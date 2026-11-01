@@ -10,6 +10,9 @@ DATA_DIR = Path.home() / "LrMcp"
 TOKEN_FILE = DATA_DIR / "token"
 PREVIEW_DIR = DATA_DIR / "previews"
 LOG_FILE = DATA_DIR / "server.log"
+EDIT_DIR = DATA_DIR / "edits"            # one JSON file per change: the old values, so it can be restored
+READONLY_FILE = DATA_DIR / "readonly"    # if this file exists, every write is refused (also checked by the plug-in)
+MAX_KEYS_PER_EDIT = 30
 
 POLL_HOLD_SECONDS = 10.0        # how long /poll waits for a job before answering "none"
 PLUGIN_SEEN_SECONDS = 25.0      # plug-in counts as connected if it polled within this time
