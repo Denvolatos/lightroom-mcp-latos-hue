@@ -25,6 +25,14 @@
   development server creates. Release builds do not contain it. If you copy the plug-in folder by hand, delete
   `DevRun.lua` and `devscripts/`.
 
+## Update notice (the only internet access)
+
+Once a day the server asks GitHub's public API for the latest release of this project and, if it is newer than the
+installed version, `lr_status` shows a one-line notice. It is an anonymous HTTPS GET with a 5-second timeout; nothing
+about you, your photos or Lightroom is sent (GitHub sees your IP address and the User-Agent `lrmcp/<version>`).
+Nothing is downloaded or installed automatically. Switch it off by setting `LRMCP_NO_UPDATE_CHECK=1` or by creating an
+empty file `C:\Users\<you>\LrMcp\no_update_check`.
+
 ## Known limits
 
 - Any program running as your Windows user can read the token file and talk to the server (the usual limit of local

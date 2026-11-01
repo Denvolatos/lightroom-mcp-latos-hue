@@ -31,6 +31,8 @@ Versions: a new feature raises the middle number, a small fix the last one. The 
 ## Unreleased
 
 - `AI_GUIDE.md` (install and usage procedure written for AI assistants), `llms.txt`, `AGENTS.md` (for AI coding agents).
+- Update notice: once a day the server checks GitHub for a newer release and `lr_status` mentions it (no automatic
+  download). Opt out with `LRMCP_NO_UPDATE_CHECK=1` or the file `~/LrMcp/no_update_check`; see SECURITY.md.
 - Feedback channel: GitHub issue forms (bug report, compatibility report, feature request) and Discussions.
 
 ## 0.1.0 — first public version (read-only)
