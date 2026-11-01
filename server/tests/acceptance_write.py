@@ -73,8 +73,10 @@ def main() -> int:
         baseline_develop = bridge.call("get_develop", {"photo": photo_id})
         baseline = everything(baseline_develop)
         baseline_size = preview_size(bridge, photo_id)
-        base = edits.current_values(baseline_develop, edits.LIMITS)
-        check("baseline read: all 35 writable sliders found", len(base) == 35)
+        plain_keys = [k for k in edits.LIMITS if k not in edits.WB_KEYS]
+        base = edits.current_values(baseline_develop, plain_keys)
+        has_kelvin = isinstance(baseline_develop["settings"].get("Temperature"), (int, float))
+        check("baseline read: all 35 non-white-balance sliders found", len(base) == 35)
 
         # 1. a normal change
         e1 = service.set_develop({"Exposure2012": base["Exposure2012"] + 0.3, "Vibrance": base["Vibrance"] + 10}, reason="acceptance")
@@ -97,7 +99,7 @@ def main() -> int:
             check("range refused by the server", "取值范围" in str(e))
         for label, params, needle in (
             ("range refused by the plug-in itself", {"Exposure2012": "9"}, "取值范围"),
-            ("white balance refused by the plug-in itself", {"Temperature": "6500"}, "不允许修改"),
+            ("white balance beyond its range refused by the plug-in itself", {"Temperature": "99999"}, "取值范围"),
             ("unknown key refused by the plug-in itself", {"Sharpness": "10"}, "不允许修改"),
         ):
             try:
@@ -113,9 +115,34 @@ def main() -> int:
                                   "LuminanceAdjustmentGreen": base["LuminanceAdjustmentGreen"] + 5}, reason="acceptance hsl")
         check("HSL change verified", e2["verified"])
 
+        # 3b. white balance: RAW photos can be changed (label becomes Custom); JPEG must be refused with a clear message
+        if has_kelvin:
+            t0, tint0, label0 = (baseline_develop["settings"][k] for k in ("Temperature", "Tint", "WhiteBalance"))
+            size_before = preview_size(bridge, photo_id)
+            ew = service.set_develop({"Temperature": t0 + 500, "Tint": tint0 + 5}, reason="acceptance white balance")
+            now_wb = bridge.call("get_develop", {"photo": photo_id})["settings"]
+            check("white balance change verified, label is Custom", ew["verified"] and now_wb["WhiteBalance"] == "Custom"
+                  and abs(now_wb["Temperature"] - (t0 + 500)) < 1e-3, f"label before: {label0}")
+            check("preview changed after the white balance edit", preview_size(bridge, photo_id) != size_before)
+            try:
+                service.set_develop({"Temperature": t0 + 500 + 2500})
+                check("white balance step limit (+2500 K) refused", False, "no error")
+            except BridgeError as e:
+                check("white balance step limit (+2500 K) refused", "单次最多改" in str(e))
+            rw = service.restore(ew["edit_id"])
+            back = bridge.call("get_develop", {"photo": photo_id})["settings"]
+            check("restore brings back the white balance LABEL and the numbers",
+                  rw["verified"] and back["WhiteBalance"] == label0 and abs(back["Temperature"] - t0) < 1e-3 and abs(back["Tint"] - tint0) < 1e-3)
+        else:
+            try:
+                service.set_develop({"Temperature": 6500})
+                check("white balance on a JPEG is refused with a clear message", False, "no error")
+            except EditError as e:
+                check("white balance on a JPEG is refused with a clear message", "JPEG" in str(e))
+
         # 4. restore one edit: only that edit's sliders go back
         r1 = service.restore(e1["edit_id"])
-        now = edits.current_values(bridge.call("get_develop", {"photo": photo_id}), edits.LIMITS)
+        now = edits.current_values(bridge.call("get_develop", {"photo": photo_id}), plain_keys)
         check("restore(edit 1) puts Exposure and Vibrance back", r1["verified"] and abs(now["Exposure2012"] - base["Exposure2012"]) < 1e-3
               and abs(now["Vibrance"] - base["Vibrance"]) < 1e-3)
         check("restore(edit 1) leaves the HSL edit alone", abs(now["HueAdjustmentRed"] - (base["HueAdjustmentRed"] + 10)) < 1e-3)

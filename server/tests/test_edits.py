@@ -16,8 +16,8 @@ LIMITS_LUA = Path(__file__).resolve().parents[2] / "plugin" / "lrmcp.lrdevplugin
 class FakeLightroom:
     def __init__(self):
         self.photos = {
-            "AAAAAAAA-1111": {"name": "one.ARW", "values": {k: 0.0 for k in edits.LIMITS}},
-            "BBBBBBBB-2222": {"name": "two.JPG", "values": {k: 0.0 for k in edits.LIMITS}},
+            "AAAAAAAA-1111": {"name": "one.ARW", "wb": "As Shot", "values": {k: 0.0 for k in edits.LIMITS}},
+            "BBBBBBBB-2222": {"name": "two.JPG", "wb": "As Shot", "values": {k: 0.0 for k in edits.LIMITS}},
         }
         self.active = "AAAAAAAA-1111"
         self.write_calls = 0
@@ -41,6 +41,7 @@ class FakeLightroom:
             hsl = {c: {"hue": v["HueAdjustment" + c], "saturation": v["SaturationAdjustment" + c],
                        "luminance": v["LuminanceAdjustment" + c]} for c in edits.COLORS}
             settings = {k: x for k, x in v.items() if not k.startswith(edits.HSL_PREFIXES)}
+            settings["WhiteBalance"] = p["wb"]
             return {"photo": {"id": pid, "name": p["name"]}, "settings": settings, "hsl": hsl}
         if command == "set_develop":
             return self._set(params)
@@ -57,7 +58,7 @@ class FakeLightroom:
         pid, p = self._photo(params["photo"])
         changes = {}
         for k, text in params.items():
-            if k in ("photo", "edit", "restore"):
+            if k in ("photo", "edit", "restore", "wb"):
                 continue
             if k not in edits.LIMITS:
                 raise BridgeError(f"不允许修改这个参数：{k}")
@@ -70,7 +71,11 @@ class FakeLightroom:
             changes[k] = x
         before = {k: p["values"][k] for k in changes}
         p["values"].update(changes)
-        return {"before": before, "after": dict(changes), "verified": True}
+        reply = {"before": before, "after": dict(changes), "verified": True}
+        if any(k in edits.WB_KEYS for k in changes):
+            reply["before_wb"] = p["wb"]
+            p["wb"] = params["wb"].replace("_", " ") if restoring and "wb" in params else "Custom"
+        return reply
 
 
 @pytest.fixture
@@ -90,7 +95,7 @@ def test_changes_must_be_a_non_empty_dict(bad):
 
 
 def test_unknown_and_forbidden_keys_are_refused_with_the_allowed_list():
-    for key in ("Temperature", "Tint", "ToneCurvePV2012", "CropLeft", "WhiteBalance", "exposure", "../x"):
+    for key in ("Sharpness", "ToneCurvePV2012", "CropLeft", "WhiteBalance", "exposure", "../x"):
         with pytest.raises(EditError) as err:
             validate_changes({key: 1})
         assert "不允许修改" in str(err.value) and "Exposure2012" in str(err.value)
@@ -125,7 +130,7 @@ def test_python_and_lua_whitelists_are_identical():
         if m:
             lua[m.group(1)] = (float(m.group(2)), float(m.group(3)), float(m.group(4)))
     assert lua == edits.LIMITS
-    assert len(lua) == 35
+    assert len(lua) == 37
 
 
 # ---- set_develop -----------------------------------------------------------------------------------------------
@@ -289,3 +294,33 @@ def test_tools_are_registered_with_the_right_hints():
     set_tool = next(t for t in tools if t.name == "lr_set_develop")
     assert "Exposure2012" in set_tool.description and "单次最多改" in set_tool.description
     assert json.dumps(set_tool.input_schema)  # the schema can be serialised
+
+
+# ---- white balance (Temperature / Tint) -----------------------------------------------------------------------
+def test_white_balance_change_sets_custom_and_restore_brings_the_label_back(env):
+    lr, store, service, _ = env
+    lr.photos["AAAAAAAA-1111"]["values"].update(Temperature=5600.0, Tint=13.0)
+    result = service.set_develop({"Temperature": 6400, "Tint": 20}, reason="warmer")
+    assert result["verified"] and lr.photos["AAAAAAAA-1111"]["wb"] == "Custom"
+    assert store.load(result["edit_id"])["before_wb"] == "As Shot"
+    service.restore(result["edit_id"])
+    photo = lr.photos["AAAAAAAA-1111"]
+    assert photo["wb"] == "As Shot" and photo["values"]["Temperature"] == 5600.0 and photo["values"]["Tint"] == 13.0
+
+
+def test_restore_original_after_two_white_balance_edits_uses_the_first_label(env):
+    lr, store, service, _ = env
+    lr.photos["AAAAAAAA-1111"]["values"].update(Temperature=5600.0, Tint=13.0)
+    service.set_develop({"Temperature": 6400})
+    service.set_develop({"Temperature": 7000})
+    service.restore_original()
+    photo = lr.photos["AAAAAAAA-1111"]
+    assert photo["wb"] == "As Shot" and photo["values"]["Temperature"] == 5600.0
+
+
+def test_white_balance_range_is_checked():
+    with pytest.raises(EditError):
+        validate_changes({"Temperature": 1500})
+    with pytest.raises(EditError):
+        validate_changes({"Tint": 151})
+    assert validate_changes({"Temperature": 6500, "Tint": -20}) == {"Temperature": 6500.0, "Tint": -20.0}

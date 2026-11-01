@@ -88,7 +88,8 @@ end
 function SET(key, value) FAKE.values[key] = value end
 function RESET()
   FAKE.readonly, FAKE.write_gate, FAKE.writes, FAKE.fail_read, FAKE.round_to = false, "executed", {}, nil, nil
-  FAKE.values = { Exposure2012 = 0, Contrast2012 = 0, Saturation = 0, HueAdjustmentRed = 0, Sharpness = 40 }
+  FAKE.values = { Exposure2012 = 0, Contrast2012 = 0, Saturation = 0, HueAdjustmentRed = 0, Sharpness = 40,
+                  WhiteBalance = 'As Shot', Temperature = 5600, Tint = 13 }
 end
 RESET()
 """
@@ -134,7 +135,7 @@ def test_a_normal_change_is_written_and_reported(lr):
 
 
 def test_unknown_parameter_is_refused_before_any_write(lr):
-    for key in ("Temperature", "Tint", "CropLeft", "ToneCurvePV2012", "Sharpness"):
+    for key in ("CropLeft", "ToneCurvePV2012", "Sharpness"):
         reply = lr.run("set_develop", photo="selected", edit="e1", **{key: "1"})
         assert not reply["ok"] and "不允许修改" in reply["error"], key
     assert lr.writes() == 0
@@ -166,7 +167,7 @@ def test_step_limit_blocks_a_big_jump_but_not_a_restore(lr):
 def test_restore_still_obeys_whitelist_and_range(lr):
     reply = lr.run("set_develop", photo="selected", edit="e1", restore="1", Exposure2012="9")
     assert not reply["ok"] and "取值范围" in reply["error"]
-    reply = lr.run("set_develop", photo="selected", edit="e1", restore="1", Temperature="6500")
+    reply = lr.run("set_develop", photo="selected", edit="e1", restore="1", Sharpness="50")
     assert not reply["ok"] and "不允许修改" in reply["error"]
 
 
@@ -201,7 +202,7 @@ def test_nothing_to_change_and_too_many_changes(lr):
     assert not lr.run("set_develop", photo="selected", edit="e1")["ok"]
     from lightroom_mcp import edits
 
-    many = {k: "0" for k in list(edits.LIMITS)[:31]}
+    many = {k: "0" for k in [k for k in edits.LIMITS if k not in edits.WB_KEYS][:31]}
     for k in many:
         lr.set_value(k, 0)
     reply = lr.run("set_develop", photo="selected", edit="e1", **many)
@@ -223,3 +224,30 @@ def test_the_history_step_is_named_after_the_edit(lr):
     lr.run("set_develop", photo="selected", edit="20261102-120000-ab12", Exposure2012="0.1")
     # (the fake keeps the name passed to applyDevelopSettings)
     assert lr.writes() == 1
+
+
+def test_white_balance_is_written_as_custom_and_restore_writes_the_old_label_back(lr):
+    reply = lr.run("set_develop", photo="selected", edit="w1", Temperature="6400", Tint="20")
+    assert reply["ok"] and reply["data"]["verified"] is True and reply["data"]["before_wb"] == "As Shot"
+    assert lr.values()["WhiteBalance"] == "Custom" and lr.values()["Temperature"] == 6400
+    back = lr.run("set_develop", photo="selected", edit="w2", restore="1", wb="As_Shot", Temperature="5600", Tint="13")
+    assert back["ok"] and lr.values()["WhiteBalance"] == "As Shot" and lr.values()["Temperature"] == 5600
+
+
+def test_white_balance_step_limit_and_range(lr):
+    reply = lr.run("set_develop", photo="selected", edit="w1", Temperature="7000")
+    assert not reply["ok"] and "单次最多改" in reply["error"]
+    reply = lr.run("set_develop", photo="selected", edit="w1", Tint="200")
+    assert not reply["ok"] and "取值范围" in reply["error"]
+    assert lr.writes() == 0
+
+
+def test_white_balance_on_a_photo_without_kelvin_values_is_refused_clearly(lr):
+    lr.set_flag("fail_read", "Temperature")  # what a JPEG looks like
+    reply = lr.run("set_develop", photo="selected", edit="w1", Temperature="5700")
+    assert not reply["ok"] and "JPEG" in reply["error"] and lr.writes() == 0
+
+
+def test_unknown_white_balance_label_is_ignored_on_restore(lr):
+    back = lr.run("set_develop", photo="selected", edit="w2", restore="1", wb="Evil_Label", Temperature="5600")
+    assert back["ok"] and lr.values()["WhiteBalance"] == "Custom"

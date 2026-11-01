@@ -71,8 +71,8 @@ async def write_round_trip(session, first_text) -> None:
         kinds = [c.type for c in res.content]
         info = json.loads(first_text(res))
         print("lr_set_develop(preview=True) ->", "is_error=", res.is_error, "| content:", kinds, "| verified:", info["verified"], "| has preview stats:", "preview" in info)
-        bad = await session.call_tool("lr_set_develop", {"changes": {"Temperature": 6500}})
-        print("lr_set_develop(Temperature) is_error=", bad.is_error, "|", " ".join(first_text(bad)[:90].split()))
+        bad = await session.call_tool("lr_set_develop", {"changes": {"Sharpness": 40}})
+        print("lr_set_develop(Sharpness) is_error=", bad.is_error, "|", " ".join(first_text(bad)[:90].split()))
         jump = await session.call_tool("lr_set_develop", {"changes": {"Exposure2012": base + 3}})
         print("lr_set_develop(+3 EV) is_error=", jump.is_error, "|", " ".join(first_text(jump)[:90].split()))
         listed = json.loads(first_text(await session.call_tool("lr_list_edits", {"photo": "selected"})))
