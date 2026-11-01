@@ -48,7 +48,45 @@ async def main() -> int:
             doctor = await session.call_tool("lr_doctor", {})
             print("lr_doctor ->")
             print(first_text(doctor))
+            if os.environ.get("SMOKE_WRITE") == "1":
+                await write_round_trip(session, first_text)
     return 0
+
+
+async def write_round_trip(session, first_text) -> None:
+    """Exercise the write tools through MCP. Only on the test catalog; undoes everything and removes its own
+    edit records."""
+    from pathlib import Path
+
+    edits_dir = Path.home() / "LrMcp" / "edits"
+    existing = {p.name for p in edits_dir.glob("*.json")} if edits_dir.is_dir() else set()
+    status = json.loads(first_text(await session.call_tool("lr_status", {})))
+    if "ceshi" not in status.get("catalog_path", ""):
+        print("WRITE TEST REFUSED: not the ceshi test catalog")
+        return
+    base = None
+    try:
+        base = json.loads(first_text(await session.call_tool("lr_get_develop", {"photo": "selected"})))["settings"]["Exposure2012"]
+        res = await session.call_tool("lr_set_develop", {"changes": {"Exposure2012": base + 0.2}, "reason": "mcp smoke test", "preview": True})
+        kinds = [c.type for c in res.content]
+        info = json.loads(first_text(res))
+        print("lr_set_develop(preview=True) ->", "is_error=", res.is_error, "| content:", kinds, "| verified:", info["verified"], "| has preview stats:", "preview" in info)
+        bad = await session.call_tool("lr_set_develop", {"changes": {"Temperature": 6500}})
+        print("lr_set_develop(Temperature) is_error=", bad.is_error, "|", " ".join(first_text(bad)[:90].split()))
+        jump = await session.call_tool("lr_set_develop", {"changes": {"Exposure2012": base + 3}})
+        print("lr_set_develop(+3 EV) is_error=", jump.is_error, "|", " ".join(first_text(jump)[:90].split()))
+        listed = json.loads(first_text(await session.call_tool("lr_list_edits", {"photo": "selected"})))
+        print("lr_list_edits -> count", listed["count"])
+        dry = json.loads(first_text(await session.call_tool("lr_restore_original", {"dry_run": True})))
+        print("lr_restore_original(dry_run) will_write:", dry.get("will_write"))
+    finally:
+        done = json.loads(first_text(await session.call_tool("lr_restore_original", {})))
+        print("lr_restore_original -> verified:", done.get("verified"))
+        after = json.loads(first_text(await session.call_tool("lr_get_develop", {"photo": "selected"})))["settings"]["Exposure2012"]
+        print("Exposure2012 back to the start:", "unknown" if base is None else abs(after - base) < 1e-6)
+        for p in edits_dir.glob("*.json"):
+            if p.name not in existing:
+                p.unlink()  # remove the records this test created
 
 
 if __name__ == "__main__":

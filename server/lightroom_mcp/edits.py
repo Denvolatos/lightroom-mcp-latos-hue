@@ -75,7 +75,7 @@ def validate_changes(changes: object) -> dict[str, float]:
     for key, value in changes.items():
         if key not in LIMITS:
             raise EditError(
-                f"不允许修改“{key}”。v1.1 只允许这些：\n{describe_limits()}\n（白平衡、色调曲线、蒙版、裁剪、预设暂不支持。）"
+                f"不允许修改“{key}”。当前版本只允许这些：\n{describe_limits()}\n（白平衡、色调曲线、蒙版、裁剪、预设暂不支持。）"
             )
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             raise EditError(f"{key} 的值必须是有限的数字，你给的是 {value!r}。")
