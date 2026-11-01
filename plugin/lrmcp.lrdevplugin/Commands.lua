@@ -15,6 +15,7 @@ local M = {}
 
 local previewDir = LrPathUtils.child(LrPathUtils.child(LrPathUtils.getStandardFilePath("home"), "LrMcp"), "previews")
 local MAX_LIST = 20
+local previewCounter = 0
 local MIN_EDGE, MAX_EDGE, DEFAULT_EDGE = 256, 2048, 1024
 
 local function fail(message)
@@ -198,7 +199,10 @@ function M.get_preview(params)
 	end
 	LrFileUtils.createAllDirectories(previewDir)
 	local uuid = tostring(photo:getRawMetadata("uuid")):gsub("[^%w]", ""):sub(1, 8)
-	local name = string.format("p_%s_%d", uuid, math.floor(LrDate.currentTime()))
+	-- unique per call: two AI sessions may ask for a preview of the same photo within the same second, and a shared
+	-- file name would let one session read the other's picture
+	previewCounter = previewCounter + 1
+	local name = string.format("p_%s_%d_%d", uuid, math.floor(LrDate.currentTime() * 1000), previewCounter)
 	local path = LrPathUtils.child(previewDir, name .. ".jpg")
 	if LrFileUtils.exists(path) then
 		LrFileUtils.delete(path)
