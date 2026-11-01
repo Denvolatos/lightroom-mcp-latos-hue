@@ -24,3 +24,8 @@ config.local.*
 # Python
 __pycache__/
 *.pyc
+
+# 打包产物
+build/
+dist/
+*.spec
