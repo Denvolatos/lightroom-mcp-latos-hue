@@ -28,11 +28,12 @@ Versions: a new feature raises the middle number, a small fix the last one. The 
   to the start, the preview is pixel-identical).
 - Not included: white balance (RAW values only appear after an edit; needs more measuring), tone curve, masks, crop.
 
-## Unreleased
+## 0.4.0 — update notice, Chinese-first docs
 
 - `AI_GUIDE.md` (install and usage procedure written for AI assistants), `llms.txt`, `AGENTS.md` (for AI coding agents).
 - Update notice: once a day the server checks GitHub for a newer release and `lr_status` mentions it (no automatic
   download). Opt out with `LRMCP_NO_UPDATE_CHECK=1` or the file `~/LrMcp/no_update_check`; see SECURITY.md.
+- The default README is now Chinese (`README.md`); the English one is `README.en.md`. SECURITY.md has a Chinese part first.
 - Feedback channel: GitHub issue forms (bug report, compatibility report, feature request) and Discussions.
 
 ## 0.1.0 — first public version (read-only)
