@@ -20,7 +20,7 @@ Thanks for looking! This is a small hobby project; issues and pull requests are 
 ```powershell
 conda create -n lrmcp python=3.12
 conda activate lrmcp
-pip install -e ./server pytest pyinstaller
+pip install -e "./server[test]" pyinstaller
 cd server
 python -m pytest -q
 ```
