@@ -3,6 +3,21 @@
 Versions: a new feature raises the middle number, a small fix the last one. The server version lives in
 `server/lightroom_mcp/__init__.py`, the plug-in version in `plugin/lrmcp.lrdevplugin/Version.lua` (and `Info.lua`).
 
+## 0.2.0 — guarded changes
+
+- New tools: `lr_set_develop`, `lr_restore`, `lr_restore_original`, `lr_list_edits`.
+- Changeable: 35 sliders (exposure, contrast, highlights, shadows, whites, blacks, texture, clarity, dehaze, vibrance,
+  saturation, 24 HSL values). Range limits, a step limit per call, one photo at a time, `LrMCP <id>` history steps.
+- The old values are saved before anything is written; restore writes them back. Lightroom snapshots and undo were
+  measured to be unreliable, so they are not used.
+- Read-only switch: file `C:\Users\<you>\LrMcp\readonly` (or `LRMCP_READONLY=1`); server and plug-in both refuse.
+- Measured: Lightroom does not check slider ranges (out-of-range values are stored as given), so this project does.
+- The token file is written back if something deletes it while the server runs.
+- 74 tests (Python logic, the plug-in's Lua write logic against a fake SDK, a whitelist consistency check) and a write
+  acceptance run against a real Lightroom test catalog (20 checks: refused changes change nothing, everything restores
+  to the start, the preview is pixel-identical).
+- Not included: white balance (RAW values only appear after an edit; needs more measuring), tone curve, masks, crop.
+
 ## Unreleased
 
 - `AI_GUIDE.md` (install and usage procedure written for AI assistants), `llms.txt`, `AGENTS.md` (for AI coding agents).
@@ -23,7 +38,7 @@ Tested on Windows 11 with Adobe Lightroom Classic 15.2 only.
 
 ### Not done / known issues
 
-- Cannot change photos (planned for 0.2 / "v1.1" in the roadmap).
+- (0.1.0) Could not change photos; 0.2.0 adds guarded changes.
 - Codex was not available for testing; whether it shows returned images is unverified.
 - Claude Desktop is not registered automatically.
 - Whether the plug-in starts on a cold Lightroom start (`LrForceInitPlugin`) is unverified.

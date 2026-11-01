@@ -4,9 +4,9 @@
 > 需要用户亲自操作的地方（点 Lightroom 的界面、重启软件），请告诉他具体怎么点，并等他回复。请用**用户使用的语言**和他交流。
 > 你**不需要**读完整个仓库，本文件就是为你写的。
 
-**English summary.** This repo is a Lightroom Classic plug-in (Lua) plus a small **read-only** MCP server (Python, stdio).
-It lets an AI assistant see the photo the user selected in Lightroom: develop settings, a preview image and histogram
-numbers. Windows only for now (macOS, Photoshop, Premiere are not supported yet). Install: `pip install` the `server`
+**English summary.** This repo is a Lightroom Classic plug-in (Lua) plus a small MCP server (Python, stdio).
+It lets an AI assistant see the photo the user selected in Lightroom (develop settings, a preview image, histogram
+numbers) and, since 0.2, make **small, guarded slider changes that can be undone**. Windows only for now (macOS, Photoshop, Premiere are not supported yet). Install: `pip install` the `server`
 folder from the GitHub zip, copy the plug-in folder into Lightroom's `Modules` folder, register the server with the
 AI client as a local stdio MCP server, restart both. Verify with the tool `lr_status`; diagnose with `lr_doctor`.
 Details below (in Chinese, but all commands are language-neutral).
@@ -20,7 +20,8 @@ Details below (in Chinese, but all commands are language-neutral).
 - **Lightroom 插件**（Lua）：在 Lightroom 里运行，只执行固定的白名单命令。
 - **MCP 服务**（Python，命令 `lrmcp`）：通过 stdio 连接 AI 客户端，并在本机（`127.0.0.1`）和插件通信。
 
-当前版本 **0.1.0 只读**：能读照片信息、读调整参数、生成预览图并给出直方图数字。**不能修改照片**。
+当前版本 **0.2.0**：能读照片信息、读取调整参数、生成预览图并给出直方图数字；也能对**少数滑块做小步、受保护的修改**，并随时还原。
+白平衡、色调曲线、蒙版、裁剪、预设、元数据都**不能**改，也不能删除照片或导入导出。
 
 ## 2. 先确认条件（不满足就别硬装）
 
@@ -42,7 +43,7 @@ pip install "https://github.com/Denvolatos/lightroom-mcp-win/archive/refs/heads/
 lrmcp --version
 ```
 
-期望输出 `lightroom_mcp 0.1.0`（版本号可能更新）。如果提示找不到 `lrmcp`，说明 Python 的 Scripts 目录不在 PATH 里：用 `python -m pip show -f lightroom-mcp` 找到它，或者以后一律用 `python -m lightroom_mcp` 代替 `lrmcp`，并在登记时写 Python 的**绝对路径**。
+期望输出形如 `lightroom_mcp 0.2.0`（版本号可能更新）。如果提示找不到 `lrmcp`，说明 Python 的 Scripts 目录不在 PATH 里：用 `python -m pip show -f lightroom-mcp` 找到它，或者以后一律用 `python -m lightroom_mcp` 代替 `lrmcp`，并在登记时写 Python 的**绝对路径**。
 
 ### 3.2 安装 Lightroom 插件（让用户在自己的 PowerShell 里运行）
 
@@ -85,7 +86,7 @@ Get-ChildItem $dst | Select-Object Name
 3. 调用工具 **`lr_status`**：应返回 `"connected": true`、Lightroom 版本和目录名。
 4. 如果不是，调用 **`lr_doctor`**，按它给出的中文提示处理（见第 6 节）。
 
-## 4. 怎么用（5 个工具，全部只读）
+## 4. 怎么用（9 个工具：5 个只读，4 个与修改有关）
 
 | 工具 | 用途 |
 |---|---|
@@ -94,16 +95,30 @@ Get-ChildItem $dst | Select-Object Name
 | `lr_get_develop` | 一张照片当前的调整参数（曝光、对比度、高光、阴影、白平衡、HSL 等）。`photo` 填 `"selected"` 或 `lr_list_selected` 返回的 `id` |
 | `lr_get_preview` | 预览图（长边 256–2048 像素，默认 1024）加直方图数字：平均亮度、过曝/欠曝比例、冷暖偏向 |
 | `lr_doctor` | 自检，用中文说明哪里有问题、怎么处理 |
+| `lr_set_develop` | **修改**一张照片的滑块：`changes` 填 `{参数名: 目标数值}`，例如 `{"Exposure2012": 0.3, "Highlights2012": -20}`；`reason` 写一句理由；`preview` 为 true 时改完顺便返回预览图。允许的参数、范围和单次最多改多少写在工具说明里 |
+| `lr_restore` | 还原一次修改（`edit_id` 来自 `lr_set_develop` 的返回或 `lr_list_edits`）：把那次修改碰过的滑块写回旧值 |
+| `lr_restore_original` | 让一张照片回到 LrMCP 第一次改它之前的样子；`dry_run` 为 true 时只显示会写回什么 |
+| `lr_list_edits` | 列出 LrMCP 做过的修改记录 |
 
 **典型用法**：用户说"看看这张照片哪里有问题"→ 先 `lr_list_selected`，再 `lr_get_preview`（看图 + 数字），必要时 `lr_get_develop` 看已经做过哪些调整，然后用大白话告诉用户：偏暗/偏亮、高光是否过曝、暗部是否死黑、色调偏冷还是偏暖，并说明依据（引用返回的数字）。
 **调色老师式的回答更有帮助**：说"改了会怎样"，而不是只给参数；用户可能是调色新手。
 
-**注意**：`lr_get_develop` 里 RAW 照片在没编辑过时读不到 Temperature/Tint，只显示 `WhiteBalance`；这不代表没有色温。当前版本**没有任何写入工具**——用户让你"直接调色"时，请如实说明现在只能给出建议，用户需要在 Lightroom 里自己拖滑块。
+**注意**：`lr_get_develop` 里 RAW 照片在没编辑过时读不到 Temperature/Tint，只显示 `WhiteBalance`；这不代表没有色温。**白平衡（色温/色调）目前不能改**：用户要调白平衡时，请如实说明现在做不到，可以给出建议，让用户在 Lightroom 里自己拖。
+
+### 修改照片的规矩（请严格遵守）
+
+1. **只在用户明确要求时才改**，只改用户指定的那一张（默认是当前选中的）。看照片、分析问题不需要改。
+2. **先看再改**：改之前先 `lr_get_preview` 看现状和直方图数字；**小步**修改，每次改完用 `lr_get_preview`（或 `lr_set_develop` 的 `preview: true`）看效果，再决定下一步。系统有单次限幅，一次改太多会被拒绝，不要试图绕过，分几次改就是。
+3. **用大白话告诉用户**每一步改了什么、为什么、预期会看到什么变化；用户可能是调色新手。引用返回的数字作依据，别只报参数。
+4. **用户不满意就还原**：`lr_restore`（撤销某一次）或 `lr_restore_original`（回到最初）。还原前如果用户期间手动改过同一个滑块，要提醒他会被覆盖。
+5. **用户第一次在他真实的 Lightroom 目录上使用修改功能时**，请先提醒他备份目录（`.lrcat` 文件），并建议先在测试目录上试。
+6. 如果工具返回"只读模式已开启"，说明用户创建了开关文件 `C:\Users\<用户名>\LrMcp\readonly`：**不要**去删它或想办法绕过，告诉用户想允许修改就自己删掉这个文件。
+7. 只改工具说明里列出的滑块。不要声称你能改白平衡、曲线、蒙版、裁剪、预设；不要用别的办法（比如操作界面）去做这些。
 
 ## 5. 对用户要讲清楚的几件事
 
 1. **隐私**：预览图和照片信息会发给用户正在使用的 AI 服务（你所在的这个）。这个项目本身不上传任何东西，但用户应只对愿意分享的照片使用。
-2. **只读**：当前版本不会改动照片；它只在 `C:\Users\<用户名>\LrMcp` 里生成预览图、口令和日志，预览图不会加入 Lightroom 目录。
+2. **修改是受保护的**：只能改一小批滑块，有范围和单次限幅，**写入前先把旧值存盘**，随时可以还原；用户可以创建文件 `C:\Users\<用户名>\LrMcp\readonly` 一键关掉所有修改。它在 `C:\Users\<用户名>\LrMcp` 里还会生成预览图、口令、日志和修改记录，预览图不会加入 Lightroom 目录。**真实作品请先备份目录。**
 3. **同一时间只支持一个 AI 会话**使用它（本机端口独占）。第二个会话里调用会看到"端口已被占用"的提示。
 4. 这是个人项目，**不是 Adobe 官方产品**，早期版本，只在 Windows 11 + Lightroom Classic 15.2 上测过。
 

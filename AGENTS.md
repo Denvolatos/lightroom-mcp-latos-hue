@@ -6,7 +6,8 @@
 
 A Lightroom Classic plug-in (Lua, `plugin/lrmcp.lrdevplugin`) and a Python MCP server (`server/lightroom_mcp`).
 The server hosts a local HTTP queue on `127.0.0.1:58770`; the plug-in polls it and runs whitelisted commands.
-Version 0.1.0 is **read-only**. Windows + Lightroom Classic 15.2 is the only tested combination.
+Version 0.2.0 reads photos and can make small, guarded slider changes (35 whitelisted sliders, restorable).
+Windows + Lightroom Classic 15.2 is the only tested combination.
 
 ## Commands
 
@@ -14,7 +15,9 @@ Version 0.1.0 is **read-only**. Windows + Lightroom Classic 15.2 is the only tes
 cd server
 python -m pytest -q                      # unit tests (no Lightroom needed)
 python tests/smoke_stdio.py <cmd>        # real MCP client over stdio (set SMOKE_FULL=1 with Lightroom connected)
-python tests/acceptance.py               # needs Lightroom + test catalog + the plug-in loaded + one photo selected
+python tests/acceptance.py               # read tools; needs Lightroom + test catalog + the plug-in loaded + one photo selected
+python tests/acceptance_write.py         # write tools; same needs; refuses unless the catalog path contains "ceshi"
+python tests/lua_syntax.py               # compile every plug-in Lua file with Lua 5.1 (pip install lupa)
 powershell -ExecutionPolicy Bypass -File ../build.ps1   # exe + installer (needs conda env "lrmcp", Inno Setup)
 ```
 

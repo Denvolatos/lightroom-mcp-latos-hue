@@ -27,5 +27,5 @@ body:
   - type: markdown
     attributes:
       value: |
-        提醒：这个项目**先只读**。任何会修改照片的功能，都需要白名单、范围限制、改前备份和还原、测试，所以做起来会慢一些。
-        Note: the project is read-only first. Anything that changes photos needs a whitelist, range limits, a backup and restore, and tests.
+        提醒：这个项目对修改照片很**谨慎**。任何新的修改功能，都需要白名单、范围限制、单次限幅、改前存旧值和还原、测试，所以做起来会慢一些。
+        Note: the project is careful about changes. Anything new that changes photos needs a whitelist, range limits, a step limit, saved old values, a restore path and tests.

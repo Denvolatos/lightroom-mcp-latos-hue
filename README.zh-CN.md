@@ -2,15 +2,15 @@
 
 **让 Claude / Codex 帮你看 Adobe Lightroom Classic 里的照片。**
 一个 Lightroom 插件加一个小型 MCP 服务：能看到你选中的照片、读取调整参数，并把预览图和直方图数字交给 AI。
-**目前只读，不会修改你的照片。**
+**0.2 起还能对少数滑块做受保护的小步修改，并随时还原**，其他一律不动。
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.1.0-orange)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.2.0-orange)
 
 [English](README.md) · [更新日志](CHANGELOG.md) · [安全说明](SECURITY.md) · [参与贡献](CONTRIBUTING.md)
 
 > 🤖 **你是 AI 助手，用户让你看这个仓库？** 请读 [`AI_GUIDE.md`](AI_GUIDE.md)，里面有完整的安装和使用步骤。
 
-> ⚠️ **早期版本（0.1.0）**：只在 Windows 11 + Lightroom Classic 15.2 上测过，暂未发布安装包。与 Adobe 无关联。
+> ⚠️ **早期版本（0.2.0）**：只在 Windows 11 + Lightroom Classic 15.2 上测过，暂未发布安装包。与 Adobe 无关联。
 
 ## ✨ 能做什么
 
@@ -21,11 +21,26 @@
 | `lr_get_develop` | 当前调整参数：曝光、对比度、高光、阴影、白平衡、HSL 等 |
 | `lr_get_preview` | 1024 像素预览（可选 256–2048）**加数字**：亮度、过曝/欠曝比例、冷暖偏向 |
 | `lr_doctor` | 中文自检：哪里有问题、怎么处理 |
+| `lr_set_develop` | **修改**一张照片的少数滑块（曝光、对比度、高光、阴影、白色、黑色、纹理、清晰度、去朦胧、自然饱和度、饱和度、HSL），有范围和单次限幅；可在改完后顺便返回预览 |
+| `lr_restore` | 把某一次修改涉及的滑块写回旧值 |
+| `lr_restore_original` | 让照片回到 LrMCP 第一次改它之前的样子（`dry_run` 只显示会做什么） |
+| `lr_list_edits` | 列出 LrMCP 做过的修改（编号、时间、照片、滑块、是否已还原） |
 
 例子：选中一张照片，对 AI 说「看看我选中的这张，曝光有什么问题」。它拿到图片和 `平均亮度 77.6`、`冷暖指数 −9.9%`
 这样的数字，就能有依据地说「偏暗、偏冷」。
 
-它**不会写入你的照片**：只会在 `C:\Users\<你>\LrMcp` 里生成预览图、口令和日志（预览图不会加入你的 Lightroom 目录）。
+### 「修改」是什么意思，怎么保证安全
+
+- **只改滑块，只改一小张清单**：35 个滑块（曝光、上面列的 10 个全局滑块、24 个 HSL 值）。白平衡、色调曲线、蒙版、裁剪、预设都不能改。
+- **范围限制**（曝光 ±5，其余 ±100）和**单次限幅**（曝光 ±1，其余 ±30）：跳得太大会被拒绝，并提示 AI 分几步改、每步看一眼预览。
+  Lightroom 自己**不检查范围**（实测：越界值它照存），所以由本项目来检查。
+- **写入之前先把旧值存到磁盘**（`C:\Users\<你>\LrMcp\edits`）。还原就是把它们写回去；Lightroom 的快照和撤销实测不可靠，所以不用。
+- **只读开关**：创建文件 `C:\Users\<你>\LrMcp\readonly`，所有修改都会被服务端和插件拒绝；删掉文件就恢复。
+- 每次只改一张照片。插件会把所有规则再检查一遍，不信任服务端。
+- 修改会在 Lightroom 的「历史记录」里显示为 `LrMCP <编号>` 步骤。**在真实作品上用之前，请先备份目录（`.lrcat`），并先在测试目录上试。**
+  如果你在 LrMCP 修改之后又手动改了同一个滑块，还原会覆盖你手动改的值。
+
+它会创建的文件：预览图（不会加入你的目录）、口令、日志和保存下来的修改记录，都在 `C:\Users\<你>\LrMcp`。
 
 ## 🏗️ 结构
 
@@ -36,7 +51,7 @@ Claude / Codex ──(MCP, stdio)──▶ lrmcp（Python 服务，本机队列 
 ```
 
 - 只在本机：服务独占绑定 `127.0.0.1`，请求要带随机口令，`Host` 必须匹配，带 `Origin` 头（浏览器）的请求一律拒绝；同一时间只支持一个服务实例。
-- 插件只执行固定的白名单命令，不接受请求里的文件路径。
+- 插件只执行固定的白名单命令，不接受请求里的文件路径。写入需要：白名单里的滑块、范围内的值、不超过单次限幅、没开只读开关。
 - 注意：工具返回的图片和照片信息会发给你使用的 AI 服务，见 [SECURITY.md](SECURITY.md)。
 
 ## 🧰 需要什么
@@ -74,8 +89,9 @@ Claude 桌面版暂不自动登记（配置文件位置取决于安装方式）�
 
 | 版本 | 计划 |
 |---|---|
-| 0.1（现在） | 只读：看照片、调整参数、预览、直方图数字、自检 |
-| 下一步 | 修改单张照片的全局滑块：范围限制、改前备份与还原命令、只读开关 |
+| 0.1 | 只读：看照片、调整参数、预览、直方图数字、自检 |
+| **0.2（现在）** | 修改单张照片的全局滑块和 HSL：范围与单次限幅、改前存旧值、还原命令、只读开关 |
+| 下一步 | 白平衡（还需要更多测量），然后是 macOS，再然后是 Photoshop / Premiere Pro |
 | 之后 | 教学模式（大白话解释、前后对比）、学习你的口味、批量/预设/挑片 |
 
 蒙版、AI 功能、色调曲线取决于 Adobe SDK 能提供什么，暂不承诺。
@@ -91,7 +107,7 @@ Claude 桌面版暂不自动登记（配置文件位置取决于安装方式）�
 其他 Lightroom Classic MCP 项目，参考过思路（没有复制代码）：
 [Automaat/lightroom-mcp](https://github.com/Automaat/lightroom-mcp)（TypeScript，MIT，工具很多，支持 Windows 和 macOS）、
 [noopz/lightroom_mcp](https://github.com/noopz/lightroom_mcp)（Python，Apache-2.0）。
-本项目的目标是：小而只读优先、用 Python、方便不懂编程的人安装。
+本项目的目标是：小、对修改很谨慎、用 Python、方便不懂编程的人安装。
 
 ## ⚖️ 许可证与声明
 

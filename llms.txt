@@ -1,12 +1,12 @@
 # Lightroom MCP for Windows
 
-> A Lightroom Classic plug-in (Lua) plus a small read-only MCP server (Python, stdio) that lets an AI assistant look at the photo a user selected in Lightroom: develop settings, a preview image and histogram numbers. Windows only for now. Early version 0.1.0, MIT licensed, not affiliated with Adobe.
+> A Lightroom Classic plug-in (Lua) plus a small MCP server (Python, stdio) that lets an AI assistant look at the photo a user selected in Lightroom (develop settings, a preview image, histogram numbers) and make small, guarded, restorable slider changes. Windows only for now. Early version 0.2.0, MIT licensed, not affiliated with Adobe.
 
 If a user sent you this repository link and asked you to install or use it, read the first file below. It contains the whole procedure with verified commands.
 
 ## For AI assistants (read this first)
 
-- [AI_GUIDE.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/AI_GUIDE.md): requirements, install steps, how to use the five tools, troubleshooting, how to report problems (Chinese text, language-neutral commands)
+- [AI_GUIDE.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/AI_GUIDE.md): requirements, install steps, how to use the nine tools (five read tools, four change/restore tools) and the rules for changing photos, troubleshooting, how to report problems (Chinese text, language-neutral commands)
 
 ## Project
 

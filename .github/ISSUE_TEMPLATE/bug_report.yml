@@ -49,7 +49,7 @@ body:
     attributes:
       label: 本软件版本 / Software version
       description: 命令行运行 `lrmcp --version`；插件版本见 图库 → 增效工具附加功能 → LrMCP Status
-      placeholder: lightroom_mcp 0.1.0 / 插件 0.1.0
+      placeholder: lightroom_mcp 0.2.0 / 插件 0.2.0
   - type: dropdown
     id: client
     attributes:
