@@ -1,6 +1,6 @@
 # Lightroom MCP for Windows
 
-> A Lightroom Classic plug-in (Lua) plus a small MCP server (Python, stdio) that lets an AI assistant look at the photo a user selected in Lightroom (develop settings, a preview image, histogram numbers) and make small, guarded, restorable slider changes. Windows only for now. Early version 0.2.0, MIT licensed, not affiliated with Adobe.
+> A Lightroom Classic plug-in (Lua) plus a small MCP server (Python, stdio) that lets an AI assistant look at the photo a user selected in Lightroom (develop settings, a preview image, histogram numbers) and make small, guarded, restorable slider changes. Windows only for now. Early version 0.4.0, MIT licensed, not affiliated with Adobe.
 
 If a user sent you this repository link and asked you to install or use it, read the first file below. It contains the whole procedure with verified commands.
 
@@ -10,8 +10,8 @@ If a user sent you this repository link and asked you to install or use it, read
 
 ## Project
 
-- [README.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/README.md): overview in English
-- [README.zh-CN.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/README.zh-CN.md): overview in Chinese
+- [README.en.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/README.en.md): overview in English
+- [README.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/README.md): overview in Chinese (default)
 - [SECURITY.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/SECURITY.md): what the software can and cannot do, privacy
 - [CHANGELOG.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/CHANGELOG.md): versions and known issues
 
