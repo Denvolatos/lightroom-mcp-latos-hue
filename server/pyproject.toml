@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lightroom-mcp"
+dynamic = ["version"]
+description = "Let Claude / Codex look at your photos in Adobe Lightroom Classic (Windows). Read-only MCP server."
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+    "mcp>=2.3,<3",
+    "pillow",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Multimedia :: Graphics",
+]
+
+[project.urls]
+Homepage = "https://github.com/Denvolatos/lightroom-mcp-win"
+Issues = "https://github.com/Denvolatos/lightroom-mcp-win/issues"
+
+[project.scripts]
+lrmcp = "lightroom_mcp.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["lightroom_mcp*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "lightroom_mcp.__version__" }
