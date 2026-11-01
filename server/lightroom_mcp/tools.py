@@ -29,7 +29,7 @@ INSTRUCTIONS = (
 )
 
 SET_DESCRIPTION = (
-    "修改一张照片的调整滑块（不能超出下面的范围；白平衡、色调曲线、蒙版、裁剪、预设暂不支持）。\n"
+    "修改一张照片的调整滑块（不能超出下面的范围；色调曲线、蒙版、裁剪、预设暂不支持）。\n"
     "changes：{参数名: 目标数值}，例如 {\"Exposure2012\": 0.3, \"Highlights2012\": -20}。给的是**目标值**，不是增量。\n"
     "每个参数的范围，以及一次调用最多能改多少（超过会被拒绝，请分几次改，每次改完用 lr_get_preview 看效果）：\n"
     f"{describe_limits()}\n"
@@ -107,7 +107,7 @@ def build_server(bridge: Bridge | None, busy_message: str | None = None, updates
     def lr_get_develop(photo: str = "selected") -> str:
         """读取一张照片当前的调整参数（曝光、对比度、高光、阴影、白平衡、HSL 等）。
         photo：\"selected\" 表示当前选中的照片，或 lr_list_selected 返回的 id。
-        注意：RAW 照片在没编辑过时读不到 Temperature/Tint，只显示 WhiteBalance。"""
+        注意：JPEG 读不到 Temperature/Tint（没有开尔文值）；RAW 没编辑过时也可能读不到，只显示 WhiteBalance。"""
         return _text(call("get_develop", {"photo": _check_photo(photo)}, timeout=30))
 
     def preview_of(photo: str, long_edge: int) -> tuple[dict, Image]:

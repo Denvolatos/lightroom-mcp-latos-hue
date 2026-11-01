@@ -1,8 +1,11 @@
 -- What the plug-in may change (v1.1) and how far: { minimum, maximum, largest change in one call }.
 -- Keep it in sync with server/lightroom_mcp/edits.py (a unit test compares the two files).
--- Anything not listed here cannot be written. White balance, tone curve, masks, crop, presets: not allowed in v1.1.
+-- Anything not listed here cannot be written. Tone curve, masks, crop, presets: not allowed.
+-- Temperature/Tint (kelvin, RAW photos only) are measured in docs/实验记录.md (experiment 6).
 return {
 	Exposure2012 = { -5, 5, 1.0 },
+	Temperature = { 2000, 50000, 1000 },
+	Tint = { -150, 150, 30 },
 	Contrast2012 = { -100, 100, 30 },
 	Highlights2012 = { -100, 100, 30 },
 	Shadows2012 = { -100, 100, 30 },

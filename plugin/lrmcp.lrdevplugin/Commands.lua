@@ -220,7 +220,14 @@ end
 -- ---------------------------------------------------------------------------------------------------------------------
 local MAX_KEYS = 30
 local VERIFY_TOLERANCE = 1e-3
-local RESERVED = { photo = true, edit = true, restore = true }
+local RESERVED = { photo = true, edit = true, restore = true, wb = true }
+-- Changing Temperature/Tint also needs WhiteBalance = "Custom" (measured). Restoring writes the old label back; the
+-- label travels as a token without spaces and only these values are accepted.
+local WB_KEYS = { Temperature = true, Tint = true }
+local WB_LABELS = {
+	As_Shot = "As Shot", Auto = "Auto", Daylight = "Daylight", Cloudy = "Cloudy", Shade = "Shade",
+	Tungsten = "Tungsten", Fluorescent = "Fluorescent", Flash = "Flash", Custom = "Custom",
+}
 local readonlyPath = LrPathUtils.child(LrPathUtils.child(LrPathUtils.getStandardFilePath("home"), "LrMcp"), "readonly")
 
 local function finiteNumber(text)
@@ -280,6 +287,9 @@ function M.set_develop(params)
 	for key, value in pairs(changes) do
 		local now = current[key]
 		if type(now) ~= "number" then
+			if WB_KEYS[key] then
+				fail("这张照片读不到色温/色调的当前值（JPEG 没有开尔文值；没编辑过的 RAW 也可能读不到，先在 Lightroom 里对它做任意一次编辑再试）。照片没有改动。")
+			end
 			fail("读不到 " .. key .. " 的当前值，已取消修改，照片没有改动。")
 		end
 		before[key] = now
@@ -290,8 +300,17 @@ function M.set_develop(params)
 		end
 	end
 
+	local toWrite, beforeWb = changes, nil
+	if changes.Temperature ~= nil or changes.Tint ~= nil then
+		beforeWb = current.WhiteBalance
+		toWrite = {}
+		for key, value in pairs(changes) do
+			toWrite[key] = value
+		end
+		toWrite.WhiteBalance = (restoring and WB_LABELS[params.wb]) or "Custom"
+	end
 	local result = catalog:withWriteAccessDo("LrMCP " .. editId, function()
-		photo:applyDevelopSettings(changes, "LrMCP " .. editId)
+		photo:applyDevelopSettings(toWrite, "LrMCP " .. editId)
 	end, { timeout = 15 })
 	if result ~= "executed" then
 		fail("Lightroom 现在不能写入（可能正忙），没有做任何修改，请稍后再试。")
@@ -306,7 +325,7 @@ function M.set_develop(params)
 			verified = false
 		end
 	end
-	return { before = before, after = after, verified = verified, photo = describe(photo) }
+	return { before = before, before_wb = beforeWb, after = after, verified = verified, photo = describe(photo) }
 end
 
 local COMMANDS = {

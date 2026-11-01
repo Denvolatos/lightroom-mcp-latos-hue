@@ -27,7 +27,13 @@ GLOBAL_KEYS = (
 HSL_PREFIXES = ("HueAdjustment", "SaturationAdjustment", "LuminanceAdjustment")
 
 # key -> (minimum, maximum, largest change in one call). Keep in sync with plugin/.../Limits.lua (a test compares).
-LIMITS: dict[str, tuple[float, float, float]] = {"Exposure2012": (-5.0, 5.0, 1.0)}
+LIMITS: dict[str, tuple[float, float, float]] = {
+    "Exposure2012": (-5.0, 5.0, 1.0),
+    "Temperature": (2000.0, 50000.0, 1000.0),  # kelvin, RAW photos only
+    "Tint": (-150.0, 150.0, 30.0),
+}
+WB_KEYS = ("Temperature", "Tint")
+WB_LABELS = ("As Shot", "Auto", "Daylight", "Cloudy", "Shade", "Tungsten", "Fluorescent", "Flash", "Custom")
 for _key in GLOBAL_KEYS:
     LIMITS[_key] = (-100.0, 100.0, 30.0)
 for _prefix in HSL_PREFIXES:
@@ -58,6 +64,8 @@ class EditError(RuntimeError):
 def describe_limits() -> str:
     """One compact text for the tool description."""
     lines = ["Exposure2012：-5 到 +5，单次最多改 ±1.0"]
+    lines.append("白平衡（只限 RAW 照片，JPEG 没有开尔文值）：Temperature 色温 2000 到 50000（单位 K，数字越大画面越偏暖），"
+                 "单次最多改 ±1000；Tint 色调 -150 到 +150（负偏绿、正偏洋红），单次最多改 ±30")
     lines.append("对比度/高光/阴影/白色/黑色/纹理/清晰度/去朦胧/自然饱和度/饱和度（Contrast2012, Highlights2012, Shadows2012, "
                  "Whites2012, Blacks2012, Texture, Clarity2012, Dehaze, Vibrance, Saturation）：-100 到 +100，单次最多改 ±30")
     lines.append("HSL（HueAdjustment / SaturationAdjustment / LuminanceAdjustment + Red, Orange, Yellow, Green, Aqua, Blue, "
@@ -75,7 +83,7 @@ def validate_changes(changes: object) -> dict[str, float]:
     for key, value in changes.items():
         if key not in LIMITS:
             raise EditError(
-                f"不允许修改“{key}”。当前版本只允许这些：\n{describe_limits()}\n（白平衡、色调曲线、蒙版、裁剪、预设暂不支持。）"
+                f"不允许修改“{key}”。当前版本只允许这些：\n{describe_limits()}\n（色调曲线、蒙版、裁剪、预设暂不支持。）"
             )
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             raise EditError(f"{key} 的值必须是有限的数字，你给的是 {value!r}。")
@@ -103,6 +111,9 @@ def current_values(develop: dict, keys) -> dict[str, float]:
         else:
             value = develop.get("settings", {}).get(key)
         if not isinstance(value, (int, float)):
+            if key in WB_KEYS:
+                raise EditError("这张照片读不到色温/色调的当前值（JPEG 没有开尔文值；没编辑过的 RAW 也可能读不到，"
+                                "先在 Lightroom 里对它做任意一次编辑再试），已取消修改。")
             raise EditError(f"读不到 {key} 的当前值，已取消修改。")
         out[key] = float(value)
     return out
@@ -174,10 +185,12 @@ class EditService:
         develop = self.call("get_develop", {"photo": photo}, timeout=30)
         return develop["photo"]["id"], develop
 
-    def _write(self, photo_id: str, edit_id: str, values: dict[str, float], restoring: bool) -> dict:
+    def _write(self, photo_id: str, edit_id: str, values: dict[str, float], restoring: bool, wb: str | None = None) -> dict:
         params = {"photo": photo_id, "edit": edit_id}
         if restoring:
             params["restore"] = "1"
+            if wb in WB_LABELS and any(k in WB_KEYS for k in values):
+                params["wb"] = wb.replace(" ", "_")  # the command line is split at spaces
         params.update({k: fmt(v) for k, v in values.items()})
         return self.call("set_develop", params, timeout=60)
 
@@ -208,6 +221,8 @@ class EditService:
             "photo_id": photo_id, "photo_name": develop["photo"].get("name"),
             "reason": str(reason)[:500], "requested": wanted, "before": before_pre,
         }
+        if any(k in WB_KEYS for k in wanted):
+            record["before_wb"] = develop.get("settings", {}).get("WhiteBalance")
         self.store.save(record)  # the old values are on disk BEFORE anything is written
         try:
             data = self._write(photo_id, record["edit_id"], wanted, restoring=False)
@@ -239,7 +254,7 @@ class EditService:
             raise EditError("这次修改当时失败了，没有改动照片，不需要还原。")
         values = {k: float(v) for k, v in record["before"].items()}
         new_id = self.store.new_id()
-        data = self._write(record["photo_id"], new_id, values, restoring=True)
+        data = self._write(record["photo_id"], new_id, values, restoring=True, wb=record.get("before_wb"))
         self.store.save({
             "edit_id": new_id, "kind": "restore", "status": "applied", "of": [edit_id],
             "created": time.strftime("%Y-%m-%d %H:%M:%S"), "created_ns": _now_ns(), "photo_id": record["photo_id"],
@@ -270,15 +285,18 @@ class EditService:
         if not records:
             return {"photo_id": photo_id, "note": "没有 LrMCP 改过这张照片（或都已还原），无需还原。"}
         earliest: dict[str, float] = {}
+        earliest_wb: str | None = None
         for r in records:  # records are sorted oldest first: keep the first old value of each slider
             for key, value in r.get("before", {}).items():
                 earliest.setdefault(key, float(value))
+            if earliest_wb is None and r.get("before_wb"):
+                earliest_wb = r["before_wb"]
         plan = {"photo": records[0].get("photo_name"), "edits_undone": [r["edit_id"] for r in records], "will_write": earliest}
         if dry_run:
             return {**plan, "dry_run": True,
                     "warning": "会把这些滑块写回 LrMCP 第一次改动之前的值；如果你期间手动改过同一个滑块，也会被覆盖。"}
         new_id = self.store.new_id()
-        data = self._write(photo_id, new_id, earliest, restoring=True)
+        data = self._write(photo_id, new_id, earliest, restoring=True, wb=earliest_wb)
         self.store.save({
             "edit_id": new_id, "kind": "restore", "status": "applied", "of": plan["edits_undone"],
             "created": time.strftime("%Y-%m-%d %H:%M:%S"), "created_ns": _now_ns(), "photo_id": photo_id, "photo_name": plan["photo"],
