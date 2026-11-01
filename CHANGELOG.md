@@ -3,6 +3,16 @@
 Versions: a new feature raises the middle number, a small fix the last one. The server version lives in
 `server/lightroom_mcp/__init__.py`, the plug-in version in `plugin/lrmcp.lrdevplugin/Version.lua` (and `Info.lua`).
 
+## 0.3.0 — several AI sessions at once
+
+- Every server takes the first free port in 58770–58789 and announces itself in `~/LrMcp/servers/<port>.txt`; the
+  plug-in polls all of them. Commands from different sessions run one at a time inside Lightroom.
+- `lr_status` shows the server's port and how many other sessions are connected; `lr_doctor` checks the Lightroom version.
+- Preview file names are unique per call, so two sessions previewing at once never share a file.
+- Acceptance run against a real Lightroom test catalog: two servers, 20 concurrent calls, simultaneous writes to one
+  photo, one server stopping and another starting.
+- A 0.2.x server keeps working with the 0.3 plug-in (legacy token file).
+
 ## 0.2.0 — guarded changes
 
 - New tools: `lr_set_develop`, `lr_restore`, `lr_restore_original`, `lr_list_edits`.
@@ -29,7 +39,7 @@ Tested on Windows 11 with Adobe Lightroom Classic 15.2 only.
 
 - Five read-only MCP tools: `lr_status`, `lr_list_selected`, `lr_get_develop`, `lr_get_preview`, `lr_doctor`.
 - Local bridge: Python HTTP queue on `127.0.0.1:58770`, the Lightroom plug-in polls it. Random token, `Host` check,
-  `Origin` refused, exclusive port (one server at a time).
+  `Origin` refused, exclusive port per server.
 - Preview: 1024 px JPEG plus histogram numbers (brightness, clipped highlights/shadows, warm/cool balance).
 - `lrmcp doctor` (self check in Chinese), `lrmcp register` / `unregister` (Claude Code and Codex via their own CLIs).
 - Packaging scripts: PyInstaller folder build + Inno Setup installer (`build.ps1`). **No installer is published yet**:

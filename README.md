@@ -60,7 +60,7 @@ Claude / Codex ──(MCP, stdio)──▶ lrmcp (Python server, local queue on 
 ```
 
 - Local only: the server binds `127.0.0.1` exclusively, requests need a random token, the `Host` header must match,
-  and requests with an `Origin` header (browsers) are refused. One server instance at a time.
+  and requests with an `Origin` header (browsers) are refused. Several AI sessions can run at once (one server each, ports 58770–58789).
 - The plug-in runs a fixed whitelist of commands and never takes a file path from a request. A write needs a whitelisted
   slider, a value in range, a small enough step, and no read-only switch.
 - Note: the images and photo information the tools return go to the AI service you use. See [SECURITY.md](SECURITY.md).

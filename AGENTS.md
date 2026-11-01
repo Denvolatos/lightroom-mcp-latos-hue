@@ -5,7 +5,7 @@
 ## What this repo is
 
 A Lightroom Classic plug-in (Lua, `plugin/lrmcp.lrdevplugin`) and a Python MCP server (`server/lightroom_mcp`).
-The server hosts a local HTTP queue on `127.0.0.1:58770`; the plug-in polls it and runs whitelisted commands.
+The server hosts a local HTTP queue on `127.0.0.1` (first free port in 58770–58789, one server per AI session, announced in `~/LrMcp/servers/<port>.txt`); the plug-in polls all of them and runs whitelisted commands.
 Version 0.2.0 reads photos and can make small, guarded slider changes (35 whitelisted sliders, restorable).
 Windows + Lightroom Classic 15.2 is the only tested combination.
 

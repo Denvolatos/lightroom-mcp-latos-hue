@@ -29,7 +29,7 @@
 
 - Any program running as your Windows user can read the token file and talk to the server (the usual limit of local
   tools). The token file's permissions are tightened on a best-effort basis (`icacls`) and not yet verified.
-- Only one server instance is supported at a time.
+- Several servers (one per AI session) can run at once, on ports 58770–58789; the plug-in only polls that range, and each server has its own random token.
 
 ## Reporting a vulnerability
 
