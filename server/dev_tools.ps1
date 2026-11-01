@@ -1,9 +1,9 @@
 # Development helpers for running Lua test scripts inside Lightroom through the dev bridge.
 # Usage:  . .\server\dev_tools.ps1 ; Invoke-DevScript select_test_photo.lua
 #
-# Safety: the dev bridge and a normal lrmcp server (for example the one a Claude Code session started) cannot both use
-# port 58770. This refuses to run while another program holds the port, and it only deletes the token / dev_enabled
-# files if THIS function started the dev bridge (an earlier version of this helper deleted a live server's token file).
+# Safety: the dev bridge announces itself in ~/LrMcp/dev_server.txt and picks its own free port, so it can run next to
+# real lrmcp servers. This refuses to start a second dev bridge, and it only deletes its own dev_enabled / dev_server.txt /
+# servers\<port>.txt files (an earlier version deleted a live server's token file).
 
 function Get-DevBridge {
     # the dev bridge announces itself in ~/LrMcp/dev_server.txt; a real lrmcp server on another port does not matter
