@@ -133,8 +133,10 @@ def main(argv: list[str] | None = None) -> int:
         bridge.start()
     except BridgeBusy as e:
         bridge, busy = None, str(e)
+    from .__main__ import out
+
     try:
-        print(format_report(run_checks(bridge, busy, wait_plugin=15.0)))
+        out(format_report(run_checks(bridge, busy, wait_plugin=15.0)))
     finally:
         if bridge is not None:
             bridge.stop()

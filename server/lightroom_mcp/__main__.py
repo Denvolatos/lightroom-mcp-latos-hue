@@ -17,6 +17,23 @@ def _setup_logging() -> None:
     logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
 
 
+_ASCII_MARKS = {"✅": "[OK]", "❌": "[X]", "➖": "[-]", "ℹ️": "[i]", "→": "->"}
+
+
+def out(text: str, stream=None) -> None:
+    """Print for the command line. A Chinese Windows console is GBK and cannot encode the check marks
+    (printing them crashed the program), so fall back to plain markers instead of failing."""
+    stream = stream or sys.stdout
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    try:
+        text.encode(encoding)
+    except UnicodeEncodeError:
+        for mark, plain in _ASCII_MARKS.items():
+            text = text.replace(mark, plain)
+        text = text.encode(encoding, errors="replace").decode(encoding)
+    print(text, file=stream)
+
+
 def serve() -> int:
     from .tools import build_server
 
@@ -51,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         from . import register
 
         fn = register.register if args[0] == "register" else register.unregister
-        print("\n".join(fn(dry_run="--dry-run" in args[1:])))
+        out("\n".join(fn(dry_run="--dry-run" in args[1:])))
         return 0
     if args[:1] in ([], ["serve"]):
         return serve()
