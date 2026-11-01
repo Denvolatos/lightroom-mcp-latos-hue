@@ -28,6 +28,16 @@ Versions: a new feature raises the middle number, a small fix the last one. The 
   to the start, the preview is pixel-identical).
 - Not included: white balance (RAW values only appear after an edit; needs more measuring), tone curve, masks, crop.
 
+## 0.5.0 — white balance (RAW)
+
+- `lr_set_develop` can change `Temperature` (2000–50000 K, at most ±1000 per call) and `Tint` (±150, at most ±30 per call)
+  on RAW photos. The white balance label becomes "Custom"; restoring writes the old label and numbers back.
+- JPEGs (no kelvin values) and RAW files whose temperature cannot be read are refused with a clear message.
+- Measured (experiment 6): Lightroom stores any temperature/tint value unchecked, JPEG values never read back, and a
+  restore must write the label together with the numbers. An unedited RAW whose temperature cannot be read is refused
+  (not measured on a real unedited RAW: 待验证).
+- Real-Lightroom acceptance run on a RAW and a JPEG of the test catalog: all checks pass, everything restored.
+
 ## 0.4.0 — update notice, Chinese-first docs
 
 - `AI_GUIDE.md` (install and usage procedure written for AI assistants), `llms.txt`, `AGENTS.md` (for AI coding agents).

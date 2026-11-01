@@ -5,13 +5,13 @@ A Lightroom plug-in plus a small MCP server. It can see the photo you selected, 
 the assistant a preview with histogram numbers. Since 0.2 it can also **make small, guarded changes to a few sliders
 and undo them**. Everything else stays untouched.
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.4.0-orange)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.5.0-orange)
 
 [中文说明](README.md) · [Changelog](CHANGELOG.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md)
 
 > 🤖 **AI assistant reading this for a user?** Read [`AI_GUIDE.md`](AI_GUIDE.md): it has the whole install and usage procedure.
 
-> ⚠️ **Early version (0.4.0).** Tested only on Windows 11 with Lightroom Classic 15.2. An installer is published, but it has not been install/uninstall-tested on a clean machine yet (待验证).
+> ⚠️ **Early version (0.5.0).** Tested only on Windows 11 with Lightroom Classic 15.2. An installer is published, but it has not been install/uninstall-tested on a clean machine yet (待验证).
 > Not affiliated with Adobe.
 
 ## ✨ What it does
@@ -34,8 +34,8 @@ The assistant gets the picture and numbers such as `mean brightness 77.6`, `warm
 
 ### What changing means, and how it is kept safe
 
-- **Only sliders, only a short list**: 35 sliders (exposure, the ten global ones above, 24 HSL values). White balance,
-  tone curve, masks, crop and presets cannot be changed.
+- **Only sliders, only a short list**: 37 sliders (exposure, the ten global ones above, 24 HSL values, and **temperature / tint of RAW photos**).
+  Tone curve, masks, crop and presets cannot be changed; JPEGs have no kelvin values, so their white balance cannot be changed.
 - **Range limits** (exposure ±5, the rest ±100) and a **step limit per call** (exposure ±1, the rest ±30): a bigger jump
   is refused and the assistant is told to go in several steps and look at the preview each time. Lightroom itself
   does *not* check ranges (measured: it stores out-of-range values as given), so this project does.
@@ -109,7 +109,7 @@ compatibility report, feature request) or start a **[discussion](../../discussio
 |---|---|
 | 0.1 | Read-only: look at photos, develop settings, preview, histogram numbers, self check |
 | **0.2 (now)** | Change one photo's global sliders and HSL with range and step limits, saved old values, restore commands and a read-only switch |
-| next | White balance (needs more measuring), then macOS, then Photoshop / Premiere Pro |
+| next | macOS, then Photoshop / Premiere Pro |
 | later | Teaching mode (plain-language explanations, before/after), learning your taste from rated photos, batch / presets / culling help |
 
 Masks, AI features and tone curves depend on what Adobe's SDK offers and are not promised.

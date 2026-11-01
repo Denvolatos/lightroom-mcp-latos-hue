@@ -4,13 +4,13 @@
 一个 Lightroom 插件加一个小型 MCP 服务：能看到你选中的照片、读取调整参数，并把预览图和直方图数字交给 AI。
 **0.2 起还能对少数滑块做受保护的小步修改，并随时还原**，其他一律不动。
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.4.0-orange)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.5.0-orange)
 
 [English](README.en.md) · [更新日志](CHANGELOG.md) · [安全说明](SECURITY.md) · [参与贡献](CONTRIBUTING.md)
 
 > 🤖 **你是 AI 助手，用户让你看这个仓库？** 请读 [`AI_GUIDE.md`](AI_GUIDE.md)，里面有完整的安装和使用步骤。
 
-> ⚠️ **早期版本（0.4.0）**：只在 Windows 11 + Lightroom Classic 15.2 上测过。安装包已发布但尚未在干净电脑上做过安装/卸载测试（待验证）。与 Adobe 无关联。
+> ⚠️ **早期版本（0.5.0）**：只在 Windows 11 + Lightroom Classic 15.2 上测过。安装包已发布但尚未在干净电脑上做过安装/卸载测试（待验证）。与 Adobe 无关联。
 
 ## ✨ 能做什么
 
@@ -31,7 +31,7 @@
 
 ### 「修改」是什么意思，怎么保证安全
 
-- **只改滑块，只改一小张清单**：35 个滑块（曝光、上面列的 10 个全局滑块、24 个 HSL 值）。白平衡、色调曲线、蒙版、裁剪、预设都不能改。
+- **只改滑块，只改一小张清单**：37 个滑块（曝光、上面列的 10 个全局滑块、24 个 HSL 值，以及 **RAW 照片的色温 / 色调**）。色调曲线、蒙版、裁剪、预设都不能改；JPEG 没有开尔文值，不能改白平衡。
 - **范围限制**（曝光 ±5，其余 ±100）和**单次限幅**（曝光 ±1，其余 ±30）：跳得太大会被拒绝，并提示 AI 分几步改、每步看一眼预览。
   Lightroom 自己**不检查范围**（实测：越界值它照存），所以由本项目来检查。
 - **写入之前先把旧值存到磁盘**（`C:\Users\<你>\LrMcp\edits`）。还原就是把它们写回去；Lightroom 的快照和撤销实测不可靠，所以不用。
@@ -97,7 +97,7 @@ Claude 桌面版暂不自动登记（配置文件位置取决于安装方式）�
 |---|---|
 | 0.1 | 只读：看照片、调整参数、预览、直方图数字、自检 |
 | **0.2（现在）** | 修改单张照片的全局滑块和 HSL：范围与单次限幅、改前存旧值、还原命令、只读开关 |
-| 下一步 | 白平衡（还需要更多测量），然后是 macOS，再然后是 Photoshop / Premiere Pro |
+| 下一步 | macOS，再然后是 Photoshop / Premiere Pro |
 | 之后 | 教学模式（大白话解释、前后对比）、学习你的口味、批量/预设/挑片 |
 
 蒙版、AI 功能、色调曲线取决于 Adobe SDK 能提供什么，暂不承诺。

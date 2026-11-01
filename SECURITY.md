@@ -4,7 +4,7 @@
 
 ## 这个软件能做什么、不能做什么
 
-- **0.2 起能修改少数滑块**（曝光、十个全局滑块、24 个 HSL 值；其他都不动：不碰白平衡、色调曲线、蒙版、裁剪、预设、元数据，不删除，不导入导出）。每次修改都有范围限制和单次限幅，一次只改一张照片，**改之前先把旧值存到** `C:\Users\<你>\LrMcp\edits`，随时可还原。**只读开关**（文件 `C:\Users\<你>\LrMcp\readonly`）会让服务和插件拒绝一切修改。0.1 版是纯只读。
+- **0.2 起能修改少数滑块**（曝光、十个全局滑块、24 个 HSL 值，以及 RAW 照片的色温/色调；其他都不动：不碰色调曲线、蒙版、裁剪、预设、元数据，不删除，不导入导出）。每次修改都有范围限制和单次限幅，一次只改一张照片，**改之前先把旧值存到** `C:\Users\<你>\LrMcp\edits`，随时可还原。**只读开关**（文件 `C:\Users\<你>\LrMcp\readonly`）会让服务和插件拒绝一切修改。0.1 版是纯只读。
 - 它还会写的文件：预览 JPEG（`LrMcp\previews`，不会加入你的 Lightroom 目录）、口令、端口/日志文件和修改记录，都在 `C:\Users\<你>\LrMcp`。
 - **在真实作品上用修改功能前，请先备份目录。** 能改滑块的 AI 也可能把照片改难看；还原会写回保存的旧值（会覆盖你之后手动改过的同一个值）。
 - 所有东西都在你自己的电脑上运行。Python 服务只监听 `127.0.0.1`，且独占端口。除下面的更新提醒外，本项目不会通过网络发送任何东西。**注意：** 工具返回的预览图和照片信息会发给你连接的 AI 服务（Claude、Codex 等），这是它的工作方式，所以只对愿意分享给该服务的照片使用。
@@ -31,8 +31,8 @@
 
 ## What this software can and cannot do
 
-- **Since 0.2 it can change a small set of sliders** (exposure, the ten global sliders, 24 HSL values; nothing else: no
-  white balance, tone curve, masks, crop, presets, metadata, no deleting, no import/export). Every change is limited by
+- **Since 0.2 it can change a small set of sliders** (exposure, the ten global sliders, 24 HSL values, and temperature/tint of RAW photos; nothing else: no
+  tone curve, masks, crop, presets, metadata, no deleting, no import/export). Every change is limited by
   range and by a step per call, one photo at a time, and the old values are saved first (`C:\Users\<you>\LrMcp\edits`)
   so it can be restored. A **read-only switch** (file `C:\Users\<you>\LrMcp\readonly`) makes the server and the plug-in
   refuse every change. Version 0.1 was read-only.

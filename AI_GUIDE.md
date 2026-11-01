@@ -20,8 +20,8 @@ Details below (in Chinese, but all commands are language-neutral).
 - **Lightroom 插件**（Lua）：在 Lightroom 里运行，只执行固定的白名单命令。
 - **MCP 服务**（Python，命令 `lrmcp`）：通过 stdio 连接 AI 客户端，并在本机（`127.0.0.1`）和插件通信。
 
-当前版本 **0.4.0**：能读照片信息、读取调整参数、生成预览图并给出直方图数字；也能对**少数滑块做小步、受保护的修改**，并随时还原。
-白平衡、色调曲线、蒙版、裁剪、预设、元数据都**不能**改，也不能删除照片或导入导出。
+当前版本 **0.5.0**：能读照片信息、读取调整参数、生成预览图并给出直方图数字；也能对**少数滑块做小步、受保护的修改**，并随时还原。
+可以改 RAW 照片的色温（Temperature，K）和色调（Tint）；JPEG 没有开尔文值，**不能**改白平衡。色调曲线、蒙版、裁剪、预设、元数据都**不能**改，也不能删除照片或导入导出。
 
 ## 2. 先确认条件（不满足就别硬装）
 
@@ -43,7 +43,7 @@ pip install "https://github.com/Denvolatos/lightroom-mcp-win/archive/refs/heads/
 lrmcp --version
 ```
 
-期望输出形如 `lightroom_mcp 0.4.0`（版本号可能更新）。如果提示找不到 `lrmcp`，说明 Python 的 Scripts 目录不在 PATH 里：用 `python -m pip show -f lightroom-mcp` 找到它，或者以后一律用 `python -m lightroom_mcp` 代替 `lrmcp`，并在登记时写 Python 的**绝对路径**。
+期望输出形如 `lightroom_mcp 0.5.0`（版本号可能更新）。如果提示找不到 `lrmcp`，说明 Python 的 Scripts 目录不在 PATH 里：用 `python -m pip show -f lightroom-mcp` 找到它，或者以后一律用 `python -m lightroom_mcp` 代替 `lrmcp`，并在登记时写 Python 的**绝对路径**。
 
 ### 3.2 安装 Lightroom 插件（让用户在自己的 PowerShell 里运行）
 
@@ -103,7 +103,7 @@ Get-ChildItem $dst | Select-Object Name
 **典型用法**：用户说"看看这张照片哪里有问题"→ 先 `lr_list_selected`，再 `lr_get_preview`（看图 + 数字），必要时 `lr_get_develop` 看已经做过哪些调整，然后用大白话告诉用户：偏暗/偏亮、高光是否过曝、暗部是否死黑、色调偏冷还是偏暖，并说明依据（引用返回的数字）。
 **调色老师式的回答更有帮助**：说"改了会怎样"，而不是只给参数；用户可能是调色新手。
 
-**注意**：`lr_get_develop` 里 RAW 照片在没编辑过时读不到 Temperature/Tint，只显示 `WhiteBalance`；这不代表没有色温。**白平衡（色温/色调）目前不能改**：用户要调白平衡时，请如实说明现在做不到，可以给出建议，让用户在 Lightroom 里自己拖。
+**注意**：`lr_get_develop` 里 RAW 照片在没编辑过时读不到 Temperature/Tint，只显示 `WhiteBalance`；这不代表没有色温。**RAW 的白平衡可以改**（Temperature 2000–50000 K，单次最多 ±1000；Tint ±150，单次最多 ±30；改后标签会变成 Custom，还原会连标签一起写回）。JPEG，或没编辑过读不到色温的 RAW，请如实告诉用户做不到，让用户先在 Lightroom 里对 RAW 做任意一次编辑，或自己拖滑块。
 
 ### 修改照片的规矩（请严格遵守）
 
@@ -113,7 +113,7 @@ Get-ChildItem $dst | Select-Object Name
 4. **用户不满意就还原**：`lr_restore`（撤销某一次）或 `lr_restore_original`（回到最初）。还原前如果用户期间手动改过同一个滑块，要提醒他会被覆盖。
 5. **用户第一次在他真实的 Lightroom 目录上使用修改功能时**，请先提醒他备份目录（`.lrcat` 文件），并建议先在测试目录上试。
 6. 如果工具返回"只读模式已开启"，说明用户创建了开关文件 `C:\Users\<用户名>\LrMcp\readonly`：**不要**去删它或想办法绕过，告诉用户想允许修改就自己删掉这个文件。
-7. 只改工具说明里列出的滑块。不要声称你能改白平衡、曲线、蒙版、裁剪、预设；不要用别的办法（比如操作界面）去做这些。
+7. 只改工具说明里列出的滑块。不要声称你能改 JPEG 的白平衡、曲线、蒙版、裁剪、预设；不要用别的办法（比如操作界面）去做这些。
 
 ## 5. 对用户要讲清楚的几件事
 
