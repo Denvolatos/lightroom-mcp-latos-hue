@@ -1,0 +1,26 @@
+# Adobe SDK 原包与示例（不可再分发）
+docs/sdk/
+*SDK*.zip
+
+# 测试照片与目录
+*.lrcat
+*.lrcat-*
+*.lrdata/
+*.ARW
+*.CR3
+*.NEF
+*.DNG
+*.JPG
+*.jpg
+*.xmp
+
+# 口令、日志、本地配置
+*.token
+token*
+*.log
+.env
+config.local.*
+
+# Python
+__pycache__/
+*.pyc
