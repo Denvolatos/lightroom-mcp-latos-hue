@@ -18,12 +18,13 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Iterable
 
 from . import config
 
 
 class BridgeBusy(RuntimeError):
-    """The port is already used (usually another Lightroom MCP instance)."""
+    """Every port in the range is already used."""
 
 
 class PluginNotConnected(RuntimeError):
@@ -72,14 +73,28 @@ class _Server(ThreadingHTTPServer):
 class Bridge:
     def __init__(
         self,
-        port: int = config.PORT,
+        port: int | None = None,
         data_dir: Path = config.DATA_DIR,
         poll_hold: float = config.POLL_HOLD_SECONDS,
         connect_wait: float = config.CONNECT_WAIT_SECONDS,
+        ports: Iterable[int] | None = None,
+        legacy_port: int | None = config.PORT,
     ):
-        self.port = port
+        """``port`` (one fixed port) or ``ports`` (candidates, in order); default: the whole range. The server
+        takes the first free one. ``legacy_port``: the server that gets this port also writes ~/LrMcp/token so that
+        an old plug-in (0.2.x, which only knows port 58770) keeps working."""
+        if ports is not None:
+            self.candidates = list(ports)
+        elif port is not None:
+            self.candidates = [port]
+        else:
+            self.candidates = list(range(config.PORT, config.PORT + config.PORT_COUNT))
+        self.port = self.candidates[0]
+        self.legacy_port = legacy_port
         self.data_dir = data_dir
-        self.token_file = data_dir / "token"
+        self.servers_dir = data_dir / "servers"
+        self.token_file = data_dir / "token"  # legacy token file
+        self.info_file: Path | None = None
         self.poll_hold = poll_hold
         self.connect_wait = connect_wait
         self.token = secrets.token_urlsafe(32)
@@ -102,23 +117,71 @@ class Bridge:
         class Handler(_Handler):
             owner = bridge
 
-        try:
-            self._server = _Server((config.HOST, self.port), Handler)
-        except OSError as e:
+        self.servers_dir.mkdir(parents=True, exist_ok=True)
+        self._remove_stale_info_files()
+        for candidate in self.candidates:
+            try:
+                self._server = _Server((config.HOST, candidate), Handler)
+            except OSError:
+                continue
+            self.port = candidate
+            break
+        else:
+            first, last = self.candidates[0], self.candidates[-1]
             raise BridgeBusy(
-                f"端口 {self.port} 已被占用：可能已有另一个 Lightroom MCP 在运行（同一时间只支持一个）。"
-            ) from e
-        _write_atomic(self.token_file, self.token)
-        restrict_to_current_user(self.token_file)
+                f"端口 {first}–{last} 都被占用了（最多同时运行 {len(self.candidates)} 个 Lightroom MCP）。"
+                "请关闭不用的 AI 会话后再试。"
+            )
+        self._write_announcements()
         self._thread = threading.Thread(target=self._server.serve_forever, name="lrmcp-bridge", daemon=True)
         self._thread.start()
+
+    # ---- announcing ourselves to the plug-in -----------------------
+    def _write_announcements(self) -> None:
+        """~/LrMcp/servers/<port>.txt tells the plug-in where to poll and with which token."""
+        from . import __version__
+
+        self.info_file = self.servers_dir / f"{self.port}.txt"
+        _write_atomic(self.info_file, f"port={self.port}\ntoken={self.token}\npid={os.getpid()}\nversion={__version__}\n")
+        restrict_to_current_user(self.info_file)
+        if self.port == self.legacy_port:
+            _write_atomic(self.token_file, self.token)
+            restrict_to_current_user(self.token_file)
+
+    def _remove_stale_info_files(self) -> None:
+        """Delete announcements of servers that are gone (killed without cleaning up): nothing listens on their port."""
+        for f in self.servers_dir.glob("*.txt"):
+            try:
+                port = int(f.stem)
+            except ValueError:
+                continue
+            with socket.socket() as s:
+                s.settimeout(0.3)
+                alive = s.connect_ex((config.HOST, port)) == 0
+            if not alive:
+                f.unlink(missing_ok=True)
+
+    def other_servers(self) -> list[int]:
+        """Ports of the other running servers (other AI sessions)."""
+        ports = []
+        for f in self.servers_dir.glob("*.txt"):
+            try:
+                port = int(f.stem)
+            except ValueError:
+                continue
+            if port != self.port:
+                ports.append(port)
+        return sorted(ports)
 
     def stop(self) -> None:
         if self._server is not None:
             self._server.shutdown()
             self._server.server_close()
             self._server = None
-        self.token_file.unlink(missing_ok=True)
+        if self.info_file is not None:
+            self.info_file.unlink(missing_ok=True)
+        if self.port == self.legacy_port:
+            self.token_file.unlink(missing_ok=True)
 
     # ---- state -----------------------------------------------------
     @property
@@ -164,12 +227,11 @@ class Bridge:
 
     # ---- used by the HTTP handler ----------------------------------
     def _heal_token_file(self) -> None:
-        """If something deleted the token file while we are running, write it back (the plug-in re-reads it
-        after a reload; without it Lightroom could not reconnect until this server restarts)."""
-        if not self.token_file.exists():
+        """If something deleted our announcement (or the legacy token file) while we are running, write it back (the
+        plug-in re-reads it after a reload; without it Lightroom could not reconnect until this server restarts)."""
+        if self.info_file is not None and (not self.info_file.exists() or (self.port == self.legacy_port and not self.token_file.exists())):
             try:
-                _write_atomic(self.token_file, self.token)
-                restrict_to_current_user(self.token_file)
+                self._write_announcements()
             except OSError:
                 pass
 

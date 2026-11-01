@@ -87,6 +87,8 @@ def build_server(bridge: Bridge | None, busy_message: str | None = None) -> MCPS
         else:
             info["connected"] = True
             info.update(call("status", timeout=15))
+            info["bridge_port"] = bridge.port
+            info["other_ai_sessions_with_a_server"] = len(bridge.other_servers())
         return _text(info)
 
     @mcp.tool(annotations=READ_ONLY)

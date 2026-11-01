@@ -2,12 +2,14 @@
 from pathlib import Path
 
 HOST = "127.0.0.1"
-PORT = 58770
+PORT = 58770                 # first port of the range; also the one an old (0.2.x) plug-in polls
+PORT_COUNT = 20             # servers take the first free port in PORT .. PORT + PORT_COUNT - 1
 
 # Shared with the Lightroom plug-in. NOT under AppData: Claude Desktop is an MSIX app and silently
 # redirects the AppData of the programs it starts, so Lightroom would not see these files.
 DATA_DIR = Path.home() / "LrMcp"
-TOKEN_FILE = DATA_DIR / "token"
+TOKEN_FILE = DATA_DIR / "token"          # legacy: only written by the server that holds PORT (for old plug-ins)
+SERVERS_DIR = DATA_DIR / "servers"       # one small text file per running server: port, token, pid
 PREVIEW_DIR = DATA_DIR / "previews"
 LOG_FILE = DATA_DIR / "server.log"
 EDIT_DIR = DATA_DIR / "edits"            # one JSON file per change: the old values, so it can be restored

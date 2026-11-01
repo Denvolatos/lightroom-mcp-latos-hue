@@ -35,7 +35,10 @@ def _file_mentions(path: Path, needle: str) -> bool:
         return False
 
 
-def run_checks(bridge: Bridge | None, busy_message: str | None = None, wait_plugin: float = 0.0) -> list[Check]:
+TESTED_LIGHTROOM_MAJOR = 15  # the only version this software has been tested on (15.2)
+
+
+def run_checks(bridge: Bridge | None, busy_message: str | None = None, wait_plugin: float = 0.0, probe: bool = True) -> list[Check]:
     checks: list[Check] = []
     checks.append(Check("服务版本", True, f"lightroom_mcp {__version__}"))
 
@@ -55,13 +58,17 @@ def run_checks(bridge: Bridge | None, busy_message: str | None = None, wait_plug
     if bridge is None:
         checks.append(Check("本机通信端口", False, busy_message or "桥接服务没有启动", "关闭另一个 Claude/Codex 会话里的 Lightroom MCP，或重启它们"))
     else:
-        checks.append(Check("本机通信端口", True, f"已监听 {config.HOST}:{bridge.port}（只在本机）"))
+        others = bridge.other_servers()
+        extra = f"；另有 {len(others)} 个 AI 会话的服务在运行（端口 {', '.join(map(str, others))}）" if others else ""
+        checks.append(Check("本机通信端口", True, f"已监听 {config.HOST}:{bridge.port}（只在本机）{extra}"))
         if wait_plugin and not bridge.connected:
             bridge.wait_connected(wait_plugin)
         if bridge.connected:
             ver = bridge.plugin_version or "未知"
             ago = time.time() - bridge.last_seen
             checks.append(Check("Lightroom 插件已连上", True, f"插件版本 {ver}，最近一次联系 {ago:.0f} 秒前"))
+            if probe:
+                checks.append(_lightroom_version_check(bridge))
         else:
             checks.append(
                 Check(
@@ -108,6 +115,22 @@ def run_checks(bridge: Bridge | None, busy_message: str | None = None, wait_plug
         )
     )
     return checks
+
+
+def _lightroom_version_check(bridge: Bridge) -> Check:
+    """Ask the plug-in which Lightroom this is; say plainly that only 15.2 has been tested."""
+    try:
+        version = str(bridge.call("status", timeout=5).get("lightroom_version", ""))
+    except Exception:  # noqa: BLE001 - a failing probe must not break the self check
+        return Check("Lightroom 版本", True, "没能读到版本号（不影响其他检查）")
+    major = version.split(".")[0]
+    if major == str(TESTED_LIGHTROOM_MAJOR):
+        return Check("Lightroom 版本", True, f"{version}（本软件在 15.2 上测试过）")
+    return Check(
+        "Lightroom 版本", True,
+        f"{version}——本软件只在 15.2 上测试过，其他版本理论上能用（插件要求 SDK 6.0 以上）但没有验证；"
+        "出问题请到 GitHub 提交“兼容性报告”，注明这个版本号。",
+    )
 
 
 def format_report(checks: list[Check]) -> str:

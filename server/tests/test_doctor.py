@@ -47,10 +47,42 @@ def test_plugin_connected_is_reported_with_version(monkeypatch, tmp_path):
 
         b.last_seen = time.time()
         b.plugin_version = "9.9.9"
-        plugin = by_name(doctor.run_checks(b), "Lightroom 插件已连上")
+        plugin = by_name(doctor.run_checks(b, probe=False), "Lightroom 插件已连上")
     finally:
         b.stop()
     assert plugin.ok and "9.9.9" in plugin.detail
+
+
+def test_other_ai_sessions_are_mentioned(monkeypatch, tmp_path):
+    monkeypatch.setattr(doctor, "_lightroom_running", lambda: True)
+    ports = [free_port(), free_port()]
+    a, b = Bridge(ports=ports, data_dir=tmp_path), Bridge(ports=ports, data_dir=tmp_path)
+    a.start()
+    b.start()
+    try:
+        detail = by_name(doctor.run_checks(a, probe=False), "本机通信端口").detail
+    finally:
+        a.stop()
+        b.stop()
+    assert "另有 1 个 AI 会话" in detail and str(b.port) in detail
+
+
+def test_untested_lightroom_version_is_said_plainly(monkeypatch, tmp_path):
+    monkeypatch.setattr(doctor, "_lightroom_running", lambda: True)
+    b = Bridge(port=free_port(), data_dir=tmp_path, connect_wait=0)
+    b.start()
+    try:
+        import time
+
+        b.last_seen = time.time()
+        b.call = lambda command, params=None, timeout=30.0: {"lightroom_version": "13.4.0"}
+        check = doctor._lightroom_version_check(b)
+        b.call = lambda command, params=None, timeout=30.0: {"lightroom_version": "15.2.0"}
+        tested = doctor._lightroom_version_check(b)
+    finally:
+        b.stop()
+    assert check.ok and "只在 15.2 上测试过" in check.detail and "兼容性报告" in check.detail
+    assert tested.ok and "测试过" in tested.detail and "没有验证" not in tested.detail
 
 
 def test_busy_port_is_diagnosed(monkeypatch):

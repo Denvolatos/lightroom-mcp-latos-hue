@@ -1,4 +1,5 @@
 import json
+import os
 import socket
 import threading
 import time
@@ -58,20 +59,32 @@ def fake_plugin(b, handler, gen="100"):
     return stop
 
 
-def test_token_file_written_and_removed(tmp_path):
-    b = Bridge(port=free_port(), data_dir=tmp_path)
+def test_announcement_file_written_and_removed(tmp_path):
+    port = free_port()
+    b = Bridge(port=port, data_dir=tmp_path)
     b.start()
-    assert (tmp_path / "token").read_text() == b.token
+    info = dict(line.split("=", 1) for line in (tmp_path / "servers" / f"{port}.txt").read_text().split())
+    assert info["port"] == str(port) and info["token"] == b.token and info["pid"] == str(os.getpid())
+    assert not (tmp_path / "token").exists()  # the legacy token file belongs to the server on the legacy port only
+    b.stop()
+    assert not (tmp_path / "servers" / f"{port}.txt").exists()
+
+
+def test_the_server_on_the_legacy_port_also_writes_the_old_token_file(tmp_path):
+    port = free_port()
+    b = Bridge(port=port, data_dir=tmp_path, legacy_port=port)
+    b.start()
+    assert (tmp_path / "token").read_text() == b.token  # an old 0.2.x plug-in reads this
     b.stop()
     assert not (tmp_path / "token").exists()
 
 
-def test_second_instance_is_refused_with_chinese_message(bridge, tmp_path):
-    other = Bridge(port=bridge.port, data_dir=tmp_path / "other")
+def test_no_free_port_is_refused_with_chinese_message(bridge, tmp_path):
+    other = Bridge(port=bridge.port, data_dir=tmp_path / "other")  # the only candidate is taken
     with pytest.raises(BridgeBusy) as err:
         other.start()
-    assert "已被占用" in str(err.value)
-    assert not (tmp_path / "other" / "token").exists()  # must not overwrite the running instance's token
+    assert "都被占用" in str(err.value)
+    assert not list((tmp_path / "other" / "servers").glob("*.txt"))  # nothing announced
 
 
 def test_port_can_be_reused_right_after_stop(tmp_path):
@@ -85,11 +98,23 @@ def test_port_can_be_reused_right_after_stop(tmp_path):
     second.stop()
 
 
-def test_deleted_token_file_is_written_back(bridge, tmp_path):
-    token_file = tmp_path / "token"
-    token_file.unlink()
+def test_deleted_announcement_is_written_back(bridge, tmp_path):
+    info = tmp_path / "servers" / f"{bridge.port}.txt"
+    info.unlink()
     assert request(bridge, "GET", "/poll", headers={"X-Gen": "1"})[1] == "none"
-    assert token_file.read_text() == bridge.token  # same token, so the running plug-in keeps working
+    assert f"token={bridge.token}" in info.read_text()  # same token, so the running plug-in keeps working
+
+
+def test_deleted_legacy_token_file_is_written_back(tmp_path):
+    port = free_port()
+    b = Bridge(port=port, data_dir=tmp_path, poll_hold=0.2, legacy_port=port)
+    b.start()
+    try:
+        (tmp_path / "token").unlink()
+        assert request(b, "GET", "/poll", headers={"X-Gen": "1"})[1] == "none"
+        assert (tmp_path / "token").read_text() == b.token
+    finally:
+        b.stop()
 
 
 def test_wrong_token_is_401(bridge):
