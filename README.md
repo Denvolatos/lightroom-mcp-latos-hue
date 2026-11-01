@@ -1,128 +1,122 @@
-# 📸 Lightroom MCP for Windows
+# 📸 Lightroom MCP（Windows）
 
-**Let Claude or Codex look at your photos in Adobe Lightroom Classic.**
-A Lightroom plug-in plus a small MCP server. It can see the photo you selected, read its develop settings, and show
-the assistant a preview with histogram numbers. Since 0.2 it can also **make small, guarded changes to a few sliders
-and undo them**. Everything else stays untouched.
+**让 Claude / Codex 帮你看 Adobe Lightroom Classic 里的照片。**
+一个 Lightroom 插件加一个小型 MCP 服务：能看到你选中的照片、读取调整参数，并把预览图和直方图数字交给 AI。
+**0.2 起还能对少数滑块做受保护的小步修改，并随时还原**，其他一律不动。
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.2.0-orange)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.4.0-orange)
 
-[中文说明](README.zh-CN.md) · [Changelog](CHANGELOG.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md)
+[English](README.en.md) · [更新日志](CHANGELOG.md) · [安全说明](SECURITY.md) · [参与贡献](CONTRIBUTING.md)
 
-> 🤖 **AI assistant reading this for a user?** Read [`AI_GUIDE.md`](AI_GUIDE.md): it has the whole install and usage procedure.
+> 🤖 **你是 AI 助手，用户让你看这个仓库？** 请读 [`AI_GUIDE.md`](AI_GUIDE.md)，里面有完整的安装和使用步骤。
 
-> ⚠️ **Early version (0.2.0).** Tested only on Windows 11 with Lightroom Classic 15.2. No installer is published yet.
-> Not affiliated with Adobe.
+> ⚠️ **早期版本（0.4.0）**：只在 Windows 11 + Lightroom Classic 15.2 上测过。安装包已发布但尚未在干净电脑上做过安装/卸载测试（待验证）。与 Adobe 无关联。
 
-## ✨ What it does
+## ✨ 能做什么
 
-| Tool | What it gives the assistant |
+| 工具 | 给 AI 的内容 |
 |---|---|
-| `lr_status` | Is Lightroom connected, its version, the open catalog, how many photos are selected |
-| `lr_list_selected` | Selected photos: name, format, rating, size, ISO / aperture / shutter / focal length / lens / camera |
-| `lr_get_develop` | Current develop settings: exposure, contrast, highlights, shadows, white balance, HSL, … |
-| `lr_get_preview` | A 1024 px preview (256–2048) **plus numbers**: brightness, clipped highlights/shadows, warm/cool balance |
-| `lr_doctor` | Self check in Chinese: what is wrong and how to fix it |
-| `lr_set_develop` | **Changes** a few sliders of one photo (exposure, contrast, highlights, shadows, whites, blacks, texture, clarity, dehaze, vibrance, saturation, HSL), with range and per-call step limits; can return a preview right after |
-| `lr_restore` | Puts the sliders of one earlier change back to their old values |
-| `lr_restore_original` | Puts every slider LrMCP changed on a photo back to its value before LrMCP's first change (`dry_run` shows what it would do) |
-| `lr_list_edits` | Lists the changes LrMCP made (id, time, photo, sliders, restored or not) |
+| `lr_status` | Lightroom 是否连上、版本、当前目录、选中几张 |
+| `lr_list_selected` | 选中的照片：文件名、格式、评分、尺寸、ISO/光圈/快门/焦距/镜头/机身 |
+| `lr_get_develop` | 当前调整参数：曝光、对比度、高光、阴影、白平衡、HSL 等 |
+| `lr_get_preview` | 1024 像素预览（可选 256–2048）**加数字**：亮度、过曝/欠曝比例、冷暖偏向 |
+| `lr_doctor` | 中文自检：哪里有问题、怎么处理 |
+| `lr_set_develop` | **修改**一张照片的少数滑块（曝光、对比度、高光、阴影、白色、黑色、纹理、清晰度、去朦胧、自然饱和度、饱和度、HSL），有范围和单次限幅；可在改完后顺便返回预览 |
+| `lr_restore` | 把某一次修改涉及的滑块写回旧值 |
+| `lr_restore_original` | 让照片回到 LrMCP 第一次改它之前的样子（`dry_run` 只显示会做什么） |
+| `lr_list_edits` | 列出 LrMCP 做过的修改（编号、时间、照片、滑块、是否已还原） |
 
-Example: select a photo and ask *"Look at the selected photo and tell me what is wrong with the exposure."*
-The assistant gets the picture and numbers such as `mean brightness 77.6`, `warm/cool index −9.9 %` and can say
-*"a bit dark and cool"* with evidence.
+例子：选中一张照片，对 AI 说「看看我选中的这张，曝光有什么问题」。它拿到图片和 `平均亮度 77.6`、`冷暖指数 −9.9%`
+这样的数字，就能有依据地说「偏暗、偏冷」。
 
-### What changing means, and how it is kept safe
+### 「修改」是什么意思，怎么保证安全
 
-- **Only sliders, only a short list**: 35 sliders (exposure, the ten global ones above, 24 HSL values). White balance,
-  tone curve, masks, crop and presets cannot be changed.
-- **Range limits** (exposure ±5, the rest ±100) and a **step limit per call** (exposure ±1, the rest ±30): a bigger jump
-  is refused and the assistant is told to go in several steps and look at the preview each time. Lightroom itself
-  does *not* check ranges (measured: it stores out-of-range values as given), so this project does.
-- **The old values are saved to disk before anything is written** (`C:\Users\<you>\LrMcp\edits`). Restoring means
-  writing them back; Lightroom's snapshots and undo were measured to be unreliable, so they are not used.
-- **Read-only switch**: create the file `C:\Users\<you>\LrMcp\readonly` and every change is refused, by the server and
-  by the plug-in. Delete the file to allow changes again.
-- One photo per call. The plug-in re-checks every rule itself; it does not trust the server.
-- Changes appear in Lightroom's History panel as `LrMCP <id>` steps. **Back up your catalog (`.lrcat`) before using this
-  on real work, and try it on a test catalog first.** If you changed the same slider by hand after an LrMCP change,
-  restoring overwrites your manual value.
+- **只改滑块，只改一小张清单**：35 个滑块（曝光、上面列的 10 个全局滑块、24 个 HSL 值）。白平衡、色调曲线、蒙版、裁剪、预设都不能改。
+- **范围限制**（曝光 ±5，其余 ±100）和**单次限幅**（曝光 ±1，其余 ±30）：跳得太大会被拒绝，并提示 AI 分几步改、每步看一眼预览。
+  Lightroom 自己**不检查范围**（实测：越界值它照存），所以由本项目来检查。
+- **写入之前先把旧值存到磁盘**（`C:\Users\<你>\LrMcp\edits`）。还原就是把它们写回去；Lightroom 的快照和撤销实测不可靠，所以不用。
+- **只读开关**：创建文件 `C:\Users\<你>\LrMcp\readonly`，所有修改都会被服务端和插件拒绝；删掉文件就恢复。
+- 每次只改一张照片。插件会把所有规则再检查一遍，不信任服务端。
+- 修改会在 Lightroom 的「历史记录」里显示为 `LrMCP <编号>` 步骤。**在真实作品上用之前，请先备份目录（`.lrcat`），并先在测试目录上试。**
+  如果你在 LrMCP 修改之后又手动改了同一个滑块，还原会覆盖你手动改的值。
 
-Files it creates: preview JPEGs (not added to your catalog), a token, a log and the saved change records, all in
-`C:\Users\<you>\LrMcp`.
+它会创建的文件：预览图（不会加入你的目录）、口令、日志和保存下来的修改记录，都在 `C:\Users\<你>\LrMcp`。
 
-## 🏗️ How it works
+## 🏗️ 结构
 
 ```
-Claude / Codex ──(MCP, stdio)──▶ lrmcp (Python server, local queue on 127.0.0.1:58770)
+Claude / Codex ──(MCP, stdio)──▶ lrmcp（Python 服务，本机队列 127.0.0.1:58770）
                                           ▲
-              Lightroom plug-in (Lua) polls the queue, runs a whitelisted command, sends the answer back
+        Lightroom 插件（Lua）来取任务，执行白名单命令，再把结果送回
 ```
 
-- Local only: the server binds `127.0.0.1` exclusively, requests need a random token, the `Host` header must match,
-  and requests with an `Origin` header (browsers) are refused. Several AI sessions can run at once (one server each, ports 58770–58789).
-- The plug-in runs a fixed whitelist of commands and never takes a file path from a request. A write needs a whitelisted
-  slider, a value in range, a small enough step, and no read-only switch.
-- Note: the images and photo information the tools return go to the AI service you use. See [SECURITY.md](SECURITY.md).
+- 只在本机：服务独占绑定 `127.0.0.1`，请求要带随机口令，`Host` 必须匹配，带 `Origin` 头（浏览器）的请求一律拒绝；可同时开多个 AI 会话（每个会话一个服务，端口 58770–58789，插件自动连上全部）。
+- 插件只执行固定的白名单命令，不接受请求里的文件路径。写入需要：白名单里的滑块、范围内的值、不超过单次限幅、没开只读开关。
+- 注意：工具返回的图片和照片信息会发给你使用的 AI 服务，见 [SECURITY.md](SECURITY.md)。
 
-## 🧰 Requirements
+## 🧰 需要什么
 
-- Windows, Adobe Lightroom Classic (developed on 15.2; SDK 15.x), Python 3.10+ (tested with 3.12).
-- Claude Code, Codex, or another MCP client (Claude Code was tested; Codex was not).
+- Windows、Adobe Lightroom Classic（在 15.2 上开发；SDK 15.x）、Python 3.10+（用 3.12 测试）。
+- Claude Code、Codex 或其他 MCP 客户端（测试过 Claude Code，没测过 Codex）。
 
-## 🚀 Install from source
+## 📦 用安装包安装（免装 Python）
 
-1. **Server** (normal PowerShell):
+1. 到 [Releases](https://github.com/Denvolatos/lightroom-mcp-win/releases/latest) 下载 `LrMCP-Setup-*.exe`，并核对页面上的 SHA-256。
+2. **在你自己的资源管理器里双击运行**（不要通过 Claude 桌面版启动，见下面的 MSIX 提醒）。程序没有代码签名，Windows SmartScreen 会提示"未知发布者"。
+3. 安装完重启 Lightroom 和你的 AI 助手，让它调用 `lr_status`。
+
+## 🚀 从源码安装
+
+1. **服务**（普通 PowerShell）：
    ```powershell
    pip install ./server
-   lrmcp register --dry-run   # shows what it would do
-   lrmcp register             # registers "lightroom_mcp" with Claude Code and/or Codex (uses their own CLIs)
+   lrmcp register --dry-run   # 先看它会做什么
+   lrmcp register             # 把 lightroom_mcp 登记到 Claude Code / Codex（调用它们自己的命令）
    ```
-2. **Plug-in**: copy `plugin/lrmcp.lrdevplugin` to `%APPDATA%\Adobe\Lightroom\Modules\LrMcp.lrplugin`, delete
-   `DevRun.lua` and the `devscripts` folder from the copy (they are development helpers), and restart Lightroom.
-   In *File → Plug-in Manager* LrMCP should be enabled. `powershell -ExecutionPolicy Bypass -File build.ps1`
-   builds a clean staged copy plus an installer (needs the conda env and Inno Setup, see [CONTRIBUTING](CONTRIBUTING.md)).
-3. Restart your assistant, then ask it to call `lr_status`. If something fails, ask for `lr_doctor`.
+2. **插件**：把 `plugin/lrmcp.lrdevplugin` 复制到 `%APPDATA%\Adobe\Lightroom\Modules\LrMcp.lrplugin`，
+   删掉副本里的 `DevRun.lua` 和 `devscripts` 文件夹（开发用的辅助），重启 Lightroom。在
+   *文件 → 增效工具管理器* 里应能看到 LrMCP 已启用。`powershell -ExecutionPolicy Bypass -File build.ps1`
+   可以生成干净的插件副本和安装包（需要 conda 环境和 Inno Setup，见 [CONTRIBUTING](CONTRIBUTING.md)）。
+3. 重启你的 AI 助手，让它调用 `lr_status`。出问题就让它调用 `lr_doctor`。
 
-> **Windows gotcha:** *Claude Desktop is an MSIX app*, and Windows silently redirects what programs it starts write to
-> `AppData`. Run installers and copy steps from your own PowerShell, not from a shell started by Claude Desktop.
-> That is also why this project keeps its shared files in `C:\Users\<you>\LrMcp`, not in `AppData`.
+> **Windows 的坑**：*Claude 桌面版是 MSIX 应用*，Windows 会悄悄重定向它启动的程序对 `AppData` 的写入。
+> 请在你自己的 PowerShell 里运行安装和复制步骤，不要通过 Claude 桌面版启动的 shell。
+> 所以本项目的共享文件放在 `C:\Users\<你>\LrMcp`，而不是 `AppData`。
 
-Claude Desktop is not registered automatically (its config file location depends on how it was installed); add the
-command by hand under *Settings → Developer → Edit Config*.
+Claude 桌面版暂不自动登记（配置文件位置取决于安装方式），请在 *设置 → 开发者 → 编辑配置* 里手动添加命令。
 
-## 💬 Feedback
+## 💬 反馈
 
-Found a problem, or got it working in another AI app? **[Open an issue](../../issues/new/choose)** (bug report,
-compatibility report, feature request) or start a **[discussion](../../discussions)**. The forms ask for the output of
-`lr_doctor`, which makes most problems easy to find. Please never attach photos or catalogs. No usage data is collected.
+遇到问题，或者在别的 AI 应用里跑通了？欢迎 **[提交 issue](../../issues/new/choose)**（问题反馈、兼容性报告、功能建议）
+或到 **[讨论区](../../discussions)** 聊。表单会让你贴上 `lr_doctor` 的输出，大多数问题一看就明白。
+请不要上传照片或 Lightroom 目录。本软件不收集任何使用数据。
 
-## 🗺️ Roadmap
+## 🗺️ 路线图
 
-| Version | Plan |
+| 版本 | 计划 |
 |---|---|
-| 0.1 | Read-only: look at photos, develop settings, preview, histogram numbers, self check |
-| **0.2 (now)** | Change one photo's global sliders and HSL with range and step limits, saved old values, restore commands and a read-only switch |
-| next | White balance (needs more measuring), then macOS, then Photoshop / Premiere Pro |
-| later | Teaching mode (plain-language explanations, before/after), learning your taste from rated photos, batch / presets / culling help |
+| 0.1 | 只读：看照片、调整参数、预览、直方图数字、自检 |
+| **0.2（现在）** | 修改单张照片的全局滑块和 HSL：范围与单次限幅、改前存旧值、还原命令、只读开关 |
+| 下一步 | 白平衡（还需要更多测量），然后是 macOS，再然后是 Photoshop / Premiere Pro |
+| 之后 | 教学模式（大白话解释、前后对比）、学习你的口味、批量/预设/挑片 |
 
-Masks, AI features and tone curves depend on what Adobe's SDK offers and are not promised.
+蒙版、AI 功能、色调曲线取决于 Adobe SDK 能提供什么，暂不承诺。
 
-## 📚 Docs
+## 📚 文档
 
-Design notes are in Chinese for now: [`docs/方案.md`](docs/方案.md) (plan), [`docs/实验记录.md`](docs/实验记录.md) (what was
-measured on Lightroom Classic 15.2: e.g. writes need `withWriteAccessDo`, snapshots and undo are unreliable),
-[`docs/实现记录.md`](docs/实现记录.md) (implementation notes).
+- [`docs/方案.md`](docs/方案.md)：方案与设计
+- [`docs/实验记录.md`](docs/实验记录.md)：在 Lightroom Classic 15.2 上的实测（例如：写入必须放进 `withWriteAccessDo`，快照和撤销不可靠）
+- [`docs/实现记录.md`](docs/实现记录.md)：实现中的发现与验证结果
 
-## 🙏 See also
+## 🙏 另见
 
-Other Lightroom Classic MCP projects, studied for ideas (no code was copied):
-[Automaat/lightroom-mcp](https://github.com/Automaat/lightroom-mcp) (TypeScript, MIT, many tools, Windows and macOS)
-and [noopz/lightroom_mcp](https://github.com/noopz/lightroom_mcp) (Python, Apache-2.0).
-This project aims to be small, careful about changes, Python-based and easy to install for non-programmers.
+其他 Lightroom Classic MCP 项目，参考过思路（没有复制代码）：
+[Automaat/lightroom-mcp](https://github.com/Automaat/lightroom-mcp)（TypeScript，MIT，工具很多，支持 Windows 和 macOS）、
+[noopz/lightroom_mcp](https://github.com/noopz/lightroom_mcp)（Python，Apache-2.0）。
+本项目的目标是：小、对修改很谨慎、用 Python、方便不懂编程的人安装。
 
-## ⚖️ License and disclaimer
+## ⚖️ 许可证与声明
 
-[MIT](LICENSE). Third-party packages: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-Adobe and Lightroom are trademarks of Adobe Inc.; this project is not affiliated with, endorsed or sponsored by Adobe.
-The Adobe Lightroom Classic SDK is not included and must not be committed.
+[MIT](LICENSE)。第三方依赖见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+Adobe、Lightroom 是 Adobe Inc. 的商标；本项目与 Adobe 无关联，未获其认可或赞助。
+Adobe Lightroom Classic SDK 不在本仓库内，也不要提交。
