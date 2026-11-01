@@ -8,6 +8,7 @@ local LrFileUtils = import "LrFileUtils"
 local LrPathUtils = import "LrPathUtils"
 
 local Json = require "Json.lua"
+local Limits = require "Limits.lua"
 local Version = require "Version.lua"
 
 local M = {}
@@ -210,11 +211,106 @@ function M.get_preview(params)
 	return { path = path, name = LrPathUtils.leafName(photo:getRawMetadata("path") or ""), bytes = attrs and attrs.fileSize }
 end
 
+-- ---------------------------------------------------------------------------------------------------------------------
+-- Writing (v1.1). Every protection is checked here again; the plug-in never trusts the Python side.
+-- ---------------------------------------------------------------------------------------------------------------------
+local MAX_KEYS = 30
+local VERIFY_TOLERANCE = 1e-3
+local RESERVED = { photo = true, edit = true, restore = true }
+local readonlyPath = LrPathUtils.child(LrPathUtils.child(LrPathUtils.getStandardFilePath("home"), "LrMcp"), "readonly")
+
+local function finiteNumber(text)
+	local value = tonumber(text)
+	if value == nil or value ~= value or value == math.huge or value == -math.huge then
+		return nil
+	end
+	return value
+end
+
+-- Parameters: photo=<"selected"|uuid> edit=<id> [restore=1] <Slider>=<number> ...
+-- restore=1 (writing back saved old values) skips only the step limit; whitelist and range still apply.
+function M.set_develop(params)
+	if LrFileUtils.exists(readonlyPath) then
+		fail("只读模式已开启（" .. readonlyPath .. " 存在），不允许修改照片。")
+	end
+	local editId = params.edit
+	if not editId or not editId:match("^[%w%-]+$") then
+		fail("缺少或不合法的修改编号。")
+	end
+	local restoring = params.restore == "1"
+
+	local changes, count = {}, 0
+	for key, text in pairs(params) do
+		if not RESERVED[key] then
+			local limit = Limits[key]
+			if not limit then
+				fail("不允许修改这个参数：" .. tostring(key))
+			end
+			local value = finiteNumber(text)
+			if not value then
+				fail(key .. " 的值不是有效数字：" .. tostring(text))
+			end
+			if value < limit[1] or value > limit[2] then
+				fail(string.format("%s 的取值范围是 %g 到 %g，收到 %g。", key, limit[1], limit[2], value))
+			end
+			changes[key] = value
+			count = count + 1
+		end
+	end
+	if count == 0 then
+		fail("没有要修改的参数。")
+	end
+	if count > MAX_KEYS then
+		fail(string.format("一次最多改 %d 个参数，收到 %d 个。", MAX_KEYS, count))
+	end
+
+	local catalog = LrApplication.activeCatalog()
+	local photo = photoFromRef(catalog, params.photo)
+	if photo:getRawMetadata("isVideo") then
+		fail("这是视频文件，不支持修改。")
+	end
+
+	-- read the current values and check the step size BEFORE writing anything
+	local current = photo:getDevelopSettings()
+	local before = {}
+	for key, value in pairs(changes) do
+		local now = current[key]
+		if type(now) ~= "number" then
+			fail("读不到 " .. key .. " 的当前值，已取消修改，照片没有改动。")
+		end
+		before[key] = now
+		local step = Limits[key][3]
+		if not restoring and math.abs(value - now) > step + 1e-9 then
+			fail(string.format("%s 当前是 %g，目标 %g，单次最多改 ±%g。请分几次改，每次改完用 lr_get_preview 看一眼效果。",
+				key, now, value, step))
+		end
+	end
+
+	local result = catalog:withWriteAccessDo("LrMCP " .. editId, function()
+		photo:applyDevelopSettings(changes, "LrMCP " .. editId)
+	end, { timeout = 15 })
+	if result ~= "executed" then
+		fail("Lightroom 现在不能写入（可能正忙），没有做任何修改，请稍后再试。")
+	end
+
+	-- read back after the write gate and report what Lightroom really stored
+	local stored = photo:getDevelopSettings()
+	local after, verified = {}, true
+	for key, value in pairs(changes) do
+		after[key] = stored[key]
+		if type(stored[key]) ~= "number" or math.abs(stored[key] - value) > VERIFY_TOLERANCE then
+			verified = false
+		end
+	end
+	return { before = before, after = after, verified = verified, photo = describe(photo) }
+end
+
 local COMMANDS = {
 	status = M.status,
 	list_selected = M.list_selected,
 	get_develop = M.get_develop,
 	get_preview = M.get_preview,
+	set_develop = M.set_develop,
 }
 
 function M.run(command, params)
