@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 提问和聊天 / Questions and chat
+    url: https://github.com/Denvolatos/lightroom-mcp-win/discussions
+    about: 用法问题、想法、分享你的调色经验请到讨论区 / Usage questions, ideas and sharing go to Discussions
+  - name: 安全问题（请私下报告）/ Security (report privately)
+    url: https://github.com/Denvolatos/lightroom-mcp-win/security/advisories/new
+    about: 请不要公开发布安全问题的细节 / Please do not post security details publicly

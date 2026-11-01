@@ -1,0 +1,46 @@
+name: 兼容性报告 / Compatibility report
+description: 你试了某个 AI 应用，能用还是不能用？/ Did it work in your AI app?
+title: "[兼容性] "
+labels: ["ai-client", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        这个软件只用标准的 MCP（本地 stdio 服务），理论上任何支持添加本地 MCP 服务的 AI 应用都能用，但作者只验证过 Claude Code。你的报告能帮大家知道哪些应用可用。
+        The software uses plain MCP (local stdio server). Only Claude Code has been verified by the author. Your report helps everyone know what works.
+  - type: input
+    id: client
+    attributes:
+      label: AI 应用和版本 / AI app and version
+      placeholder: 例如 WorkBuddy x.y、豆包桌面版、Cursor
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: 结果 / Result
+      options:
+        - 能用：5 个工具都正常 / Works: all five tools OK
+        - 部分能用 / Partly works
+        - 不能用：应用不支持本地 MCP 服务 / Does not work: the app cannot run local MCP servers
+        - 不能用：别的原因 / Does not work: other reason
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: 怎么配置的 / How you configured it
+      description: 配置写在哪里、写了什么（不要含私人路径也没关系，可以用 <用户名> 代替）
+      render: text
+  - type: textarea
+    id: notes
+    attributes:
+      label: 遇到的问题、需要注意的地方 / Problems and notes
+      description: 例如：图片显示不出来、要手动重启、某个工具报错
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 隐私 / Privacy
+      options:
+        - label: 我已去掉不想公开的信息，没有附照片 / I removed private information and attached no photos
+          required: true

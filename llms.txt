@@ -1,0 +1,25 @@
+# Lightroom MCP for Windows
+
+> A Lightroom Classic plug-in (Lua) plus a small read-only MCP server (Python, stdio) that lets an AI assistant look at the photo a user selected in Lightroom: develop settings, a preview image and histogram numbers. Windows only for now. Early version 0.1.0, MIT licensed, not affiliated with Adobe.
+
+If a user sent you this repository link and asked you to install or use it, read the first file below. It contains the whole procedure with verified commands.
+
+## For AI assistants (read this first)
+
+- [AI_GUIDE.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/AI_GUIDE.md): requirements, install steps, how to use the five tools, troubleshooting, how to report problems (Chinese text, language-neutral commands)
+
+## Project
+
+- [README.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/README.md): overview in English
+- [README.zh-CN.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/README.zh-CN.md): overview in Chinese
+- [SECURITY.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/SECURITY.md): what the software can and cannot do, privacy
+- [CHANGELOG.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/CHANGELOG.md): versions and known issues
+
+## For AI assistants that change the code
+
+- [AGENTS.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/AGENTS.md): repository rules, commands, pitfalls
+
+## Optional
+
+- [docs/实验记录.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/docs/%E5%AE%9E%E9%AA%8C%E8%AE%B0%E5%BD%95.md): measured behaviour of the Lightroom Classic 15.2 SDK
+- [docs/方案.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/docs/%E6%96%B9%E6%A1%88.md): design

@@ -8,6 +8,8 @@ the assistant a preview with histogram numbers. **Read-only for now: it cannot c
 
 [中文说明](README.zh-CN.md) · [Changelog](CHANGELOG.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md)
 
+> 🤖 **AI assistant reading this for a user?** Read [`AI_GUIDE.md`](AI_GUIDE.md): it has the whole install and usage procedure.
+
 > ⚠️ **Early version (0.1.0).** Tested only on Windows 11 with Lightroom Classic 15.2. No installer is published yet.
 > Not affiliated with Adobe.
 
@@ -66,6 +68,12 @@ Claude / Codex ──(MCP, stdio)──▶ lrmcp (Python server, local queue on 
 
 Claude Desktop is not registered automatically (its config file location depends on how it was installed); add the
 command by hand under *Settings → Developer → Edit Config*.
+
+## 💬 Feedback
+
+Found a problem, or got it working in another AI app? **[Open an issue](../../issues/new/choose)** (bug report,
+compatibility report, feature request) or start a **[discussion](../../discussions)**. The forms ask for the output of
+`lr_doctor`, which makes most problems easy to find. Please never attach photos or catalogs. No usage data is collected.
 
 ## 🗺️ Roadmap
 

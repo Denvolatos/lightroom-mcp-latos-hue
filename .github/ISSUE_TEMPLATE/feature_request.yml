@@ -1,0 +1,31 @@
+name: 功能建议 / Feature request
+description: 希望 AI 还能做什么 / What should the assistant be able to do?
+title: "[建议] "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: textarea
+    id: want
+    attributes:
+      label: 希望 AI 能做什么？ / What would you like it to do?
+      placeholder: 例如：能帮我把这张照片的暗部提亮一点，并告诉我改了什么
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: 为什么需要？你现在怎么做的？ / Why, and how do you do it today?
+  - type: dropdown
+    id: area
+    attributes:
+      label: 属于哪个软件 / Which software
+      options:
+        - Lightroom Classic（Windows）
+        - Lightroom Classic（macOS）
+        - Photoshop
+        - Premiere Pro
+        - 其他 / Other
+  - type: markdown
+    attributes:
+      value: |
+        提醒：这个项目**先只读**。任何会修改照片的功能，都需要白名单、范围限制、改前备份和还原、测试，所以做起来会慢一些。
+        Note: the project is read-only first. Anything that changes photos needs a whitelist, range limits, a backup and restore, and tests.

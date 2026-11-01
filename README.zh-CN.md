@@ -8,6 +8,8 @@
 
 [English](README.md) · [更新日志](CHANGELOG.md) · [安全说明](SECURITY.md) · [参与贡献](CONTRIBUTING.md)
 
+> 🤖 **你是 AI 助手，用户让你看这个仓库？** 请读 [`AI_GUIDE.md`](AI_GUIDE.md)，里面有完整的安装和使用步骤。
+
 > ⚠️ **早期版本（0.1.0）**：只在 Windows 11 + Lightroom Classic 15.2 上测过，暂未发布安装包。与 Adobe 无关联。
 
 ## ✨ 能做什么
@@ -61,6 +63,12 @@ Claude / Codex ──(MCP, stdio)──▶ lrmcp（Python 服务，本机队列 
 > 所以本项目的共享文件放在 `C:\Users\<你>\LrMcp`，而不是 `AppData`。
 
 Claude 桌面版暂不自动登记（配置文件位置取决于安装方式），请在 *设置 → 开发者 → 编辑配置* 里手动添加命令。
+
+## 💬 反馈
+
+遇到问题，或者在别的 AI 应用里跑通了？欢迎 **[提交 issue](../../issues/new/choose)**（问题反馈、兼容性报告、功能建议）
+或到 **[讨论区](../../discussions)** 聊。表单会让你贴上 `lr_doctor` 的输出，大多数问题一看就明白。
+请不要上传照片或 Lightroom 目录。本软件不收集任何使用数据。
 
 ## 🗺️ 路线图
 

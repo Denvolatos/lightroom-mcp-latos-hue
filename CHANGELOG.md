@@ -3,6 +3,11 @@
 Versions: a new feature raises the middle number, a small fix the last one. The server version lives in
 `server/lightroom_mcp/__init__.py`, the plug-in version in `plugin/lrmcp.lrdevplugin/Version.lua` (and `Info.lua`).
 
+## Unreleased
+
+- `AI_GUIDE.md` (install and usage procedure written for AI assistants), `llms.txt`, `AGENTS.md` (for AI coding agents).
+- Feedback channel: GitHub issue forms (bug report, compatibility report, feature request) and Discussions.
+
 ## 0.1.0 — first public version (read-only)
 
 Tested on Windows 11 with Adobe Lightroom Classic 15.2 only.
