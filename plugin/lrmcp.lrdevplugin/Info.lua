@@ -12,7 +12,8 @@ return {
 	LrLibraryMenuItems = {
 		{ title = "LrMCP: Hello (experiment 1)", file = "Hello.lua" },
 		{ title = "LrMCP: HTTP test (experiment 2)", file = "Http.lua" },
+		{ title = "LrMCP: Socket test (experiment 3)", file = "Socket.lua" },
 	},
 
-	VERSION = { major = 0, minor = 0, revision = 2, build = "exp2" },
+	VERSION = { major = 0, minor = 0, revision = 3, build = "exp3" },
 }
