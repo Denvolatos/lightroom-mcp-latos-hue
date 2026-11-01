@@ -47,9 +47,15 @@ def main(argv: list[str] | None = None) -> int:
         from . import doctor
 
         return doctor.main(args[1:])
+    if args[:1] in (["register"], ["unregister"]):
+        from . import register
+
+        fn = register.register if args[0] == "register" else register.unregister
+        print("\n".join(fn(dry_run="--dry-run" in args[1:])))
+        return 0
     if args[:1] in ([], ["serve"]):
         return serve()
-    print("用法：lrmcp [serve] | doctor | --version", file=sys.stderr)
+    print("用法：lrmcp [serve] | doctor | register [--dry-run] | unregister [--dry-run] | --version", file=sys.stderr)
     return 2
 
 
