@@ -36,6 +36,7 @@ def out(text: str, stream=None) -> None:
 
 def serve() -> int:
     from .tools import build_server
+    from .update import UpdateChecker
 
     _setup_logging()
     log = logging.getLogger("lrmcp")
@@ -47,8 +48,10 @@ def serve() -> int:
     except BridgeBusy as e:
         bridge, busy = None, str(e)
         log.warning("%s", busy)
+    updates = UpdateChecker()
+    updates.start_in_background()
     try:
-        build_server(bridge, busy).run()  # stdio
+        build_server(bridge, busy, updates).run()  # stdio
     finally:
         if bridge is not None:
             bridge.stop()

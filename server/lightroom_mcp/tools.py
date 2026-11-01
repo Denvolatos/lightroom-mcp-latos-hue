@@ -13,6 +13,7 @@ from mcp.types import ToolAnnotations
 from . import __version__, config, previews
 from .bridge import Bridge
 from .edits import EditService, describe_limits
+from .update import UpdateChecker
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 # Changes are reversible (the old values are saved) and writing the same values twice changes nothing more.
@@ -63,7 +64,7 @@ def _check_photo(photo: str) -> str:
     return photo
 
 
-def build_server(bridge: Bridge | None, busy_message: str | None = None) -> MCPServer:
+def build_server(bridge: Bridge | None, busy_message: str | None = None, updates: UpdateChecker | None = None) -> MCPServer:
     """Create the MCP server. ``bridge`` is None when the port was busy; tools then explain why."""
     mcp = MCPServer("lightroom_mcp", instructions=INSTRUCTIONS, version=__version__)
 
@@ -77,6 +78,9 @@ def build_server(bridge: Bridge | None, busy_message: str | None = None) -> MCPS
     def lr_status() -> str:
         """检查 Lightroom 是否连上，返回 Lightroom 版本、当前目录、插件版本和选中照片数量。"""
         info: dict = {"server_version": __version__}
+        notice = updates.notice() if updates else None
+        if notice:
+            info["update_available"] = notice
         if bridge is None:
             info.update(connected=False, message=busy_message)
         elif not bridge.connected and not bridge.wait_connected(bridge.connect_wait):
