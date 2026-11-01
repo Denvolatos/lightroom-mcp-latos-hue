@@ -13,6 +13,7 @@ LOG_FILE = DATA_DIR / "server.log"
 
 POLL_HOLD_SECONDS = 10.0        # how long /poll waits for a job before answering "none"
 PLUGIN_SEEN_SECONDS = 25.0      # plug-in counts as connected if it polled within this time
+CONNECT_WAIT_SECONDS = 6.0      # a call waits this long for a plug-in that is still (re)connecting
 PREVIEW_MAX_AGE_SECONDS = 24 * 3600
 PREVIEW_MIN_EDGE = 256
 PREVIEW_MAX_EDGE = 2048

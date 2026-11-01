@@ -70,11 +70,18 @@ class _Server(ThreadingHTTPServer):
 
 
 class Bridge:
-    def __init__(self, port: int = config.PORT, data_dir: Path = config.DATA_DIR, poll_hold: float = config.POLL_HOLD_SECONDS):
+    def __init__(
+        self,
+        port: int = config.PORT,
+        data_dir: Path = config.DATA_DIR,
+        poll_hold: float = config.POLL_HOLD_SECONDS,
+        connect_wait: float = config.CONNECT_WAIT_SECONDS,
+    ):
         self.port = port
         self.data_dir = data_dir
         self.token_file = data_dir / "token"
         self.poll_hold = poll_hold
+        self.connect_wait = connect_wait
         self.token = secrets.token_urlsafe(32)
         self._jobs: "queue.Queue[tuple[int, str]]" = queue.Queue()
         self._events: dict[int, threading.Event] = {}
@@ -129,7 +136,7 @@ class Bridge:
     # ---- calling the plug-in ---------------------------------------
     def call(self, command: str, params: dict | None = None, timeout: float = 30.0) -> dict:
         """Send a whitelisted command to the plug-in and return its decoded JSON ``data``."""
-        if not self.connected:
+        if not self.connected and not self.wait_connected(self.connect_wait):
             raise PluginNotConnected(
                 "Lightroom 插件没有连上。请确认 Lightroom 已打开、已安装 LrMCP 插件；运行 lr_doctor 可查看原因。"
             )

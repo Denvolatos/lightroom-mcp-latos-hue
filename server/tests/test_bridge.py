@@ -18,7 +18,7 @@ def free_port() -> int:
 
 @pytest.fixture
 def bridge(tmp_path):
-    b = Bridge(port=free_port(), data_dir=tmp_path, poll_hold=0.3)
+    b = Bridge(port=free_port(), data_dir=tmp_path, poll_hold=0.3, connect_wait=0)
     b.start()
     yield b
     b.stop()
@@ -110,6 +110,24 @@ def test_round_trip(bridge):
         assert data == {"cmd": "get_preview", "params": {"photo": "selected", "long_edge": "1024"}}
     finally:
         stop.set()
+
+
+def test_call_waits_for_a_plugin_that_is_still_connecting(tmp_path):
+    b = Bridge(port=free_port(), data_dir=tmp_path, poll_hold=0.3, connect_wait=3)
+    b.start()
+    try:
+        started = []
+
+        def late():
+            time.sleep(0.5)
+            started.append(fake_plugin(b, lambda cmd, params: {"ok": True, "data": {"cmd": cmd}}))
+
+        threading.Thread(target=late, daemon=True).start()
+        assert b.call("status", timeout=5) == {"cmd": "status"}
+        for stop in started:
+            stop.set()
+    finally:
+        b.stop()
 
 
 def test_plugin_error_becomes_bridge_error(bridge):

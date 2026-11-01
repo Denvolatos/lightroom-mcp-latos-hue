@@ -63,7 +63,7 @@ def build_server(bridge: Bridge | None, busy_message: str | None = None) -> MCPS
         info: dict = {"server_version": __version__}
         if bridge is None:
             info.update(connected=False, message=busy_message)
-        elif not bridge.connected:
+        elif not bridge.connected and not bridge.wait_connected(bridge.connect_wait):
             info.update(
                 connected=False,
                 message="Lightroom 插件没有连上：请确认 Lightroom 已打开并安装了 LrMCP 插件，运行 lr_doctor 查看原因。",
