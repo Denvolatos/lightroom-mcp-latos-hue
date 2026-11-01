@@ -1,0 +1,14 @@
+﻿Lightroom MCP (LrMCP) is installed.
+
+What happens next / 接下来：
+1. Restart Lightroom Classic (or open File > Plug-in Manager, select LrMCP and click Reload).
+   重启 Lightroom Classic，或在 文件 > 增效工具管理器 里选中 LrMCP 后点“重新载入增效工具”。
+2. Restart Claude Code / Codex so they pick up the new server "lightroom_mcp".
+   重启 Claude Code / Codex，让它们加载新的服务 lightroom_mcp。
+3. Ask Claude to run lr_status, or run lr_doctor if something does not work.
+   让 Claude 调用 lr_status；有问题就调用 lr_doctor。
+
+This version only looks at photos. It cannot change them.
+这个版本只看不改，不会修改你的任何照片。
+
+Not an Adobe product. 非 Adobe 官方软件。
