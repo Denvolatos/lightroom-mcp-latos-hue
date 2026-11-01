@@ -12,7 +12,6 @@ from pathlib import Path
 
 DIR = Path.home() / "LrMcp"
 SCRIPTS = Path(__file__).resolve().parent.parent / "plugin" / "lrmcp.lrdevplugin" / "devscripts"
-URL = "http://127.0.0.1:58770"
 
 
 def main() -> int:
@@ -24,9 +23,10 @@ def main() -> int:
     if not re.fullmatch(r"[A-Za-z0-9_\-]+\.lua", name) or not (SCRIPTS / name).is_file():
         print(f"script must be a plain file name that exists in {SCRIPTS}")
         return 2
-    token = (DIR / "token").read_text(encoding="ascii").strip()
+    info = dict(line.split("=", 1) for line in (DIR / "dev_server.txt").read_text(encoding="ascii").split() if "=" in line)
+    token, url = info["token"], f"http://127.0.0.1:{info['port']}"
     req = urllib.request.Request(
-        f"{URL}/submit?t={timeout}",
+        f"{url}/submit?t={timeout}",
         data=name.encode("utf-8"),
         method="POST",
         headers={"Authorization": f"Bearer {token}", "Content-Type": "text/plain"},

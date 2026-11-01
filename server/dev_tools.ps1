@@ -5,8 +5,12 @@
 # port 58770. This refuses to run while another program holds the port, and it only deletes the token / dev_enabled
 # files if THIS function started the dev bridge (an earlier version of this helper deleted a live server's token file).
 
-function Get-PortOwner {
-    $c = Get-NetTCPConnection -LocalPort 58770 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+function Get-DevBridge {
+    # the dev bridge announces itself in ~/LrMcp/dev_server.txt; a real lrmcp server on another port does not matter
+    $f = "$env:USERPROFILE\LrMcp\dev_server.txt"
+    if (-not (Test-Path $f)) { return $null }
+    $port = ((Get-Content $f) | Where-Object { $_ -like "port=*" }) -replace "port=", ""
+    $c = Get-NetTCPConnection -LocalPort ([int]$port) -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $c) { return $null }
     return Get-CimInstance Win32_Process -Filter "ProcessId=$($c.OwningProcess)"
 }
@@ -14,14 +18,14 @@ function Get-PortOwner {
 function Invoke-DevScript {
     param([Parameter(Mandatory)][string]$Script, [int]$Timeout = 120)
     $repo = Split-Path $PSScriptRoot -Parent
-    $owner = Get-PortOwner
-    if ($owner) {
-        throw "Port 58770 is in use by $($owner.Name) (PID $($owner.ProcessId)): $($owner.CommandLine). Close that session first; nothing was changed."
+    $existing = Get-DevBridge
+    if ($existing) {
+        throw "A dev bridge is already running (PID $($existing.ProcessId)). Stop it first; nothing was changed."
     }
     $dev = Start-Process -FilePath python -ArgumentList "-I", "$repo\server\dev_bridge.py" -WindowStyle Hidden -PassThru
     try {
         Start-Sleep -Seconds 2
-        $mine = Get-PortOwner
+        $mine = Get-DevBridge
         if (-not $mine -or $mine.CommandLine -notmatch "dev_bridge") { throw "the dev bridge did not start" }
         $result = ""
         for ($i = 0; $i -lt 12; $i++) {
@@ -32,10 +36,15 @@ function Invoke-DevScript {
         return $result
     }
     finally {
-        # we own these files only because we started the dev bridge above
+        # we own these files only because we started the dev bridge above; a real server's files are not touched
         Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -match "dev_bridge" } |
             ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
         Start-Sleep -Seconds 1
-        Remove-Item "$env:USERPROFILE\LrMcp\dev_enabled", "$env:USERPROFILE\LrMcp\token" -ErrorAction SilentlyContinue
+        $port = $null
+        if (Test-Path "$env:USERPROFILE\LrMcp\dev_server.txt") {
+            $port = ((Get-Content "$env:USERPROFILE\LrMcp\dev_server.txt") | Where-Object { $_ -like "port=*" }) -replace "port=", ""
+        }
+        Remove-Item "$env:USERPROFILE\LrMcp\dev_enabled", "$env:USERPROFILE\LrMcp\dev_server.txt" -ErrorAction SilentlyContinue
+        if ($port) { Remove-Item "$env:USERPROFILE\LrMcp\servers\$port.txt" -ErrorAction SilentlyContinue }
     }
 }

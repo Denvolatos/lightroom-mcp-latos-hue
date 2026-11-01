@@ -13,6 +13,7 @@ import itertools
 import os
 import queue
 import secrets
+import socket
 import sys
 import threading
 import time
@@ -21,7 +22,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 HOST = "127.0.0.1"
-PORT = 58770
+PORTS = range(58770, 58790)   # same range as the real server; the first free port is used
+PORT = PORTS[0]              # set in main()
 LIFETIME = 6 * 3600
 POLL_HOLD = 10
 # Not under AppData: Claude Desktop is an MSIX app and redirects the AppData of its child processes.
@@ -40,6 +42,18 @@ def write_atomic(path: Path, text: str) -> None:
     tmp = path.with_suffix(".tmp")
     tmp.write_text(text, encoding="ascii")
     os.replace(tmp, path)
+
+
+class ExclusiveServer(ThreadingHTTPServer):
+    """No SO_REUSEADDR on Windows: two programs must never share a port."""
+
+    allow_reuse_address = False
+    daemon_threads = True
+
+    def server_bind(self):
+        if os.name == "nt":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -131,20 +145,31 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> int:
     DIR.mkdir(parents=True, exist_ok=True)
     (DIR / "scripts").mkdir(exist_ok=True)
-    try:
-        server = ThreadingHTTPServer((HOST, PORT), Handler)
-    except OSError as e:
-        print(f"cannot bind {HOST}:{PORT}: {e}", file=sys.stderr)
+    global PORT
+    (DIR / "servers").mkdir(exist_ok=True)
+    server = None
+    for candidate in PORTS:
+        try:
+            server = ExclusiveServer((HOST, candidate), Handler)
+            PORT = candidate
+            break
+        except OSError:
+            continue
+    if server is None:
+        print(f"no free port in {PORTS[0]}-{PORTS[-1]}", file=sys.stderr)
         return 1
-    server.daemon_threads = True
-    write_atomic(DIR / "token", TOKEN)
+    # announce ourselves like a real server does, so the plug-in polls us; dev_run.py reads dev_server.txt
+    info = f"port={PORT}\ntoken={TOKEN}\npid={os.getpid()}\nversion=dev\n"
+    announce = DIR / "servers" / f"{PORT}.txt"
+    write_atomic(announce, info)
+    write_atomic(DIR / "dev_server.txt", info)
     write_atomic(DIR / "dev_enabled", "1")
     threading.Timer(LIFETIME, server.shutdown).start()
     try:
         server.serve_forever()
     finally:
-        for name in ("token", "dev_enabled"):
-            (DIR / name).unlink(missing_ok=True)
+        for path in (announce, DIR / "dev_server.txt", DIR / "dev_enabled"):
+            path.unlink(missing_ok=True)
         server.server_close()
     return 0
 
