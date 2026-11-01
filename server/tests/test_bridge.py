@@ -85,6 +85,13 @@ def test_port_can_be_reused_right_after_stop(tmp_path):
     second.stop()
 
 
+def test_deleted_token_file_is_written_back(bridge, tmp_path):
+    token_file = tmp_path / "token"
+    token_file.unlink()
+    assert request(bridge, "GET", "/poll", headers={"X-Gen": "1"})[1] == "none"
+    assert token_file.read_text() == bridge.token  # same token, so the running plug-in keeps working
+
+
 def test_wrong_token_is_401(bridge):
     assert request(bridge, "GET", "/poll", token="nope")[0] == 401
 

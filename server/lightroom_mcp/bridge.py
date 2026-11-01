@@ -163,7 +163,18 @@ class Bridge:
         return reply.get("data", {})
 
     # ---- used by the HTTP handler ----------------------------------
+    def _heal_token_file(self) -> None:
+        """If something deleted the token file while we are running, write it back (the plug-in re-reads it
+        after a reload; without it Lightroom could not reconnect until this server restarts)."""
+        if not self.token_file.exists():
+            try:
+                _write_atomic(self.token_file, self.token)
+                restrict_to_current_user(self.token_file)
+            except OSError:
+                pass
+
     def _next_job(self, gen: float) -> str:
+        self._heal_token_file()
         with self._lock:
             self.last_seen = time.time()
             if gen < self._latest_gen:
