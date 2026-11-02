@@ -28,6 +28,22 @@ Versions: a new feature raises the middle number, a small fix the last one. The 
   to the start, the preview is pixel-identical).
 - Not included: white balance (RAW values only appear after an edit; needs more measuring), tone curve, masks, crop.
 
+## 0.11.2 — fixes from a contributor (pull request #1 by Galio1991)
+
+- A write that Lightroom applied but whose reply timed out is no longer recorded as "failed": the record is kept as
+  "uncertain" with the old values (or the whole saved state for presets, and the keyword changes for catalog
+  information), so `lr_restore` can still undo it.
+- `lr_restore_original` now uses the first saved value of a setting even when an earlier change of that setting was restored
+  on its own.
+- A batch plan re-reads every photo just before writing and stops for a photo that was changed after the dry run.
+- The announcement and token files are now given "modify" rights for the current user (still only that user), so the
+  server can remove them again, for example after the data folder was moved.
+- Test scripts: the write acceptance script no longer deletes a read-only switch file that was already there; the read
+  acceptance script accepts JPEGs without exposure data; the smoke test prints the doctor report safely on GBK consoles.
+- Checked before merging: the 141 unit tests, the write, catalog-information, batch and read acceptance runs against a real
+  Lightroom test catalog, and the read-only-switch fix. The preset acceptance run could not be completed (not verified
+  on the timed-out preset path beyond the unit tests).
+
 ## 0.11.1 — bilingual tool descriptions
 
 - The description of every one of the 14 tools (and the server instructions) is now English first, Chinese second. English is

@@ -16,5 +16,5 @@ return {
 	},
 
 	-- Keep in sync with Version.lua
-	VERSION = { major = 0, minor = 11, revision = 1, build = "dev" },
+	VERSION = { major = 0, minor = 11, revision = 2, build = "dev" },
 }

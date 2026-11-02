@@ -22,7 +22,7 @@ A small tool that lets an AI "see" and gently adjust the photo a user selected i
 - **Lightroom plug-in** (Lua): runs inside Lightroom and only executes a fixed whitelist of commands.
 - **MCP server** (Python, command `lrmcp`): talks to the AI client over stdio and to the plug-in over `127.0.0.1`.
 
-Current version **0.11.1**. What it can do:
+Current version **0.11.2**. What it can do:
 
 - **Look:** read photo information and develop settings, render a preview image with histogram numbers, read catalog information.
 - **Change develop settings** (`lr_set_develop`): 89 whitelisted sliders (basic tone, HSL, colour grading, camera calibration, parametric
@@ -63,7 +63,7 @@ pip install "https://github.com/Denvolatos/lightroom-mcp-win/archive/refs/heads/
 lrmcp --version
 ```
 
-Expected output like `lightroom_mcp 0.11.1` (the number may be newer). If `lrmcp` is not found, Python's Scripts folder is not on
+Expected output like `lightroom_mcp 0.11.2` (the number may be newer). If `lrmcp` is not found, Python's Scripts folder is not on
 PATH: find it with `python -m pip show -f lightroom-mcp`, or always use `python -m lightroom_mcp` instead of `lrmcp` and write the
 **absolute path** of Python when registering.
 
