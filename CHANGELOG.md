@@ -28,6 +28,15 @@ Versions: a new feature raises the middle number, a small fix the last one. The 
   to the start, the preview is pixel-identical).
 - Not included: white balance (RAW values only appear after an edit; needs more measuring), tone curve, masks, crop.
 
+## 0.7.0 — detail and effects
+
+- 22 more sliders in `lr_set_develop` (84 in total): sharpening (amount, radius, detail, masking), noise reduction (luminance
+  and colour, with their detail / contrast / smoothness), post-crop vignette (amount, midpoint, feather, roundness,
+  highlight contrast), lens vignette (amount, midpoint), grain (amount, size, roughness), defringe (purple, green).
+- Measured (experiment 8): Lightroom stores out-of-range values unchecked for all of these, so the ranges are checked by
+  the server and the plug-in. The vignette "style" option is not included.
+- Real-Lightroom acceptance run on a RAW and a JPEG of the test catalog: all checks pass, everything restored.
+
 ## 0.6.0 — colour grading, calibration, tone curves
 
 - `lr_set_develop` can now change 25 more sliders: colour grading (shadows / midtones / highlights / global hue,
