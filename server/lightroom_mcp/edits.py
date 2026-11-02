@@ -177,6 +177,42 @@ def describe_limits() -> str:
     return "\n".join(lines)
 
 
+def describe_limits_en() -> str:
+    """The same table as describe_limits(), in English (for the tool description)."""
+    lines = ["Exposure2012: -5 to +5, at most +-1.0 per call"]
+    lines.append("White balance (RAW photos only, JPEGs have no kelvin value): Temperature 2000 to 50000 K (higher = warmer picture), "
+                 "at most +-1000 per call; Tint -150 to +150 (negative = greener, positive = more magenta), at most +-30 per call")
+    lines.append("Contrast2012, Highlights2012, Shadows2012, Whites2012, Blacks2012, Texture, Clarity2012, Dehaze, Vibrance, Saturation: "
+                 "-100 to +100, at most +-30 per call")
+    lines.append("Colour grading (raise the matching saturation above 0 or the hue is not visible): hue SplitToningShadowHue / "
+                 "SplitToningHighlightHue / ColorGradeMidtoneHue / ColorGradeGlobalHue 0 to 360 (cyclic, no step limit); saturation "
+                 "SplitToningShadowSaturation / SplitToningHighlightSaturation / ColorGradeMidtoneSat / ColorGradeGlobalSat 0 to 100; "
+                 "luminance ColorGradeShadowLum / ColorGradeHighlightLum / ColorGradeMidtoneLum / ColorGradeGlobalLum -100 to 100; "
+                 "SplitToningBalance -100 to 100; ColorGradeBlending 0 to 100. At most +-30 per call (except hue)")
+    lines.append("Camera calibration: ShadowTint, RedHue, RedSaturation, GreenHue, GreenSaturation, BlueHue, BlueSaturation: "
+                 "-100 to +100, at most +-30 per call")
+    lines.append("Sharpening: Sharpness 0 to 150 (at most +-40), SharpenRadius 0.5 to 3 (at most +-1), SharpenDetail and "
+                 "SharpenEdgeMasking 0 to 100 (+-30)")
+    lines.append("Noise reduction: LuminanceSmoothing, LuminanceNoiseReductionDetail, LuminanceNoiseReductionContrast, ColorNoiseReduction, "
+                 "ColorNoiseReductionDetail, ColorNoiseReductionSmoothness: 0 to 100, at most +-30 per call")
+    lines.append("Effects: PostCropVignetteAmount (negative = darker, positive = lighter) and PostCropVignetteRoundness -100 to 100; "
+                 "PostCropVignetteMidpoint / Feather / HighlightContrast 0 to 100; GrainAmount / GrainSize / GrainFrequency 0 to 100; "
+                 "lens vignette VignetteAmount -100 to 100, VignetteMidpoint 0 to 100; defringe DefringePurpleAmount / DefringeGreenAmount "
+                 "0 to 20 (at most +-10). +-30 per call unless stated")
+    lines.append("Crop: CropLeft / CropTop / CropRight / CropBottom are the edge positions as fractions of the whole image (0 = left/top edge, "
+                 "1 = right/bottom edge; uncropped is 0, 0, 1, 1). Each 0 to 1, an edge moves at most 0.3 per call; at least 10% of the width "
+                 "and of the height must stay, with left < right and top < bottom. CropAngle is the straighten angle, -45 to 45, at most +-10 "
+                 "per call (check with lr_get_preview which way it turns). lr_get_preview shows the cropped picture; to undo, use "
+                 "lr_restore_original or write the edges back as 0, 0, 1, 1")
+    lines.append("Parametric tone curve: ParametricShadows, ParametricDarks, ParametricLights, ParametricHighlights: -100 to +100, at most +-30 per call")
+    lines.append("Point tone curve: ToneCurvePV2012 (luminance) and ToneCurvePV2012Red / Green / Blue; the value is a list of points, e.g. "
+                 "[[0,0],[64,56],[192,200],[255,255]]: x = input level, y = output level (0 to 255), 2 to 16 points, the first point has x=0 and "
+                 "the last x=255, x increasing, y never going back down, every point at most 90 away from the straight line y=x")
+    lines.append("HSL (HueAdjustment / SaturationAdjustment / LuminanceAdjustment + Red, Orange, Yellow, Green, Aqua, Blue, Purple, Magenta): "
+                 "-100 to +100, at most +-30 per call")
+    return "\n".join(lines)
+
+
 def validate_curve(key: str, value: object) -> list[float]:
     """A point curve as [[x, y], ...] (or a flat list). Returns the flat list [x1, y1, x2, y2, ...]."""
     flat: list[float] = []

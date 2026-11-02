@@ -378,6 +378,10 @@ def test_tools_are_registered_with_the_right_hints():
         "lr_set_develop": False, "lr_restore": False, "lr_restore_original": False, "lr_list_edits": True,
         "lr_list_presets": True, "lr_apply_preset": False, "lr_batch_set_develop": False, "lr_get_metadata": True, "lr_set_metadata": False,
     }
+    for tool in tools:   # every description is English first and also has the Chinese text
+        text = tool.description or ""
+        assert text[:1].isascii() and text[:1].isalpha(), tool.name
+        assert any("一" <= c <= "鿿" for c in text), tool.name
     set_tool = next(t for t in tools if t.name == "lr_set_develop")
     assert "Exposure2012" in set_tool.description and "单次最多改" in set_tool.description
     assert json.dumps(set_tool.input_schema)  # the schema can be serialised
