@@ -96,6 +96,17 @@ LIMITS.update({
     "DefringeGreenAmount": (0.0, 20.0, 10.0),
 })
 
+# batch 3 (experiment 9): crop edges as fractions of the image, straighten angle in degrees
+LIMITS.update({
+    "CropLeft": (0.0, 1.0, 0.3),
+    "CropTop": (0.0, 1.0, 0.3),
+    "CropRight": (0.0, 1.0, 0.3),
+    "CropBottom": (0.0, 1.0, 0.3),
+    "CropAngle": (-45.0, 45.0, 10.0),
+})
+CROP_KEYS = ("CropLeft", "CropTop", "CropRight", "CropBottom")
+MIN_CROP_SIZE = 0.1  # the crop must keep at least 10% of the width and of the height
+
 # Point curves (flat list x1, y1, x2, y2, ...; 0..255). Not in LIMITS: they are lists, not numbers.
 CURVE_KEYS = ("ToneCurvePV2012", "ToneCurvePV2012Red", "ToneCurvePV2012Green", "ToneCurvePV2012Blue")
 MAX_CURVE_POINTS = 16
@@ -142,6 +153,10 @@ def describe_limits() -> str:
                  "PostCropVignetteMidpoint / Feather / HighlightContrast 0 到 100；GrainAmount 颗粒数量、GrainSize 大小、GrainFrequency 粗糙度 0 到 100；"
                  "镜头暗角 VignetteAmount -100 到 100、VignetteMidpoint 0 到 100；去边 DefringePurpleAmount / DefringeGreenAmount 0 到 20（单次最多 ±10）。"
                  "以上除特别说明外单次最多改 ±30")
+    lines.append("裁剪：CropLeft / CropTop / CropRight / CropBottom 是四条边的位置，用占整张图的比例表示（0 是左/上边，1 是右/下边；"
+                 "不裁剪时是 0, 0, 1, 1）。每个 0 到 1，单次最多移 0.3；宽和高至少保留 10%，且左 < 右、上 < 下。"
+                 "CropAngle 是拉直角度，-45 到 45，单次最多 ±10（正负两个方向，改完用 lr_get_preview 确认转的方向对不对）。"
+                 "裁剪后 lr_get_preview 看到的就是裁剪后的画面；恢复原图用 lr_restore_original 或把四条边写回 0, 0, 1, 1。")
     lines.append("色调曲线·参数：ParametricShadows, ParametricDarks, ParametricLights, ParametricHighlights：-100 到 +100，单次最多改 ±30")
     lines.append("色调曲线·点：ToneCurvePV2012（亮度）、ToneCurvePV2012Red / Green / Blue（三个通道），值是点的列表，"
                  "例如 [[0,0],[64,56],[192,200],[255,255]]：x 是原亮度、y 是调整后的亮度（0 到 255），2 到 16 个点，"
@@ -201,6 +216,20 @@ def validate_changes(changes: object) -> dict[str, object]:
             raise EditError(f"{key} 的取值范围是 {low:g} 到 {high:g}，你给的是 {value:g}。")
         clean[key] = float(value)
     return clean
+
+
+def check_crop(wanted: dict, settings: dict) -> None:
+    """The four crop edges together must make a sensible rectangle. ``settings`` are the current values."""
+    if not any(k in wanted for k in CROP_KEYS):
+        return
+    now = {k: wanted.get(k, settings.get(k)) for k in CROP_KEYS}
+    if not all(isinstance(v, (int, float)) for v in now.values()):
+        raise EditError("读不到这张照片当前的裁剪值，已取消修改。")
+    if now["CropRight"] - now["CropLeft"] < MIN_CROP_SIZE or now["CropBottom"] - now["CropTop"] < MIN_CROP_SIZE:
+        raise EditError(
+            f"裁剪后的宽和高都必须至少保留原图的 {MIN_CROP_SIZE:.0%}，并且 CropLeft < CropRight、CropTop < CropBottom。"
+            f"改完会是：左 {now['CropLeft']:g} 右 {now['CropRight']:g} 上 {now['CropTop']:g} 下 {now['CropBottom']:g}。"
+        )
 
 
 def fmt(value) -> str:
@@ -333,6 +362,7 @@ class EditService:
         wanted = validate_changes(changes)
         photo_id, develop = self._resolve_photo(photo)
         before_pre = current_values(develop, wanted)
+        check_crop(wanted, develop.get("settings", {}))
 
         record = {
             "edit_id": self.store.new_id(), "kind": "set", "status": "pending",

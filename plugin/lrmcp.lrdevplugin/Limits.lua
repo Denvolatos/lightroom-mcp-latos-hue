@@ -89,4 +89,10 @@ return {
 	VignetteMidpoint = { 0, 100, 30 },
 	DefringePurpleAmount = { 0, 20, 10 },
 	DefringeGreenAmount = { 0, 20, 10 },
+	-- batch 3: crop (fractions of the image, 0 = left/top edge, 1 = right/bottom edge) and straighten (degrees); experiment 9
+	CropLeft = { 0, 1, 0.3 },
+	CropTop = { 0, 1, 0.3 },
+	CropRight = { 0, 1, 0.3 },
+	CropBottom = { 0, 1, 0.3 },
+	CropAngle = { -45, 45, 10 },
 }

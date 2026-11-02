@@ -375,6 +375,27 @@ function M.set_develop(params)
 		end
 	end
 
+	if not restoring then
+		local cropKeys = { "CropLeft", "CropTop", "CropRight", "CropBottom" }
+		local touched = false
+		for _, k in ipairs(cropKeys) do
+			if changes[k] ~= nil then touched = true end
+		end
+		if touched then
+			local v = {}
+			for _, k in ipairs(cropKeys) do
+				v[k] = changes[k] ~= nil and changes[k] or current[k]
+				if type(v[k]) ~= "number" then
+					fail("读不到这张照片当前的裁剪值，已取消修改，照片没有改动。")
+				end
+			end
+			if v.CropRight - v.CropLeft < 0.1 - 1e-9 or v.CropBottom - v.CropTop < 0.1 - 1e-9 then
+				fail(string.format("裁剪后的宽和高都必须至少保留原图的 10%%，并且 CropLeft < CropRight、CropTop < CropBottom。改完会是：左 %g 右 %g 上 %g 下 %g。",
+					v.CropLeft, v.CropRight, v.CropTop, v.CropBottom))
+			end
+		end
+	end
+
 	local toWrite, beforeWb = changes, nil
 	if changes.Temperature ~= nil or changes.Tint ~= nil then
 		beforeWb = current.WhiteBalance
