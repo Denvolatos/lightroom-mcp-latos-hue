@@ -113,6 +113,11 @@ CURVE_KEYS = ("ToneCurvePV2012", "ToneCurvePV2012Red", "ToneCurvePV2012Green", "
 MAX_CURVE_POINTS = 16
 MAX_CURVE_DEVIATION = 90.0  # how far a point may be from the straight line (y = x) in one call
 
+MAX_BATCH_PHOTOS = 10      # photos per batch call
+PLAN_LIFETIME_SECONDS = 15 * 60
+# A batch changes sliders by the same RELATIVE amount on every photo. Composition (crop, straighten) is per photo and
+# white balance needs a readable kelvin value, so crop/angle stay out; white balance is allowed (refused per photo if unreadable).
+BATCH_FORBIDDEN = ("CropLeft", "CropTop", "CropRight", "CropBottom", "CropAngle")
 PRESET_ID = re.compile(r"^[A-Za-z0-9\-]{8,64}$")
 MAX_PRESET_ROWS_IN_REPLY = 60
 EDIT_ID = re.compile(r"^[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$")
@@ -330,6 +335,7 @@ class EditService:
         self.call = call
         self.store = store or EditStore()
         self.readonly_file = readonly_file
+        self._plans: dict[str, dict] = {}   # batch plans from a dry run; in memory only, single use
 
     # ---- guards ----------------------------------------------------
     def check_writable(self) -> None:
@@ -412,6 +418,8 @@ class EditService:
     def restore(self, edit_id: str) -> dict:
         self.check_writable()
         record = self.store.load(edit_id)
+        if record.get("kind") == "batch":
+            return self._restore_batch(record)
         if record.get("kind") != "set":
             raise EditError("这条记录本身是一次还原，不能再还原。")
         if record.get("restored_by"):
@@ -488,6 +496,118 @@ class EditService:
             "verified": bool(data.get("verified")),
             "changes": self._summary(data.get("before", {}), data.get("after", {}), earliest),
         }
+
+    # ---- batch -----------------------------------------------------
+    def _batch_photo_ids(self, photos) -> list[str]:
+        if photos in ("selected", None, ""):
+            listing = self.call("list_selected", {"limit": MAX_BATCH_PHOTOS + 1}, timeout=30)
+            ids = [p["id"] for p in listing.get("photos", [])]
+            if listing.get("count", len(ids)) > MAX_BATCH_PHOTOS:
+                raise EditError(f"选中了 {listing.get('count')} 张照片，一次批量最多 {MAX_BATCH_PHOTOS} 张。请少选几张，或分几批做。")
+        elif isinstance(photos, (list, tuple)) and all(isinstance(p, str) for p in photos):
+            ids = list(dict.fromkeys(photos))   # no duplicates, order kept
+        else:
+            raise EditError('photos 必须是 "selected"，或 lr_list_selected 返回的照片 id 列表。')
+        if not ids:
+            raise EditError("没有要处理的照片：Lightroom 里没有选中的照片。")
+        if len(ids) > MAX_BATCH_PHOTOS:
+            raise EditError(f"一次批量最多 {MAX_BATCH_PHOTOS} 张照片，你给了 {len(ids)} 张。")
+        for p in ids:
+            if p == "selected" or not re.match(r"^[A-Za-z0-9\-]{8,64}$", p):
+                raise EditError("照片 id 不合法：请用 lr_list_selected 返回的 id。")
+        return ids
+
+    def batch_plan(self, deltas: dict, photos="selected", reason: str = "") -> dict:
+        """Dry run: nothing is written. Returns what every photo would become and a single-use plan id."""
+        self.check_writable()
+        if not isinstance(deltas, dict) or not deltas:
+            raise EditError("changes 必须是非空的 {参数名: 相对改动量} 字典，例如 {\"Exposure2012\": 0.3}（每张照片在自己当前值上加这个数）。")
+        clean: dict[str, float] = {}
+        for key, value in deltas.items():
+            if key in BATCH_FORBIDDEN or key in CURVE_KEYS:
+                raise EditError(f"批量不支持“{key}”（裁剪、拉直、曲线都要一张一张看着改）。")
+            if key not in LIMITS:
+                raise EditError(f"不允许修改“{key}”。可用的参数见 lr_set_develop 的说明。")
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise EditError(f"{key} 的改动量必须是有限的数字，你给的是 {value!r}。")
+            step = LIMITS[key][2]
+            if abs(value) > step + 1e-9:
+                raise EditError(f"{key} 单次最多改 ±{step:g}，你给的是 {value:g}。请分几次改。")
+            clean[key] = float(value)
+        ids = self._batch_photo_ids(photos)
+        rows, items = [], []
+        for pid in ids:
+            develop = self.call("get_develop", {"photo": pid}, timeout=30)
+            name = develop["photo"].get("name")
+            try:
+                before = current_values(develop, clean)
+                targets = {k: before[k] + clean[k] for k in clean}
+                validate_changes(targets)
+            except EditError as e:
+                rows.append({"photo": name, "photo_id": pid, "will_change": False, "reason_skipped": str(e)})
+                continue
+            rows.append({"photo": name, "photo_id": pid, "will_change": True,
+                         "changes": [{"parameter": k, "before": before[k], "after": targets[k]} for k in clean]})
+            items.append((pid, name, targets))
+        plan_id = secrets.token_hex(6)
+        now = time.time()
+        for old in [k for k, v in self._plans.items() if v["expires"] < now]:
+            del self._plans[old]
+        if items:
+            self._plans[plan_id] = {"items": items, "deltas": clean, "reason": str(reason)[:500], "expires": now + PLAN_LIFETIME_SECONDS}
+        return {
+            "dry_run": True, "nothing_was_changed": True,
+            "plan_id": plan_id if items else None,
+            "photos": rows, "will_change": len(items), "skipped": len(rows) - len(items),
+            "next": ("把上面每张照片的结果用大白话讲给用户，得到同意后再调用 lr_batch_set_develop(dry_run=false, plan_id=\"" + plan_id + "\")。"
+                     f"这个计划 {PLAN_LIFETIME_SECONDS // 60} 分钟内有效，只能用一次。") if items else "没有任何照片可以改，不需要执行。",
+        }
+
+    def batch_apply(self, plan_id: str, reason: str = "") -> dict:
+        self.check_writable()
+        plan = self._plans.pop(str(plan_id), None)
+        if plan is None or plan["expires"] < time.time():
+            raise EditError("找不到这个计划，或者它已经用过 / 过期了。请先用 dry_run=true 重新预演一次。")
+        results, members = [], []
+        stopped = None
+        for pid, name, targets in plan["items"]:
+            try:
+                done = self.set_develop(targets, reason=reason or plan["reason"], photo=pid)
+                members.append(done["edit_id"])
+                results.append({"photo": name, "edit_id": done["edit_id"], "verified": done["verified"]})
+            except Exception as e:  # noqa: BLE001 - stop at the first problem, what is done can be restored
+                results.append({"photo": name, "error": str(e)})
+                stopped = name
+                break
+        batch_id = self.store.new_id()
+        self.store.save({
+            "edit_id": batch_id, "kind": "batch", "status": "applied" if stopped is None else "partial",
+            "created": time.strftime("%Y-%m-%d %H:%M:%S"), "created_ns": _now_ns(),
+            "photo_id": "", "photo_name": f"批量 {len(members)} 张", "reason": plan["reason"],
+            "requested": plan["deltas"], "members": members,
+        })
+        not_done = len(plan["items"]) - len(results)   # photos after the one that failed
+        return {
+            "batch_id": batch_id, "changed": len(members), "results": results,
+            "stopped_early_at": stopped, "not_done": not_done if stopped else 0,
+            "undo": f"lr_restore(edit_id=\"{batch_id}\") 一次还原这批里全部照片；也可以用其中某张的 edit_id 单独还原。",
+        }
+
+    def _restore_batch(self, record: dict) -> dict:
+        if record.get("restored_by"):
+            return {"edit_id": record["edit_id"], "note": "这批修改已经还原过了，没有再做任何事。"}
+        restored, problems = [], []
+        for member in record.get("members", []):
+            try:
+                result = self.restore(member)
+                restored.append({"edit_id": member, "photo": result.get("photo"), "note": result.get("note"), "verified": result.get("verified")})
+            except Exception as e:  # noqa: BLE001
+                problems.append({"edit_id": member, "error": str(e)})
+        if not problems:
+            record["restored_by"] = "restored"
+            self.store.save(record)
+        return {"batch": record["edit_id"], "restored": restored, "problems": problems,
+                "note": "有些照片没能还原，请看 problems；成功的已经还原，可以再次调用补做剩下的。" if problems else "整批已还原。"}
 
     # ---- presets ---------------------------------------------------
     def list_presets(self, query: str = "", limit: int = 30) -> dict:

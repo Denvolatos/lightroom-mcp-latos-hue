@@ -167,8 +167,26 @@ def build_server(bridge: Bridge | None, busy_message: str | None = None, updates
 
     @mcp.tool(annotations=WRITES)
     @_guard
+    def lr_batch_set_develop(changes: dict[str, float], photos: str | list[str] = "selected", reason: str = "",
+                             dry_run: bool = True, plan_id: str = "") -> str:
+        """批量修改：把同样的**相对改动量**加到多张照片的滑块上（每张加在自己当前值上），一次最多 10 张。
+        两步走：
+        1. dry_run=true（默认）：只预演，不改任何东西。changes 是相对改动量，例如 {"Exposure2012": 0.3, "Contrast2012": 10}
+           （每个参数单次最多的改动量和 lr_set_develop 一样；不支持裁剪/拉直/曲线）。photos 填 "selected"（所有选中的照片）
+           或 lr_list_selected 返回的 id 列表。返回每张照片改前→改后的数字、哪些照片会被跳过（比如 JPEG 改色温），以及 plan_id。
+        2. 把预演结果用大白话讲给用户，**用户同意后**再调用 dry_run=false 并带上 plan_id 才会真的改。计划 15 分钟内有效，只能用一次。
+        遇到第一个失败就停止，已经改的不会回滚，可以用返回的 batch_id 调用 lr_restore 一次还原整批。reason：一句话说明理由。"""
+        if dry_run:
+            return _text(edits.batch_plan(changes, photos, reason))
+        if not plan_id:
+            raise ValueError("要真正执行批量修改，需要先用 dry_run=true 预演，并带上返回的 plan_id。")
+        return _text(edits.batch_apply(plan_id, reason))
+
+    @mcp.tool(annotations=WRITES)
+    @_guard
     def lr_restore(edit_id: str) -> str:
-        """还原一次修改：把那次修改涉及的滑块写回修改前的值。edit_id 来自 lr_set_develop 的返回或 lr_list_edits。
+        """还原一次修改：把那次修改涉及的滑块写回修改前的值。edit_id 来自 lr_set_develop 的返回或 lr_list_edits；
+        批量修改的 batch_id 也可以，会一次还原整批。
         只还原那次修改碰过的滑块；如果之后又改过同一个滑块，会被写回那次修改之前的值。"""
         return _text(edits.restore(edit_id))
 
