@@ -90,7 +90,7 @@ function RESET()
   FAKE.readonly, FAKE.write_gate, FAKE.writes, FAKE.fail_read, FAKE.round_to = false, "executed", {}, nil, nil
   FAKE.values = { Exposure2012 = 0, Contrast2012 = 0, Saturation = 0, HueAdjustmentRed = 0, Sharpness = 40,
                   WhiteBalance = 'As Shot', Temperature = 5600, Tint = 13,
-                  ToneCurvePV2012 = { 0, 0, 255, 255 }, ParametricHighlights = 0, ColorGradeBlending = 50 }
+                  ToneCurvePV2012 = { 0, 0, 255, 255 }, CropLeft = 0, CropTop = 0, CropRight = 1, CropBottom = 1, CropAngle = 0, ParametricHighlights = 0, ColorGradeBlending = 50 }
 end
 RESET()
 """
@@ -136,7 +136,7 @@ def test_a_normal_change_is_written_and_reported(lr):
 
 
 def test_unknown_parameter_is_refused_before_any_write(lr):
-    for key in ("CropLeft", "ToneCurve", "CropTop"):
+    for key in ("PerspectiveVertical", "ToneCurve", "LensManualDistortionAmount"):
         reply = lr.run("set_develop", photo="selected", edit="e1", **{key: "1"})
         assert not reply["ok"] and "不允许修改" in reply["error"], key
     assert lr.writes() == 0
@@ -168,7 +168,7 @@ def test_step_limit_blocks_a_big_jump_but_not_a_restore(lr):
 def test_restore_still_obeys_whitelist_and_range(lr):
     reply = lr.run("set_develop", photo="selected", edit="e1", restore="1", Exposure2012="9")
     assert not reply["ok"] and "取值范围" in reply["error"]
-    reply = lr.run("set_develop", photo="selected", edit="e1", restore="1", CropTop="0.5")
+    reply = lr.run("set_develop", photo="selected", edit="e1", restore="1", PerspectiveVertical="5")
     assert not reply["ok"] and "不允许修改" in reply["error"]
 
 
@@ -285,3 +285,15 @@ def test_colour_grading_and_parametric_sliders_use_the_same_rules(lr):
     assert not reply["ok"] and "取值范围" in reply["error"]
     reply = lr.run("set_develop", photo="selected", edit="g3", ParametricHighlights="-80")
     assert not reply["ok"] and "单次最多改" in reply["error"]
+
+
+def test_crop_rectangle_rule_and_restore_in_the_plugin(lr):
+    reply = lr.run("set_develop", photo="selected", edit="k1", CropLeft="0.1", CropRight="0.9", CropAngle="3")
+    assert reply["ok"] and reply["data"]["verified"] is True
+    lr.set_value("CropLeft", 0.8)
+    reply = lr.run("set_develop", photo="selected", edit="k2", CropLeft="0.85")  # width would be 0.05, a small step
+    assert not reply["ok"] and "至少保留" in reply["error"]
+    reply = lr.run("set_develop", photo="selected", edit="k3", CropAngle="30")  # more than 10 degrees in one call
+    assert not reply["ok"] and "单次最多改" in reply["error"]
+    back = lr.run("set_develop", photo="selected", edit="k4", restore="1", CropLeft="0", CropRight="1", CropAngle="0")
+    assert back["ok"] and lr.values()["CropLeft"] == 0 and lr.values()["CropRight"] == 1

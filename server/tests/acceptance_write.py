@@ -100,7 +100,7 @@ def main() -> int:
         for label, params, needle in (
             ("range refused by the plug-in itself", {"Exposure2012": "9"}, "取值范围"),
             ("white balance beyond its range refused by the plug-in itself", {"Temperature": "99999"}, "取值范围"),
-            ("unknown key refused by the plug-in itself", {"CropTop": "0.1"}, "不允许修改"),
+            ("unknown key refused by the plug-in itself", {"LensManualDistortionAmount": "5"}, "不允许修改"),
         ):
             try:
                 bridge.call("set_develop", {"photo": photo_id, "edit": "acceptance", **params})
@@ -187,6 +187,31 @@ def main() -> int:
         rc = service.restore(ec["edit_id"])
         now2 = edits.current_values(bridge.call("get_develop", {"photo": photo_id}), list(wanted2))
         check("restore brings batch 2 back", rc["verified"] and all(abs(now2[k] - base[k]) < 1e-3 for k in wanted2))
+
+        # 3e. batch 3: crop and straighten
+        size_before = preview_size(bridge, photo_id)
+        ek = service.set_develop({"CropLeft": base["CropLeft"] + 0.1, "CropRight": base["CropRight"] - 0.1, "CropTop": base["CropTop"] + 0.1,
+                                  "CropBottom": base["CropBottom"] - 0.1, "CropAngle": base["CropAngle"] + 3}, reason="acceptance batch 3")
+        check("batch 3 change verified (crop + straighten)", ek["verified"] and all(r["ok"] for r in ek["changes"]),
+              str([r["parameter"] for r in ek["changes"] if not r["ok"]]))
+        listed = bridge.call("list_selected")["photos"][0]
+        check("Lightroom reports the photo as cropped", listed["is_cropped"] is True)
+        check("preview changed after the crop", preview_size(bridge, photo_id) != size_before)
+        for label, change, needle in (("a crop edge outside the image is refused", {"CropLeft": -0.1}, "取值范围"),
+                                      ("a straighten jump of 30 degrees is refused", {"CropAngle": base["CropAngle"] + 33}, "最多")):
+            try:
+                service.set_develop(change)
+                check(label, False, "no error")
+            except (EditError, BridgeError) as e:
+                check(label, needle in str(e), str(e)[:60])
+        try:
+            bridge.call("set_develop", {"photo": photo_id, "edit": "acceptance", "CropLeft": "0.85", "CropRight": "0.9"})
+            check("a crop that keeps under 10% of the width is refused by the plug-in itself", False, "no error")
+        except BridgeError as e:
+            check("a crop that keeps under 10% of the width is refused by the plug-in itself", "至少保留" in str(e) or "单次最多" in str(e), str(e)[:60])
+        rk = service.restore(ek["edit_id"])
+        listed = bridge.call("list_selected")["photos"][0]
+        check("restore brings the crop back (photo is not cropped any more)", rk["verified"] and listed["is_cropped"] is False)
 
         # 4. restore one edit: only that edit's sliders go back
         r1 = service.restore(e1["edit_id"])

@@ -101,7 +101,7 @@ def test_changes_must_be_a_non_empty_dict(bad):
 
 
 def test_unknown_and_forbidden_keys_are_refused_with_the_allowed_list():
-    for key in ("CropTop", "ToneCurve", "CropLeft", "WhiteBalance", "exposure", "../x"):
+    for key in ("PerspectiveVertical", "ToneCurve", "LensManualDistortionAmount", "WhiteBalance", "exposure", "../x"):
         with pytest.raises(EditError) as err:
             validate_changes({key: 1})
         assert "不允许修改" in str(err.value) and "Exposure2012" in str(err.value)
@@ -136,7 +136,7 @@ def test_python_and_lua_whitelists_are_identical():
         if m:
             lua[m.group(1)] = (float(m.group(2)), float(m.group(3)), float(m.group(4)))
     assert lua == edits.LIMITS
-    assert len(lua) == 84
+    assert len(lua) == 89
 
 
 # ---- set_develop -----------------------------------------------------------------------------------------------
@@ -379,3 +379,22 @@ def test_detail_and_effect_ranges():
     for bad in ({"Sharpness": 151}, {"SharpenRadius": 0.4}, {"ColorNoiseReduction": -1}, {"DefringeGreenAmount": 21}, {"VignetteAmount": 101}):
         with pytest.raises(EditError):
             validate_changes(bad)
+
+
+# ---- batch 3: crop and straighten ------------------------------------------------------------------------------
+def test_crop_ranges_and_rectangle_rule(env):
+    lr, store, service, _ = env
+    for k, v in (("CropLeft", 0.0), ("CropTop", 0.0), ("CropRight", 1.0), ("CropBottom", 1.0)):
+        lr.photos["AAAAAAAA-1111"]["values"][k] = v
+    result = service.set_develop({"CropLeft": 0.1, "CropRight": 0.9}, reason="crop in")
+    assert result["verified"]
+    with pytest.raises(EditError):
+        validate_changes({"CropLeft": -0.1})
+    with pytest.raises(EditError):
+        validate_changes({"CropAngle": 46})
+    with pytest.raises(EditError) as err:   # 0.95 leaves less than 10% of the width next to CropRight=0.9
+        service.set_develop({"CropLeft": 0.95})
+    assert "至少保留" in str(err.value)
+    service.restore(result["edit_id"])
+    values = lr.photos["AAAAAAAA-1111"]["values"]
+    assert values["CropLeft"] == 0.0 and values["CropRight"] == 1.0
