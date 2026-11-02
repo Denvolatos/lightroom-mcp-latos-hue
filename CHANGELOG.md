@@ -28,6 +28,16 @@ Versions: a new feature raises the middle number, a small fix the last one. The 
   to the start, the preview is pixel-identical).
 - Not included: white balance (RAW values only appear after an edit; needs more measuring), tone curve, masks, crop.
 
+## 0.11.1 — bilingual tool descriptions
+
+- The description of every one of the 14 tools (and the server instructions) is now English first, Chinese second. English is
+  the safest common language for Claude, Codex and other clients; the Chinese text stays for Chinese-speaking users. A test checks it.
+- The `lr_set_develop` description was out of date (it still said that curves and crop are not supported); it now lists
+  everything that can be changed and says what cannot (masks).
+- `lr_restore` / `lr_restore_original` descriptions say what they cover (catalog information is restored with `lr_restore`).
+- `AI_GUIDE.md` is now written in English (with a note to answer in the user's language and to translate the Chinese tool
+  messages); it also mentions the installer and the update notice.
+
 ## 0.11.0 — catalog information
 
 - New tools `lr_get_metadata` and `lr_set_metadata` (14 tools in total): rating (0–5), flag (pick / none / reject), colour label,
