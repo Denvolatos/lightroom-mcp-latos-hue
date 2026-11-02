@@ -25,10 +25,32 @@ function photo:getRawMetadata(key)
   if key == "fileFormat" then return "RAW" end
   if key == "dimensions" then return { width = 6000, height = 4000 } end
   if key == "isVideo" then return false end
-  if key == "pickStatus" then return 0 end
+  if key == "pickStatus" then return FAKE.meta.pick end
+  if key == "rating" then return FAKE.meta.rating end
+  if key == "colorNameForLabel" then return FAKE.meta.label end
+  if key == "keywords" then return FAKE.meta.keywords end
   return nil
 end
-function photo:getFormattedMetadata(key) return nil end
+function photo:getFormattedMetadata(key)
+  if key == "title" or key == "caption" then return FAKE.meta[key] end
+  return nil
+end
+function photo:setRawMetadata(key, value)
+  FAKE.writes[#FAKE.writes + 1] = { meta = key }
+  if key == "rating" then FAKE.meta.rating = value
+  elseif key == "pickStatus" then FAKE.meta.pick = value
+  elseif key == "colorNameForLabel" then FAKE.meta.label = value
+  elseif key == "title" or key == "caption" then FAKE.meta[key] = value
+  else error("unexpected metadata key " .. key) end
+end
+local function newKeyword(name) return { getName = function() return name end } end
+function photo:addKeyword(k)
+  for _, x in ipairs(FAKE.meta.keywords) do if x:getName() == k:getName() then return end end
+  FAKE.meta.keywords[#FAKE.meta.keywords + 1] = k
+end
+function photo:removeKeyword(k)
+  for i, x in ipairs(FAKE.meta.keywords) do if x:getName() == k:getName() then table.remove(FAKE.meta.keywords, i) return end end
+end
 function photo:getDevelopSettings()
   local copy = {}
   for k, v in pairs(FAKE.values) do copy[k] = v end
@@ -63,6 +85,7 @@ local folder = { getName = function() return "Test folder" end, getDevelopPreset
 
 local catalog = {}
 function catalog:getPath() return "C:\\test\\test.lrcat" end
+function catalog:createKeyword(name) return newKeyword(name) end
 function catalog:getTargetPhoto() return photo end
 function catalog:getTargetPhotos() return { photo } end
 function catalog:findPhotoByUuid(id) if id == FAKE.uuid then return photo end end
@@ -108,7 +131,9 @@ function SET(key, value) FAKE.values[key] = value end
 function SET_JSON(key, text) FAKE.values[key] = Json.decode(text) end
 function DECODE(text) return Json.encode(Json.decode(text)) end
 function DECODE_FAILS(text) local ok, e = pcall(Json.decode, text) return (not ok) and (type(e) == "table" and e.lrmcp or tostring(e)) or false end
+function SET_LABEL(v) FAKE.meta.label = v end
 function RESET()
+  FAKE.meta = { rating = nil, pick = 0, label = "", title = "", caption = "", keywords = { newKeyword("Torino") } }
   FAKE.readonly, FAKE.write_gate, FAKE.writes, FAKE.fail_read, FAKE.round_to = false, "executed", {}, nil, nil
   FAKE.values = { Exposure2012 = 0, Contrast2012 = 0, Saturation = 0, HueAdjustmentRed = 0, Sharpness = 40,
                   WhiteBalance = 'As Shot', Temperature = 5600, Tint = 13,
@@ -140,6 +165,9 @@ def lr():
 
         def reset(self):
             g.RESET()
+
+        def set_label(self, value):
+            g.SET_LABEL(value)
 
         def set_json(self, key, text):
             g.SET_JSON(key, text)
@@ -385,3 +413,49 @@ def test_restore_settings_writes_back_only_known_keys_of_the_same_type_and_range
     lr.set_flag("readonly", True)
     reply = lr.run("restore_settings", photo="selected", edit="r3", blob=blob({"Contrast2012": 1}))
     assert not reply["ok"] and "只读模式" in reply["error"]
+
+
+# ---- catalog information ------------------------------------------------------------------------------------------
+def q(text):
+    import urllib.parse
+    return urllib.parse.quote(text, safe="")
+
+
+def test_get_metadata_reads_catalog_information(lr):
+    reply = lr.run("get_metadata", photo="selected")
+    data = reply["data"]["metadata"]
+    assert reply["ok"] and data == {"rating": 0, "flag": "none", "color_label": "none", "title": "", "caption": "", "keywords": ["Torino"]}
+
+
+def test_set_metadata_writes_everything_and_reports_before_and_after(lr):
+    reply = lr.run("set_metadata", photo="selected", edit="m1", rating="4", flag="reject", color="Green", title=q("Tramonto \u00e0 Torino"),
+                   caption=q("a b, c"), add_kw=q("sera") + "," + q("due parole"), remove_kw=q("Torino"))
+    assert reply["ok"] and reply["data"]["verified"] is True
+    after = reply["data"]["after"]
+    assert after["rating"] == 4 and after["flag"] == "reject" and after["color_label"].lower() == "green"
+    assert after["title"] == "Tramonto \u00e0 Torino" and after["caption"] == "a b, c"
+    assert after["keywords"] == ["due parole", "sera"]
+    assert reply["data"]["before"]["keywords"] == ["Torino"]
+    back = lr.run("set_metadata", photo="selected", edit="m2", rating="0", flag="none")
+    assert back["ok"] and back["data"]["after"]["rating"] == 0 and back["data"]["after"]["flag"] == "none"
+
+
+def test_set_metadata_refuses_bad_input_without_writing(lr):
+    bad = [dict(rating="6"), dict(rating="2.5"), dict(rating="x"), dict(flag="maybe"), dict(color="pink"), dict(title="x" * 201),
+           dict(title="%0A"), dict(caption="x" * 1001), dict(add_kw=""), dict(add_kw=q("x" * 61)),
+           dict(add_kw=",".join(q(f"k{i}") for i in range(11))), dict(add_kw="%01"), dict()]
+    for params in bad:
+        reply = lr.run("set_metadata", photo="selected", edit="m1", **params)
+        assert not reply["ok"], params
+    assert lr.writes() == 0
+    for edit in ("", "a b", "../x"):
+        assert not lr.run("set_metadata", photo="selected", edit=edit, rating="3")["ok"]
+    lr.set_flag("readonly", True)
+    reply = lr.run("set_metadata", photo="selected", edit="m3", rating="3")
+    assert not reply["ok"] and "只读模式" in reply["error"]
+
+
+def test_gray_means_no_colour_label(lr):
+    lr.set_label("gray")
+    reply = lr.run("get_metadata", photo="selected")
+    assert reply["data"]["metadata"]["color_label"] == "none"

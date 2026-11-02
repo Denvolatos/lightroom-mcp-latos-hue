@@ -21,6 +21,8 @@ class FakeLightroom:
             "AAAAAAAA-1111": {"name": "one.ARW", "wb": "As Shot", "values": {**{k: 0.0 for k in edits.LIMITS}, **{c: [0.0, 0.0, 255.0, 255.0] for c in edits.CURVE_KEYS}, "Look": {"Name": "Adobe Color", "Amount": 1.0}}},
             "BBBBBBBB-2222": {"name": "two.JPG", "wb": "As Shot", "values": {**{k: 0.0 for k in edits.LIMITS}, **{c: [0.0, 0.0, 255.0, 255.0] for c in edits.CURVE_KEYS}, "Look": {"Name": "Adobe Color", "Amount": 1.0}}},
         }
+        for p in self.photos.values():
+            p["meta"] = {"rating": 0, "flag": "none", "color_label": "none", "title": "", "caption": "", "keywords": []}
         self.active = "AAAAAAAA-1111"
         self.selected = None   # list of ids; None = only the active photo
         self.write_calls = 0
@@ -49,6 +51,11 @@ class FakeLightroom:
             return {"photo": {"id": pid, "name": p["name"]}, "settings": settings, "hsl": hsl}
         if command == "set_develop":
             return self._set(params)
+        if command == "get_metadata":
+            pid, p = self._photo(params["photo"])
+            return {"photo": {"id": pid, "name": p["name"]}, "metadata": copy.deepcopy(p["meta"])}
+        if command == "set_metadata":
+            return self._set_metadata(params)
         if command == "list_presets":
             return {"total": 2, "matched": 2, "shown": 2, "presets": [
                 {"id": "PRESET-AAAA-0001", "name": "Warm look", "folder": "Test", "has_masks": False},
@@ -61,6 +68,32 @@ class FakeLightroom:
         if command == "restore_settings":
             return self._restore_settings(params)
         raise AssertionError(f"unexpected command {command}")
+
+    def _set_metadata(self, params):
+        self.write_calls += 1
+        if self.fail_next_write:
+            self.fail_next_write = False
+            raise BridgeError("Lightroom 现在不能写入")
+        pid, p = self._photo(params["photo"])
+        m = p["meta"]
+        before = copy.deepcopy(m)
+        dec = urllib.parse.unquote
+        if "rating" in params:
+            m["rating"] = int(params["rating"])
+        if "flag" in params:
+            m["flag"] = params["flag"]
+        if "color" in params:
+            m["color_label"] = params["color"]
+        for key in ("title", "caption"):
+            if key in params:
+                m[key] = dec(params[key])
+        for name in (dec(x) for x in params.get("add_kw", "").split(",") if x):
+            if name not in m["keywords"]:
+                m["keywords"].append(name)
+        for name in (dec(x) for x in params.get("remove_kw", "").split(",") if x):
+            if name in m["keywords"]:
+                m["keywords"].remove(name)
+        return {"before": before, "after": copy.deepcopy(m), "verified": True}
 
     def _apply_preset(self, params):
         self.write_calls += 1
@@ -343,7 +376,7 @@ def test_tools_are_registered_with_the_right_hints():
     assert hints == {
         "lr_status": True, "lr_list_selected": True, "lr_get_develop": True, "lr_get_preview": True, "lr_doctor": True,
         "lr_set_develop": False, "lr_restore": False, "lr_restore_original": False, "lr_list_edits": True,
-        "lr_list_presets": True, "lr_apply_preset": False, "lr_batch_set_develop": False,
+        "lr_list_presets": True, "lr_apply_preset": False, "lr_batch_set_develop": False, "lr_get_metadata": True, "lr_set_metadata": False,
     }
     set_tool = next(t for t in tools if t.name == "lr_set_develop")
     assert "Exposure2012" in set_tool.description and "单次最多改" in set_tool.description
@@ -605,3 +638,65 @@ def test_batch_respects_read_only(env):
         service.batch_plan({"Exposure2012": 0.1}, [A])
     with pytest.raises(ReadOnlyError):
         service.batch_apply("whatever")
+
+
+# ---- catalog information: rating, flag, colour label, title, caption, keywords --------------------------------------
+def test_metadata_change_is_saved_first_and_restore_brings_everything_back(env):
+    lr, store, service, _ = env
+    lr.photos[A]["meta"].update(rating=2, title="Old title", keywords=["Torino", "sera"])
+    start = copy.deepcopy(lr.photos[A]["meta"])
+    result = service.set_metadata(rating=5, flag="pick", color_label="red", title="Tramonto", caption="Superga, 18:40",
+                                  add_keywords=["tramonto", "Torino"], remove_keywords=["sera"], reason="culling")
+    assert result["verified"] and lr.photos[A]["meta"]["rating"] == 5 and lr.photos[A]["meta"]["keywords"] == ["Torino", "tramonto"]
+    record = store.load(result["edit_id"])
+    assert record["kind"] == "meta" and record["before"]["rating"] == 2
+    assert record["added_keywords"] == ["tramonto"] and record["removed_keywords"] == ["sera"]   # "Torino" was already there
+    restored = service.restore(result["edit_id"])
+    assert restored["verified"]
+    now = lr.photos[A]["meta"]
+    assert now["rating"] == 2 and now["title"] == "Old title" and now["flag"] == "none" and now["caption"] == ""
+    assert sorted(now["keywords"]) == sorted(start["keywords"])
+    assert "已经" in service.restore(result["edit_id"])["note"]
+
+
+def test_metadata_restore_only_touches_what_was_changed(env):
+    lr, store, service, _ = env
+    result = service.set_metadata(rating=4)
+    lr.photos[A]["meta"]["title"] = "typed by hand later"
+    service.restore(result["edit_id"])
+    assert lr.photos[A]["meta"]["rating"] == 0 and lr.photos[A]["meta"]["title"] == "typed by hand later"
+
+
+def test_metadata_validation(env):
+    lr, store, service, _ = env
+    bad = [dict(), dict(rating=6), dict(rating=-1), dict(rating=True), dict(rating="3"), dict(flag="maybe"), dict(color_label="pink"),
+           dict(title="x" * 201), dict(title="a\nb"), dict(caption="x" * 1001), dict(add_keywords="sunset"), dict(add_keywords=[""]),
+           dict(add_keywords=["a,b"]), dict(add_keywords=["x" * 61]), dict(add_keywords=[f"k{i}" for i in range(11)]),
+           dict(add_keywords=["a"], remove_keywords=["a"])]
+    for kwargs in bad:
+        with pytest.raises(EditError):
+            service.set_metadata(**kwargs)
+    assert lr.write_calls == 0 and not store.all()
+    service.set_metadata(title="")        # clearing is allowed
+    service.set_metadata(rating=0)
+
+
+def test_metadata_failure_is_recorded_and_readonly_blocks(env):
+    lr, store, service, tmp = env
+    lr.fail_next_write = True
+    with pytest.raises(BridgeError):
+        service.set_metadata(rating=3)
+    assert store.all()[-1]["status"] == "failed"
+    with pytest.raises(EditError):
+        service.restore(store.all()[-1]["edit_id"])
+    (tmp / "readonly").write_text("1")
+    with pytest.raises(ReadOnlyError):
+        service.set_metadata(rating=3)
+
+
+def test_metadata_edits_do_not_disturb_restore_original_of_develop_changes(env):
+    lr, store, service, _ = env
+    service.set_develop({"Exposure2012": 0.5})
+    service.set_metadata(rating=5)
+    service.restore_original()
+    assert lr.photos[A]["values"]["Exposure2012"] == 0.0 and lr.photos[A]["meta"]["rating"] == 5
