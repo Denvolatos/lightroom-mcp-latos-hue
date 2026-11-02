@@ -4,6 +4,9 @@
 #ifndef AppVer
   #define AppVer "0.0.0"
 #endif
+#ifndef DistDir
+  #define DistDir "..\build\release_dist"
+#endif
 
 [Setup]
 AppId={{7B8E2C41-5A0D-4E3B-9F6A-1D2C3E4F5A6B}
@@ -23,7 +26,7 @@ InfoAfterFile=after.txt
 
 [Files]
 ; the server (PyInstaller folder build, includes Python)
-Source: "..\build\dist\lrmcp\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#DistDir}\lrmcp\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 ; the Lightroom plug-in (staged by build.ps1 without the development helpers); {userappdata} = %APPDATA%
 Source: "..\build\stage\LrMcp.lrplugin\*"; DestDir: "{userappdata}\Adobe\Lightroom\Modules\LrMcp.lrplugin"; Flags: recursesubdirs createallsubdirs ignoreversion
 

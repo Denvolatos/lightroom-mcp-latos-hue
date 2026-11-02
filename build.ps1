@@ -27,11 +27,15 @@ if (-not $SkipTests) {
     Pop-Location
 }
 
+# The release is built in its own folder: build\dist may be the lrmcp.exe that an AI client has registered and is running
+# right now, and Windows will not let PyInstaller delete its files.
+$distRoot = Join-Path $repo "build\release_dist"
+
 Write-Host "-- lrmcp.exe"
 Push-Location (Join-Path $repo "server")
 & $py -m PyInstaller --noconfirm --clean --onedir --name lrmcp --paths "$repo\server" `
     --collect-submodules lightroom_mcp --exclude-module mcp.cli `
-    --distpath "$repo\build\dist" --workpath "$repo\build\work" --specpath "$repo\build" "$repo\server\run_lrmcp.py"
+    --distpath "$distRoot" --workpath "$repo\build\work" --specpath "$repo\build" "$repo\server\run_lrmcp.py"
 if ($LASTEXITCODE -ne 0) { Pop-Location; throw "PyInstaller failed" }
 Pop-Location
 
@@ -44,7 +48,7 @@ Get-ChildItem (Join-Path $repo "plugin\lrmcp.lrdevplugin") | Where-Object { $dev
     Copy-Item -Destination $stage -Recurse
 
 Write-Host "-- installer"
-& $iscc "/DAppVer=$version" (Join-Path $repo "installer\lrmcp.iss")
+& $iscc "/DAppVer=$version" "/DDistDir=$distRoot" (Join-Path $repo "installer\lrmcp.iss")
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
 
 $out = Get-ChildItem (Join-Path $repo "build\installer") -Filter "LrMCP-Setup-*.exe" | Sort-Object LastWriteTime | Select-Object -Last 1
