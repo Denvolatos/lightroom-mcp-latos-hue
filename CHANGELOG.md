@@ -28,6 +28,20 @@ Versions: a new feature raises the middle number, a small fix the last one. The 
   to the start, the preview is pixel-identical).
 - Not included: white balance (RAW values only appear after an edit; needs more measuring), tone curve, masks, crop.
 
+## 0.10.0 — batch changes
+
+- New tool `lr_batch_set_develop` (12 tools in total): adds the same RELATIVE change to the sliders of up to 10 photos.
+  Two steps: a dry run (default; changes nothing, returns each photo's before / after numbers, the photos that would be
+  skipped and a single-use plan id valid for 15 minutes) and the real run, which needs that plan id.
+- Each photo goes through the normal guarded single-photo write (range, step, readonly switch, old values saved first) and
+  gets its own record; one batch record ties them together and `lr_restore(batch_id)` undoes the whole batch (or one photo
+  by its own edit id). The run stops at the first failure; what was done stays and can be restored.
+- Not in a batch: crop, straighten and curves (they need a look at every photo). White balance is allowed; JPEGs are
+  skipped with the reason.
+- No plug-in change. Real-Lightroom acceptance run (`acceptance_batch.py`) on two RAW and one JPEG of the test catalog:
+  dry run changes nothing, exact relative changes, plan single use, one restore undoes everything, full settings snapshots
+  identical at the end.
+
 ## 0.9.0 — develop presets
 
 - New tools `lr_list_presets` (search the presets in Lightroom) and `lr_apply_preset` (apply one to a photo). 11 tools in total.

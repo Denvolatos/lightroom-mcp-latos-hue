@@ -4,13 +4,13 @@
 一个 Lightroom 插件加一个小型 MCP 服务：能看到你选中的照片、读取调整参数，并把预览图和直方图数字交给 AI。
 **0.2 起还能对少数滑块做受保护的小步修改，并随时还原**，其他一律不动。
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.9.0-orange)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.10.0-orange)
 
 [English](README.en.md) · [更新日志](CHANGELOG.md) · [安全说明](SECURITY.md) · [参与贡献](CONTRIBUTING.md)
 
 > 🤖 **你是 AI 助手，用户让你看这个仓库？** 请读 [`AI_GUIDE.md`](AI_GUIDE.md)，里面有完整的安装和使用步骤。
 
-> ⚠️ **早期版本（0.9.0）**：只在 Windows 11 + Lightroom Classic 15.2 上测过。安装包已发布但尚未在干净电脑上做过安装/卸载测试（待验证）。与 Adobe 无关联。
+> ⚠️ **早期版本（0.10.0）**：只在 Windows 11 + Lightroom Classic 15.2 上测过。安装包已发布但尚未在干净电脑上做过安装/卸载测试（待验证）。与 Adobe 无关联。
 
 ## ✨ 能做什么
 
@@ -24,6 +24,7 @@
 | `lr_set_develop` | **修改**一张照片的少数滑块（曝光、对比度、高光、阴影、白色、黑色、纹理、清晰度、去朦胧、自然饱和度、饱和度、HSL），有范围和单次限幅；可在改完后顺便返回预览 |
 | `lr_restore` | 把某一次修改涉及的滑块写回旧值 |
 | `lr_restore_original` | 让照片回到 LrMCP 第一次改它之前的样子（`dry_run` 只显示会做什么） |
+| `lr_batch_set_develop` | 批量：把同样的相对改动加到多张照片（一次最多 10 张）。先预演（什么都不改，返回每张的结果和计划编号），确认后才执行；可一次还原整批 |
 | `lr_list_presets` / `lr_apply_preset` | 查找开发预设，并给一张照片套用（不带蒙版的预设；套之前整张照片的设置先存盘，可完全还原） |
 | `lr_list_edits` | 列出 LrMCP 做过的修改（编号、时间、照片、滑块、是否已还原） |
 
@@ -98,7 +99,7 @@ Claude 桌面版暂不自动登记（配置文件位置取决于安装方式）�
 |---|---|
 | 0.1 | 只读：看照片、调整参数、预览、直方图数字、自检 |
 | **0.2（现在）** | 修改单张照片的全局滑块和 HSL：范围与单次限幅、改前存旧值、还原命令、只读开关 |
-| 下一步 | 批量（macOS、Photoshop、Premiere 暂停） |
+| 下一步 | 蒙版（SDK 能否做待验证）、评分/旗标/关键词（macOS、Photoshop、Premiere 暂停） |
 | 之后 | 教学模式（大白话解释、前后对比）、学习你的口味、批量/预设/挑片 |
 
 蒙版、AI 功能取决于 Adobe SDK 能提供什么，暂不承诺。

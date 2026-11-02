@@ -20,7 +20,7 @@ Details below (in Chinese, but all commands are language-neutral).
 - **Lightroom 插件**（Lua）：在 Lightroom 里运行，只执行固定的白名单命令。
 - **MCP 服务**（Python，命令 `lrmcp`）：通过 stdio 连接 AI 客户端，并在本机（`127.0.0.1`）和插件通信。
 
-当前版本 **0.9.0**：能读照片信息、读取调整参数、生成预览图并给出直方图数字；也能对**少数滑块做小步、受保护的修改**，并随时还原。
+当前版本 **0.10.0**：能读照片信息、读取调整参数、生成预览图并给出直方图数字；也能对**少数滑块做小步、受保护的修改**，并随时还原。
 可以改 RAW 照片的色温（Temperature，K）和色调（Tint）；JPEG 没有开尔文值，**不能**改白平衡。也可以改颜色分级、相机校准、参数曲线和点曲线（`ToneCurvePV2012` 及 Red/Green/Blue，值是 `[[x,y],...]`）。也可以套用不带蒙版的开发预设（可还原）。也可以改锐化、降噪、暗角、颗粒、去边，以及裁剪与拉直（`CropLeft/Top/Right/Bottom` 是占整张图的比例，不裁剪时是 0,0,1,1；`CropAngle` 是度数）。蒙版（含自适应预设）、元数据都**不能**改，也不能删除照片或导入导出。
 
 ## 2. 先确认条件（不满足就别硬装）
@@ -43,7 +43,7 @@ pip install "https://github.com/Denvolatos/lightroom-mcp-win/archive/refs/heads/
 lrmcp --version
 ```
 
-期望输出形如 `lightroom_mcp 0.9.0`（版本号可能更新）。如果提示找不到 `lrmcp`，说明 Python 的 Scripts 目录不在 PATH 里：用 `python -m pip show -f lightroom-mcp` 找到它，或者以后一律用 `python -m lightroom_mcp` 代替 `lrmcp`，并在登记时写 Python 的**绝对路径**。
+期望输出形如 `lightroom_mcp 0.10.0`（版本号可能更新）。如果提示找不到 `lrmcp`，说明 Python 的 Scripts 目录不在 PATH 里：用 `python -m pip show -f lightroom-mcp` 找到它，或者以后一律用 `python -m lightroom_mcp` 代替 `lrmcp`，并在登记时写 Python 的**绝对路径**。
 
 ### 3.2 安装 Lightroom 插件（让用户在自己的 PowerShell 里运行）
 
@@ -86,7 +86,7 @@ Get-ChildItem $dst | Select-Object Name
 3. 调用工具 **`lr_status`**：应返回 `"connected": true`、Lightroom 版本和目录名。
 4. 如果不是，调用 **`lr_doctor`**，按它给出的中文提示处理（见第 6 节）。
 
-## 4. 怎么用（11 个工具：6 个只读，5 个与修改有关）
+## 4. 怎么用（12 个工具：6 个只读，6 个与修改有关）
 
 | 工具 | 用途 |
 |---|---|
@@ -96,6 +96,7 @@ Get-ChildItem $dst | Select-Object Name
 | `lr_get_preview` | 预览图（长边 256–2048 像素，默认 1024）加直方图数字：平均亮度、过曝/欠曝比例、冷暖偏向 |
 | `lr_doctor` | 自检，用中文说明哪里有问题、怎么处理 |
 | `lr_set_develop` | **修改**一张照片的滑块：`changes` 填 `{参数名: 目标数值}`，例如 `{"Exposure2012": 0.3, "Highlights2012": -20}`；`reason` 写一句理由；`preview` 为 true 时改完顺便返回预览图。允许的参数、范围和单次最多改多少写在工具说明里 |
+| `lr_batch_set_develop` | **批量**改多张照片（一次最多 10 张），两步走：先 `dry_run=true`（默认）预演，`changes` 是**相对改动量**（每张在自己当前值上加，例如 `{"Exposure2012": 0.3}`），返回每张的改前→改后和 `plan_id`，什么都不改；把结果讲给用户，**得到同意后**再用 `dry_run=false` 加 `plan_id` 执行（15 分钟内有效，只能用一次）。不支持裁剪/拉直/曲线；遇到第一个失败就停；返回的 `batch_id` 交给 `lr_restore` 可一次还原整批 |
 | `lr_list_presets` | 列出 Lightroom 里的开发预设（`query` 填一个词搜索，一次最多 50 个）：`id`、名称、文件夹、是否带蒙版 |
 | `lr_apply_preset` | **套用**一个预设（`preset_id` 来自 `lr_list_presets`）。预设可能一次改很多地方，套之前要先告诉用户；套完用预览看效果；带蒙版/AI 的预设和已经有蒙版的照片会被拒绝；可用 `lr_restore` / `lr_restore_original` 完全还原 |
 | `lr_restore` | 还原一次修改（`edit_id` 来自 `lr_set_develop` 的返回或 `lr_list_edits`）：把那次修改碰过的滑块写回旧值 |
@@ -109,7 +110,7 @@ Get-ChildItem $dst | Select-Object Name
 
 ### 修改照片的规矩（请严格遵守）
 
-1. **只在用户明确要求时才改**，只改用户指定的那一张（默认是当前选中的）。看照片、分析问题不需要改。
+1. **只在用户明确要求时才改**，只改用户指定的那一张（默认是当前选中的）；用户明确要求处理多张时才用批量，并且一定先预演、讲给用户、得到同意再执行。看照片、分析问题不需要改。
 2. **先看再改**：改之前先 `lr_get_preview` 看现状和直方图数字；**小步**修改，每次改完用 `lr_get_preview`（或 `lr_set_develop` 的 `preview: true`）看效果，再决定下一步。系统有单次限幅，一次改太多会被拒绝，不要试图绕过，分几次改就是。
 3. **用大白话告诉用户**每一步改了什么、为什么、预期会看到什么变化；用户可能是调色新手。引用返回的数字作依据，别只报参数。
 4. **用户不满意就还原**：`lr_restore`（撤销某一次）或 `lr_restore_original`（回到最初）。还原前如果用户期间手动改过同一个滑块，要提醒他会被覆盖。

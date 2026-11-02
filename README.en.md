@@ -5,13 +5,13 @@ A Lightroom plug-in plus a small MCP server. It can see the photo you selected, 
 the assistant a preview with histogram numbers. Since 0.2 it can also **make small, guarded changes to a few sliders
 and undo them**. Everything else stays untouched.
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.9.0-orange)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.10.0-orange)
 
 [中文说明](README.md) · [Changelog](CHANGELOG.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md)
 
 > 🤖 **AI assistant reading this for a user?** Read [`AI_GUIDE.md`](AI_GUIDE.md): it has the whole install and usage procedure.
 
-> ⚠️ **Early version (0.9.0).** Tested only on Windows 11 with Lightroom Classic 15.2. An installer is published, but it has not been install/uninstall-tested on a clean machine yet (待验证).
+> ⚠️ **Early version (0.10.0).** Tested only on Windows 11 with Lightroom Classic 15.2. An installer is published, but it has not been install/uninstall-tested on a clean machine yet (待验证).
 > Not affiliated with Adobe.
 
 ## ✨ What it does
@@ -26,6 +26,7 @@ and undo them**. Everything else stays untouched.
 | `lr_set_develop` | **Changes** a few sliders of one photo (exposure, contrast, highlights, shadows, whites, blacks, texture, clarity, dehaze, vibrance, saturation, HSL), with range and per-call step limits; can return a preview right after |
 | `lr_restore` | Puts the sliders of one earlier change back to their old values |
 | `lr_restore_original` | Puts every slider LrMCP changed on a photo back to its value before LrMCP's first change (`dry_run` shows what it would do) |
+| `lr_batch_set_develop` | Batch: add the same relative change to several photos (at most 10). Dry run first (changes nothing, returns each photo's result and a plan id), executed only with that plan id; the whole batch can be undone at once |
 | `lr_list_presets` / `lr_apply_preset` | Find develop presets and apply one to a photo (presets without masks; the whole state is saved first and can be restored exactly) |
 | `lr_list_edits` | Lists the changes LrMCP made (id, time, photo, sliders, restored or not) |
 
@@ -110,7 +111,7 @@ compatibility report, feature request) or start a **[discussion](../../discussio
 |---|---|
 | 0.1 | Read-only: look at photos, develop settings, preview, histogram numbers, self check |
 | **0.2 (now)** | Change one photo's global sliders and HSL with range and step limits, saved old values, restore commands and a read-only switch |
-| next | Presets and batch (macOS, Photoshop, Premiere are paused) |
+| next | Masks (whether the SDK allows it is 待验证), rating / flags / keywords (macOS, Photoshop, Premiere are paused) |
 | later | Teaching mode (plain-language explanations, before/after), learning your taste from rated photos, batch / presets / culling help |
 
 Masks and AI features depend on what Adobe's SDK offers and are not promised.
