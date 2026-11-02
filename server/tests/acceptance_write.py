@@ -100,7 +100,7 @@ def main() -> int:
         for label, params, needle in (
             ("range refused by the plug-in itself", {"Exposure2012": "9"}, "取值范围"),
             ("white balance beyond its range refused by the plug-in itself", {"Temperature": "99999"}, "取值范围"),
-            ("unknown key refused by the plug-in itself", {"Sharpness": "10"}, "不允许修改"),
+            ("unknown key refused by the plug-in itself", {"CropTop": "0.1"}, "不允许修改"),
         ):
             try:
                 bridge.call("set_develop", {"photo": photo_id, "edit": "acceptance", **params})
@@ -167,6 +167,26 @@ def main() -> int:
         backed = bridge.call("get_develop", {"photo": photo_id})["settings"]
         check("restore brings the point curve and sliders back", rb["verified"] and backed.get("ToneCurvePV2012") == curve0
               and abs(backed["ColorGradeBlending"] - base["ColorGradeBlending"]) < 1e-3)
+
+        # 3d. batch 2: sharpening, noise reduction, grain, vignettes, defringe
+        size_before = preview_size(bridge, photo_id)
+        wanted2 = {"Sharpness": base["Sharpness"] + 30, "SharpenRadius": base["SharpenRadius"] + 0.5,
+                   "LuminanceSmoothing": base["LuminanceSmoothing"] + 20, "ColorNoiseReduction": base["ColorNoiseReduction"] + 15,
+                   "GrainAmount": base["GrainAmount"] + 25, "GrainSize": base["GrainSize"] + 10,
+                   "PostCropVignetteAmount": base["PostCropVignetteAmount"] - 25, "VignetteAmount": base["VignetteAmount"] + 20,
+                   "DefringePurpleAmount": base["DefringePurpleAmount"] + 5}
+        ec = service.set_develop(wanted2, reason="acceptance batch 2")
+        check("batch 2 change verified (sharpening, noise, grain, vignettes, defringe)", ec["verified"] and all(r["ok"] for r in ec["changes"]),
+              str([r["parameter"] for r in ec["changes"] if not r["ok"]]))
+        check("preview changed after the batch 2 edit", preview_size(bridge, photo_id) != size_before)
+        try:
+            service.set_develop({"Sharpness": base["Sharpness"] + 30 + 100})
+            check("a big sharpening jump is refused", False, "no error")
+        except (EditError, BridgeError) as e:
+            check("a big sharpening jump is refused", "最多" in str(e) or "取值范围" in str(e))
+        rc = service.restore(ec["edit_id"])
+        now2 = edits.current_values(bridge.call("get_develop", {"photo": photo_id}), list(wanted2))
+        check("restore brings batch 2 back", rc["verified"] and all(abs(now2[k] - base[k]) < 1e-3 for k in wanted2))
 
         # 4. restore one edit: only that edit's sliders go back
         r1 = service.restore(e1["edit_id"])

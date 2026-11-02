@@ -101,7 +101,7 @@ def test_changes_must_be_a_non_empty_dict(bad):
 
 
 def test_unknown_and_forbidden_keys_are_refused_with_the_allowed_list():
-    for key in ("Sharpness", "ToneCurve", "CropLeft", "WhiteBalance", "exposure", "../x"):
+    for key in ("CropTop", "ToneCurve", "CropLeft", "WhiteBalance", "exposure", "../x"):
         with pytest.raises(EditError) as err:
             validate_changes({key: 1})
         assert "不允许修改" in str(err.value) and "Exposure2012" in str(err.value)
@@ -136,7 +136,7 @@ def test_python_and_lua_whitelists_are_identical():
         if m:
             lua[m.group(1)] = (float(m.group(2)), float(m.group(3)), float(m.group(4)))
     assert lua == edits.LIMITS
-    assert len(lua) == 62
+    assert len(lua) == 84
 
 
 # ---- set_develop -----------------------------------------------------------------------------------------------
@@ -371,3 +371,11 @@ def test_restore_original_after_two_curve_edits(env):
     service.set_develop({"ToneCurvePV2012": [[0, 0], [100, 120], [255, 255]]})
     service.restore_original()
     assert lr.photos["AAAAAAAA-1111"]["values"]["ToneCurvePV2012"] == [0.0, 0.0, 255.0, 255.0]
+
+
+# ---- batch 2: sharpening, noise reduction, effects ------------------------------------------------------------
+def test_detail_and_effect_ranges():
+    assert validate_changes({"Sharpness": 120, "SharpenRadius": 1.5, "GrainAmount": 30, "PostCropVignetteAmount": -25})
+    for bad in ({"Sharpness": 151}, {"SharpenRadius": 0.4}, {"ColorNoiseReduction": -1}, {"DefringeGreenAmount": 21}, {"VignetteAmount": 101}):
+        with pytest.raises(EditError):
+            validate_changes(bad)

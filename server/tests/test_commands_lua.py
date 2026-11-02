@@ -136,7 +136,7 @@ def test_a_normal_change_is_written_and_reported(lr):
 
 
 def test_unknown_parameter_is_refused_before_any_write(lr):
-    for key in ("CropLeft", "ToneCurve", "Sharpness"):
+    for key in ("CropLeft", "ToneCurve", "CropTop"):
         reply = lr.run("set_develop", photo="selected", edit="e1", **{key: "1"})
         assert not reply["ok"] and "不允许修改" in reply["error"], key
     assert lr.writes() == 0
@@ -168,7 +168,7 @@ def test_step_limit_blocks_a_big_jump_but_not_a_restore(lr):
 def test_restore_still_obeys_whitelist_and_range(lr):
     reply = lr.run("set_develop", photo="selected", edit="e1", restore="1", Exposure2012="9")
     assert not reply["ok"] and "取值范围" in reply["error"]
-    reply = lr.run("set_develop", photo="selected", edit="e1", restore="1", Sharpness="50")
+    reply = lr.run("set_develop", photo="selected", edit="e1", restore="1", CropTop="0.5")
     assert not reply["ok"] and "不允许修改" in reply["error"]
 
 
