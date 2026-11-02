@@ -6,7 +6,7 @@
 
 A Lightroom Classic plug-in (Lua, `plugin/lrmcp.lrdevplugin`) and a Python MCP server (`server/lightroom_mcp`).
 The server hosts a local HTTP queue on `127.0.0.1` (first free port in 58770–58789, one server per AI session, announced in `~/LrMcp/servers/<port>.txt`); the plug-in polls all of them and runs whitelisted commands.
-Version 0.8.0 reads photos and can make small, guarded changes (89 whitelisted sliders incl. RAW temperature/tint, colour grading, calibration, parametric curve, detail and effects, crop and straighten, plus 4 point curves; restorable).
+Version 0.9.0 reads photos and can make small, guarded changes (89 whitelisted sliders incl. RAW temperature/tint, colour grading, calibration, parametric curve, detail and effects, crop and straighten, plus develop presets without masks (applied by Lightroom, undone by writing back every changed setting), plus 4 point curves; restorable).
 Windows + Lightroom Classic 15.2 is the only tested combination.
 
 ## Commands

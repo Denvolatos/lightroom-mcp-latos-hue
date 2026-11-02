@@ -28,6 +28,22 @@ Versions: a new feature raises the middle number, a small fix the last one. The 
   to the start, the preview is pixel-identical).
 - Not included: white balance (RAW values only appear after an edit; needs more measuring), tone curve, masks, crop.
 
+## 0.9.0 — develop presets
+
+- New tools `lr_list_presets` (search the presets in Lightroom) and `lr_apply_preset` (apply one to a photo). 11 tools in total.
+- Presets are applied by Lightroom itself. Before that the photo's whole settings are saved to disk; afterwards the plug-in
+  reports every setting that changed (also the ones the preset does not list) and `lr_restore` / `lr_restore_original` write
+  the old values back, also when presets and slider changes are mixed.
+- Presets with masks / AI local adjustments, and photos that already have masks, are refused.
+- New plug-in commands `list_presets`, `snapshot`, `apply_preset`, `restore_settings` (the last accepts only keys the photo
+  already has, with the same type and inside the known ranges, never masks) and a strict JSON decoder.
+- Measured (experiment 10): of 381 presets 38 carry masks and most others touch settings beyond our sliders (looks, camera
+  profiles, black & white mixer), so presets are applied natively. Lightroom creates internal values on first use
+  (`GrainSeed`, `DepthMapInfo`, ...) that cannot be deleted; they do not change the picture as far as measured.
+- Real-Lightroom acceptance run (`acceptance_presets.py`) on a RAW and a JPEG of the test catalog: the full settings snapshot
+  (about 170 keys, tables included) is identical after restore.
+- Not included: the preset amount slider (0–200) and applying to several photos at once.
+
 ## 0.8.0 — crop and straighten
 
 - `lr_set_develop` can change the four crop edges (`CropLeft`, `CropTop`, `CropRight`, `CropBottom`, fractions of the image;
