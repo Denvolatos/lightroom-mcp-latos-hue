@@ -28,6 +28,19 @@ Versions: a new feature raises the middle number, a small fix the last one. The 
   to the start, the preview is pixel-identical).
 - Not included: white balance (RAW values only appear after an edit; needs more measuring), tone curve, masks, crop.
 
+## 0.6.0 — colour grading, calibration, tone curves
+
+- `lr_set_develop` can now change 25 more sliders: colour grading (shadows / midtones / highlights / global hue,
+  saturation, luminance, balance, blending), camera calibration (shadow tint, red / green / blue hue and saturation) and
+  the parametric tone curve (shadows, darks, lights, highlights). 62 sliders in total. Hue values are cyclic (no step limit).
+- Point curves: `ToneCurvePV2012` (luminance) and its Red / Green / Blue versions, given as `[[x, y], ...]`
+  (2–16 points, first x = 0, last x = 255, x increasing, y never going back, at most 90 away from the straight line).
+  Old curves are saved and restored like the sliders.
+- Measured (experiment 7): the new sliders reset to their default when given an out-of-range value (instead of storing it
+  as the older sliders do); point curves can be written and restored exactly; the three parametric split points did not
+  take writes and are not supported (reason not found: 待验证).
+- Real-Lightroom acceptance run on a RAW and a JPEG of the test catalog: all checks pass, everything restored.
+
 ## 0.5.0 — white balance (RAW)
 
 - `lr_set_develop` can change `Temperature` (2000–50000 K, at most ±1000 per call) and `Tint` (±150, at most ±30 per call)
