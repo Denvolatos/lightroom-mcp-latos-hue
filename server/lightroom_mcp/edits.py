@@ -70,6 +70,32 @@ LIMITS.update({
     "ParametricHighlights": (-100.0, 100.0, 30.0),
 })
 
+# batch 2 (experiment 8): sharpening, noise reduction, vignette, grain, defringe. Stored unchecked by Lightroom, so we check.
+LIMITS.update({
+    "Sharpness": (0.0, 150.0, 40.0),
+    "SharpenRadius": (0.5, 3.0, 1.0),
+    "SharpenDetail": (0.0, 100.0, 30.0),
+    "SharpenEdgeMasking": (0.0, 100.0, 30.0),
+    "LuminanceSmoothing": (0.0, 100.0, 30.0),
+    "LuminanceNoiseReductionDetail": (0.0, 100.0, 30.0),
+    "LuminanceNoiseReductionContrast": (0.0, 100.0, 30.0),
+    "ColorNoiseReduction": (0.0, 100.0, 30.0),
+    "ColorNoiseReductionDetail": (0.0, 100.0, 30.0),
+    "ColorNoiseReductionSmoothness": (0.0, 100.0, 30.0),
+    "PostCropVignetteAmount": (-100.0, 100.0, 30.0),
+    "PostCropVignetteMidpoint": (0.0, 100.0, 30.0),
+    "PostCropVignetteFeather": (0.0, 100.0, 30.0),
+    "PostCropVignetteRoundness": (-100.0, 100.0, 30.0),
+    "PostCropVignetteHighlightContrast": (0.0, 100.0, 30.0),
+    "GrainAmount": (0.0, 100.0, 30.0),
+    "GrainSize": (0.0, 100.0, 30.0),
+    "GrainFrequency": (0.0, 100.0, 30.0),
+    "VignetteAmount": (-100.0, 100.0, 30.0),
+    "VignetteMidpoint": (0.0, 100.0, 30.0),
+    "DefringePurpleAmount": (0.0, 20.0, 10.0),
+    "DefringeGreenAmount": (0.0, 20.0, 10.0),
+})
+
 # Point curves (flat list x1, y1, x2, y2, ...; 0..255). Not in LIMITS: they are lists, not numbers.
 CURVE_KEYS = ("ToneCurvePV2012", "ToneCurvePV2012Red", "ToneCurvePV2012Green", "ToneCurvePV2012Blue")
 MAX_CURVE_POINTS = 16
@@ -109,6 +135,13 @@ def describe_limits() -> str:
                  "ColorGradeMidtoneLum / ColorGradeGlobalLum 明度 -100 到 100；SplitToningBalance -100 到 100；ColorGradeBlending 0 到 100。"
                  "（除色相外）单次最多改 ±30")
     lines.append("相机校准：ShadowTint, RedHue, RedSaturation, GreenHue, GreenSaturation, BlueHue, BlueSaturation：-100 到 +100，单次最多改 ±30")
+    lines.append("锐化：Sharpness 数量 0 到 150（单次最多改 ±40），SharpenRadius 半径 0.5 到 3（单次最多 ±1），SharpenDetail 细节、SharpenEdgeMasking 蒙版 0 到 100（±30）")
+    lines.append("降噪：LuminanceSmoothing 明亮度、LuminanceNoiseReductionDetail 明亮度细节、LuminanceNoiseReductionContrast 明亮度对比、"
+                 "ColorNoiseReduction 颜色、ColorNoiseReductionDetail 颜色细节、ColorNoiseReductionSmoothness 颜色平滑度：0 到 100，单次最多改 ±30")
+    lines.append("效果：PostCropVignetteAmount 裁剪后暗角数量（负变暗、正变亮）-100 到 100、PostCropVignetteRoundness -100 到 100、"
+                 "PostCropVignetteMidpoint / Feather / HighlightContrast 0 到 100；GrainAmount 颗粒数量、GrainSize 大小、GrainFrequency 粗糙度 0 到 100；"
+                 "镜头暗角 VignetteAmount -100 到 100、VignetteMidpoint 0 到 100；去边 DefringePurpleAmount / DefringeGreenAmount 0 到 20（单次最多 ±10）。"
+                 "以上除特别说明外单次最多改 ±30")
     lines.append("色调曲线·参数：ParametricShadows, ParametricDarks, ParametricLights, ParametricHighlights：-100 到 +100，单次最多改 ±30")
     lines.append("色调曲线·点：ToneCurvePV2012（亮度）、ToneCurvePV2012Red / Green / Blue（三个通道），值是点的列表，"
                  "例如 [[0,0],[64,56],[192,200],[255,255]]：x 是原亮度、y 是调整后的亮度（0 到 255），2 到 16 个点，"
