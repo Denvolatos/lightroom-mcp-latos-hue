@@ -1,51 +1,73 @@
-# 🤖 给 AI 助手的说明 / Guide for AI assistants
+# 🤖 Guide for AI assistants / 给 AI 助手的说明
 
-> **如果你是 AI 助手**，用户把这个仓库的链接发给了你，让你帮他安装并使用这个软件：请**完整读完本文件**，再按步骤做。
-> 需要用户亲自操作的地方（点 Lightroom 的界面、重启软件），请告诉他具体怎么点，并等他回复。请用**用户使用的语言**和他交流。
-> 你**不需要**读完整个仓库，本文件就是为你写的。
+> **If you are an AI assistant** and the user sent you the link to this repository, asking you to install and use this software:
+> read **this whole file** first, then follow the steps. Where the user has to act (click in Lightroom, restart an app), tell them
+> exactly what to click and wait for their answer. **Talk to the user in the user's language.** You do **not** need to read the rest
+> of the repository; this file was written for you.
+>
+> 中文用户：本文件为方便各种 AI 助手阅读而用英文写成；请你（AI）用用户的语言和他交流。工具返回的提示是中文，需要时请翻译给用户。
 
-**English summary.** This repo is a Lightroom Classic plug-in (Lua) plus a small MCP server (Python, stdio).
-It lets an AI assistant see the photo the user selected in Lightroom (develop settings, a preview image, histogram
-numbers) and, since 0.2, make **small, guarded slider changes that can be undone**. Windows only for now (macOS, Photoshop, Premiere are not supported yet). Install: `pip install` the `server`
-folder from the GitHub zip, copy the plug-in folder into Lightroom's `Modules` folder, register the server with the
-AI client as a local stdio MCP server, restart both. Verify with the tool `lr_status`; diagnose with `lr_doctor`.
-Details below (in Chinese, but all commands are language-neutral).
+**Summary.** A Lightroom Classic plug-in (Lua) plus a small MCP server (Python, stdio). It lets an AI assistant see the photo the
+user selected in Lightroom (develop settings, a preview image with histogram numbers, catalog information) and make **small,
+guarded changes that can all be undone**. Windows only for now (macOS, Photoshop and Premiere are paused). Install: `pip install`
+the `server` folder from the GitHub zip, copy the plug-in folder into Lightroom's `Modules` folder, register the server with the
+AI client as a local stdio MCP server, restart both. Verify with the tool `lr_status`, diagnose with `lr_doctor`.
 
 ---
 
-## 1. 这是什么
+## 1. What this is
 
-一个让 AI 能"看"用户在 Adobe Lightroom Classic 里选中的照片的小工具，由两部分组成：
+A small tool that lets an AI "see" and gently adjust the photo a user selected in Adobe Lightroom Classic. Two parts:
 
-- **Lightroom 插件**（Lua）：在 Lightroom 里运行，只执行固定的白名单命令。
-- **MCP 服务**（Python，命令 `lrmcp`）：通过 stdio 连接 AI 客户端，并在本机（`127.0.0.1`）和插件通信。
+- **Lightroom plug-in** (Lua): runs inside Lightroom and only executes a fixed whitelist of commands.
+- **MCP server** (Python, command `lrmcp`): talks to the AI client over stdio and to the plug-in over `127.0.0.1`.
 
-当前版本 **0.11.0**：能读照片信息、读取调整参数、生成预览图并给出直方图数字；也能对**少数滑块做小步、受保护的修改**，并随时还原。
-可以改 RAW 照片的色温（Temperature，K）和色调（Tint）；JPEG 没有开尔文值，**不能**改白平衡。也可以改颜色分级、相机校准、参数曲线和点曲线（`ToneCurvePV2012` 及 Red/Green/Blue，值是 `[[x,y],...]`）。也可以套用不带蒙版的开发预设（可还原）。也可以改锐化、降噪、暗角、颗粒、去边，以及裁剪与拉直（`CropLeft/Top/Right/Bottom` 是占整张图的比例，不裁剪时是 0,0,1,1；`CropAngle` 是度数）。蒙版（含自适应预设）都**不能**改（实测：通过 SDK 写蒙版不可靠，见 docs/实验记录.md 实验 11）。目录信息（星级、旗标、颜色标签、标题、说明、关键词）可以用 `lr_set_metadata` 改，其他元数据（拍摄信息、版权、位置等）不能改，也不能删除照片或导入导出。
+Current version **0.11.1**. What it can do:
 
-## 2. 先确认条件（不满足就别硬装）
+- **Look:** read photo information and develop settings, render a preview image with histogram numbers, read catalog information.
+- **Change develop settings** (`lr_set_develop`): 89 whitelisted sliders (basic tone, HSL, colour grading, camera calibration, parametric
+  tone curve, sharpening, noise reduction, vignettes, grain, defringe, crop and straighten), four point curves
+  (`ToneCurvePV2012` and its Red / Green / Blue versions, values like `[[0,0],[64,56],[192,200],[255,255]]`) and, for **RAW** photos,
+  temperature and tint. JPEGs have no kelvin values, so their white balance cannot be changed. Crop edges (`CropLeft/Top/Right/Bottom`)
+  are fractions of the whole image (uncropped is 0, 0, 1, 1); `CropAngle` is in degrees.
+- **Apply develop presets** without masks (`lr_apply_preset`), **batch changes** on up to 10 photos with a dry run first
+  (`lr_batch_set_develop`), and change **catalog information** (rating, flag, colour label, title, caption, keywords) with
+  `lr_set_metadata`.
+- **Undo** everything: every change saves the old values first.
+- **Cannot:** masks (local adjustments) — writing masks through the Lightroom SDK was measured to be unreliable (docs/实验记录.md,
+  experiment 11); other metadata (shooting data, copyright, location ...); deleting photos; import/export.
 
-| 条件 | 怎么查 |
+## 2. Check the conditions first (do not force an install if they are not met)
+
+| Condition | How to check |
 |---|---|
-| Windows 10/11 | macOS 暂不支持（计划中）；Photoshop、Premiere 也暂不支持 |
-| 已安装 Adobe Lightroom Classic，且能正常打开 | 在 Lightroom 里 *帮助 → 系统信息* 看版本；开发和测试用的是 15.2 |
-| Python 3.10 或更新 | 运行 `python --version`。没有的话请用户去 python.org 安装，勾选"Add to PATH" |
-| 你所在的 AI 应用能添加**本地 stdio MCP 服务** | **Claude Code 已实测可用**；Codex 的登记命令已写好但**没有实测**（见下）。其他应用（WorkBuddy、豆包、MiMo 系客户端、Cursor 等）**也没有验证过**：只要它能添加"命令 + 参数"形式的本地 MCP 服务，就用第 3 步的通用写法；如果它只能连云端、不能运行本机命令，就如实告诉用户"目前用不了"，不要尝试绕过 |
+| Windows 10/11 | macOS is paused; Photoshop and Premiere are not supported |
+| Adobe Lightroom Classic is installed and starts | In Lightroom: *Help → System Info*. Developed and tested with 15.2 |
+| Python 3.10 or newer | `python --version`. If missing, ask the user to install it from python.org and tick "Add to PATH" |
+| Your AI app can add a **local stdio MCP server** | **Claude Code is tested.** The Codex registration command is written but **not tested** (see below). Other apps (WorkBuddy, Doubao, MiMo-based clients, Cursor ...) are **not verified either**: if the app can add a local MCP server given as "command + arguments", use the generic form in step 3.3; if it can only connect to cloud servers and cannot run local commands, tell the user honestly that it cannot be used for now and do not try to work around it |
 
-## 3. 安装
+## 3. Install
 
-**重要（给在 Claude 桌面版里运行命令的助手）**：Claude 桌面版是 Windows 商店（MSIX）应用，它启动的程序写入 `AppData` 时会被悄悄重定向，Lightroom 看不到。所以**第 3.2 步（复制插件）请让用户在他自己的 PowerShell 里运行**，不要在你自己的 shell 里运行。
+**Important (for assistants that run commands inside Claude Desktop):** Claude Desktop is a Windows Store (MSIX) app. When a program it
+starts writes to `AppData`, Windows silently redirects the write and Lightroom cannot see it. So **ask the user to run step 3.2
+(copying the plug-in) in their own PowerShell**, not in your shell.
 
-### 3.1 安装 MCP 服务（Python）
+Alternative: the project also publishes an installer (`LrMCP-Setup-*.exe` on the GitHub Releases page) that installs the server and the
+plug-in without Python. It is not code-signed (Windows SmartScreen will warn) and has **not yet been install/uninstall-tested on a clean
+machine**, so the pip route below is the tested one. If the user prefers the installer, they must run it from their own File Explorer.
+
+### 3.1 Install the MCP server (Python)
 
 ```powershell
 pip install "https://github.com/Denvolatos/lightroom-mcp-win/archive/refs/heads/main.zip#subdirectory=server"
 lrmcp --version
 ```
 
-期望输出形如 `lightroom_mcp 0.11.0`（版本号可能更新）。如果提示找不到 `lrmcp`，说明 Python 的 Scripts 目录不在 PATH 里：用 `python -m pip show -f lightroom-mcp` 找到它，或者以后一律用 `python -m lightroom_mcp` 代替 `lrmcp`，并在登记时写 Python 的**绝对路径**。
+Expected output like `lightroom_mcp 0.11.1` (the number may be newer). If `lrmcp` is not found, Python's Scripts folder is not on
+PATH: find it with `python -m pip show -f lightroom-mcp`, or always use `python -m lightroom_mcp` instead of `lrmcp` and write the
+**absolute path** of Python when registering.
 
-### 3.2 安装 Lightroom 插件（让用户在自己的 PowerShell 里运行）
+### 3.2 Install the Lightroom plug-in (the user runs this in their own PowerShell)
 
 ```powershell
 $tmp = Join-Path $env:TEMP "lrmcp-src"
@@ -59,101 +81,129 @@ Copy-Item "$($src.FullName)\plugin\lrmcp.lrdevplugin\*" $dst -Recurse -Exclude D
 Get-ChildItem $dst | Select-Object Name
 ```
 
-应该列出 8 个文件（`Bridge.lua`、`Commands.lua`、`Info.lua`、`Init.lua`、`Json.lua`、`Status.lua`、`Stop.lua`、`Version.lua`），**没有** `DevRun.lua` 和 `devscripts`（那是开发用的，不要装）。
-然后请用户**重启 Lightroom**。重启后在 *文件 → 增效工具管理器* 里应看到 **LrMCP** 且已启用；如果没有，选 *添加*，指向 `%APPDATA%\Adobe\Lightroom\Modules\LrMcp.lrplugin`。
+The listing should show the plug-in files (`Bridge.lua`, `Commands.lua`, `Info.lua`, `Init.lua`, `Json.lua`, `Limits.lua`,
+`Status.lua`, `Stop.lua`, `Version.lua`) and **not** `DevRun.lua` or `devscripts` (those are for development, do not install them).
+Then ask the user to **restart Lightroom**. After the restart, *File → Plug-in Manager* should show **LrMCP**, enabled; if not, choose
+*Add* and point it to `%APPDATA%\Adobe\Lightroom\Modules\LrMcp.lrplugin`.
 
-### 3.3 把服务登记到你的 AI 客户端
+### 3.3 Register the server with your AI client
 
-**这会修改用户的客户端配置，先说明再做，并先问用户同意。**
+**This changes the user's client configuration: explain first and ask for the user's agreement before doing it.**
 
-- **Claude Code / Codex**（本机命令行里有 `claude` 或 `codex`）：
+- **Claude Code / Codex** (`claude` or `codex` exists on the command line):
   ```powershell
-  lrmcp register --dry-run   # 先看会做什么，不改任何东西
-  lrmcp register             # 用户同意后再运行
+  lrmcp register --dry-run   # shows what it would do, changes nothing
+  lrmcp register             # run after the user agrees
   ```
-  它通过 `claude mcp add` / `codex mcp add` 登记名为 `lightroom_mcp` 的服务。（Codex 没在作者的电脑上测试过。）
-- **其他支持"本地 MCP 服务"的应用**：添加一个 stdio 服务，名字 `lightroom_mcp`，命令是 `lrmcp` 的**绝对路径**（用 `where lrmcp` 查），参数为空。常见的配置文件写法：
+  It registers a server named `lightroom_mcp` through `claude mcp add` / `codex mcp add`. (Codex has not been tested on the author's machine.)
+- **Any other app that supports local MCP servers:** add a stdio server named `lightroom_mcp`, command = the **absolute path** of `lrmcp`
+  (find it with `where lrmcp`), no arguments. A common configuration file form:
   ```json
-  { "mcpServers": { "lightroom_mcp": { "command": "C:\\完整路径\\lrmcp.exe", "args": [] } } }
+  { "mcpServers": { "lightroom_mcp": { "command": "C:\\full\\path\\lrmcp.exe", "args": [] } } }
   ```
-  没有 `lrmcp.exe` 时：`"command": "C:\\完整路径\\python.exe", "args": ["-m", "lightroom_mcp"]`。
-  配置文件的位置和格式因应用而异，请按你自己所在应用的文档来；**注意名字用下划线 `lightroom_mcp`**（有的应用对别的写法会静默忽略）。
+  Without `lrmcp.exe`: `"command": "C:\\full\\path\\python.exe", "args": ["-m", "lightroom_mcp"]`.
+  Where the configuration lives and its format differ per app, follow your own app's documentation. **Use the name with an underscore,
+  `lightroom_mcp`** (some apps silently ignore other spellings).
 
-### 3.4 重启并验证
+### 3.4 Restart and verify
 
-1. 请用户**重启你所在的 AI 应用**（让它加载新的 MCP 服务），并保持 **Lightroom 已打开**。
-2. 请用户在 Lightroom 里**打开一个目录并选中一张照片**。
-3. 调用工具 **`lr_status`**：应返回 `"connected": true`、Lightroom 版本和目录名。
-4. 如果不是，调用 **`lr_doctor`**，按它给出的中文提示处理（见第 6 节）。
+1. Ask the user to **restart your AI app** (so it loads the new MCP server) and to keep **Lightroom open**.
+2. Ask the user to **open a catalog in Lightroom and select a photo**.
+3. Call the tool **`lr_status`**: it should return `"connected": true`, the Lightroom version and the catalog name.
+4. If not, call **`lr_doctor`** and follow its (Chinese) hints; see section 6.
 
-## 4. 怎么用（14 个工具：7 个只读，7 个与修改有关）
+## 4. How to use it (14 tools: 7 read-only, 7 that change something)
 
-| 工具 | 用途 |
+| Tool | Purpose |
 |---|---|
-| `lr_status` | Lightroom 是否连上、版本、目录、是否有选中照片 |
-| `lr_list_selected` | 选中的照片：文件名、格式、评分、尺寸、ISO/光圈/快门/焦距/镜头/机身、`id` |
-| `lr_get_develop` | 一张照片当前的调整参数（曝光、对比度、高光、阴影、白平衡、HSL 等）。`photo` 填 `"selected"` 或 `lr_list_selected` 返回的 `id` |
-| `lr_get_preview` | 预览图（长边 256–2048 像素，默认 1024）加直方图数字：平均亮度、过曝/欠曝比例、冷暖偏向 |
-| `lr_doctor` | 自检，用中文说明哪里有问题、怎么处理 |
-| `lr_set_develop` | **修改**一张照片的滑块：`changes` 填 `{参数名: 目标数值}`，例如 `{"Exposure2012": 0.3, "Highlights2012": -20}`；`reason` 写一句理由；`preview` 为 true 时改完顺便返回预览图。允许的参数、范围和单次最多改多少写在工具说明里 |
-| `lr_get_metadata` | 一张照片的目录信息：星级（0–5）、旗标（pick / none / reject）、颜色标签、标题、说明文字、关键词 |
-| `lr_set_metadata` | **修改**目录信息（不是调整参数），只给要改的项：`rating`、`flag`、`color_label`、`title`、`caption`、`add_keywords`、`remove_keywords`；一次一张；旧值先存盘，`lr_restore` 可还原（新建过的关键词会留在关键词列表里）。只在用户明确要求时才改，尤其是 reject 和清空标题/说明 |
-| `lr_batch_set_develop` | **批量**改多张照片（一次最多 10 张），两步走：先 `dry_run=true`（默认）预演，`changes` 是**相对改动量**（每张在自己当前值上加，例如 `{"Exposure2012": 0.3}`），返回每张的改前→改后和 `plan_id`，什么都不改；把结果讲给用户，**得到同意后**再用 `dry_run=false` 加 `plan_id` 执行（15 分钟内有效，只能用一次）。不支持裁剪/拉直/曲线；遇到第一个失败就停；返回的 `batch_id` 交给 `lr_restore` 可一次还原整批 |
-| `lr_list_presets` | 列出 Lightroom 里的开发预设（`query` 填一个词搜索，一次最多 50 个）：`id`、名称、文件夹、是否带蒙版 |
-| `lr_apply_preset` | **套用**一个预设（`preset_id` 来自 `lr_list_presets`）。预设可能一次改很多地方，套之前要先告诉用户；套完用预览看效果；带蒙版/AI 的预设和已经有蒙版的照片会被拒绝；可用 `lr_restore` / `lr_restore_original` 完全还原 |
-| `lr_restore` | 还原一次修改（`edit_id` 来自 `lr_set_develop` 的返回或 `lr_list_edits`）：把那次修改碰过的滑块写回旧值 |
-| `lr_restore_original` | 让一张照片回到 LrMCP 第一次改它之前的样子；`dry_run` 为 true 时只显示会写回什么 |
-| `lr_list_edits` | 列出 LrMCP 做过的修改记录 |
+| `lr_status` | Is Lightroom connected, version, catalog, is a photo selected. May contain `update_available` (tell the user; nothing is installed automatically) |
+| `lr_list_selected` | Selected photos: file name, format, rating, size, ISO / aperture / shutter / focal length / lens / camera, and the `id` |
+| `lr_get_develop` | Current develop settings of a photo. `photo` is `"selected"` or an `id` from `lr_list_selected` |
+| `lr_get_preview` | Preview image (long side 256–2048 px, default 1024) plus histogram numbers: mean brightness, clipped highlights/shadows, warm/cool cast |
+| `lr_get_metadata` | Catalog information: rating (0–5), flag (pick / none / reject), colour label, title, caption, keywords |
+| `lr_list_presets` | The develop presets in Lightroom (`query` = one word; at most 50 per call): `id`, name, folder, whether it has masks |
+| `lr_doctor` | Self-check; says in Chinese what is wrong and what to do |
+| `lr_set_develop` | **Change** the settings of ONE photo: `changes` = `{name: TARGET value}`, e.g. `{"Exposure2012": 0.3, "Highlights2012": -20}`; `reason` = one sentence; `preview: true` also returns a preview. The allowed parameters, ranges and per-call limits are in the tool description |
+| `lr_set_metadata` | **Change** catalog information of ONE photo; give only what changes: `rating`, `flag`, `color_label`, `title`, `caption`, `add_keywords`, `remove_keywords`. Restorable with `lr_restore` (a keyword created by the change stays in the keyword list). Only when the user clearly asked, especially reject and clearing a title or caption |
+| `lr_apply_preset` | **Apply** a preset to ONE photo (`preset_id` from `lr_list_presets`). A preset can change a lot, so tell the user first and look at a preview afterwards. Presets with masks / AI, and photos that already have masks, are refused. Fully restorable |
+| `lr_batch_set_develop` | **Batch** change of up to 10 photos in two steps. First `dry_run=true` (default): `changes` are **relative** amounts added to each photo's own value (e.g. `{"Exposure2012": 0.3}`); it changes nothing and returns before → after for every photo, the skipped photos and a `plan_id`. Explain the result to the user and, **only after the user agrees**, call again with `dry_run=false` and the `plan_id` (valid 15 minutes, single use). No crop / straighten / curves. Stops at the first failure; the returned `batch_id` given to `lr_restore` undoes the whole batch |
+| `lr_restore` | Undo one change (`edit_id` from the tool that made it, or from `lr_list_edits`; a `batch_id` undoes a whole batch). Works for develop changes, presets and catalog information |
+| `lr_restore_original` | Put a photo back to how it was before LrMCP first changed it (develop settings and presets; not catalog information). `dry_run: true` only shows what would be written |
+| `lr_list_edits` | The history of the changes LrMCP made |
 
-**典型用法**：用户说"看看这张照片哪里有问题"→ 先 `lr_list_selected`，再 `lr_get_preview`（看图 + 数字），必要时 `lr_get_develop` 看已经做过哪些调整，然后用大白话告诉用户：偏暗/偏亮、高光是否过曝、暗部是否死黑、色调偏冷还是偏暖，并说明依据（引用返回的数字）。
-**调色老师式的回答更有帮助**：说"改了会怎样"，而不是只给参数；用户可能是调色新手。
+**Typical use.** The user says "look at this photo, what's wrong with it?" → `lr_list_selected`, then `lr_get_preview` (picture + numbers),
+if needed `lr_get_develop` to see what was already adjusted, then explain in plain words: too dark / too bright, are the highlights
+clipped, are the shadows crushed, is the colour cast cool or warm — and quote the returned numbers as evidence.
+**Answer like a colour-grading teacher:** say what a change will look like, not only the numbers; the user may be a beginner.
 
-**注意**：`lr_get_develop` 里 RAW 照片在没编辑过时读不到 Temperature/Tint，只显示 `WhiteBalance`；这不代表没有色温。**RAW 的白平衡可以改**（Temperature 2000–50000 K，单次最多 ±1000；Tint ±150，单次最多 ±30；改后标签会变成 Custom，还原会连标签一起写回）。JPEG，或没编辑过读不到色温的 RAW，请如实告诉用户做不到，让用户先在 Lightroom 里对 RAW 做任意一次编辑，或自己拖滑块。
+**White balance.** `lr_get_develop` may not show Temperature/Tint for an unedited RAW (only `WhiteBalance`); that does not mean there is
+no colour temperature. **RAW white balance can be changed** (Temperature 2000–50000 K, at most ±1000 per call; Tint ±150, at most ±30
+per call; the label becomes Custom, and restoring writes the label back too). For a JPEG, or a RAW whose temperature cannot be read,
+say honestly that it is not possible, and suggest that the user makes any edit to the RAW in Lightroom first, or drags the slider.
 
-### 修改照片的规矩（请严格遵守）
+### Rules for changing photos (follow them strictly)
 
-1. **只在用户明确要求时才改**，只改用户指定的那一张（默认是当前选中的）；用户明确要求处理多张时才用批量，并且一定先预演、讲给用户、得到同意再执行。看照片、分析问题不需要改。
-2. **先看再改**：改之前先 `lr_get_preview` 看现状和直方图数字；**小步**修改，每次改完用 `lr_get_preview`（或 `lr_set_develop` 的 `preview: true`）看效果，再决定下一步。系统有单次限幅，一次改太多会被拒绝，不要试图绕过，分几次改就是。
-3. **用大白话告诉用户**每一步改了什么、为什么、预期会看到什么变化；用户可能是调色新手。引用返回的数字作依据，别只报参数。
-4. **用户不满意就还原**：`lr_restore`（撤销某一次）或 `lr_restore_original`（回到最初）。还原前如果用户期间手动改过同一个滑块，要提醒他会被覆盖。
-5. **用户第一次在他真实的 Lightroom 目录上使用修改功能时**，请先提醒他备份目录（`.lrcat` 文件），并建议先在测试目录上试。
-6. 如果工具返回"只读模式已开启"，说明用户创建了开关文件 `C:\Users\<用户名>\LrMcp\readonly`：**不要**去删它或想办法绕过，告诉用户想允许修改就自己删掉这个文件。
-7. 只改工具说明里列出的滑块。不要声称你能改 JPEG 的白平衡、曲线、蒙版、裁剪、预设；不要用别的办法（比如操作界面）去做这些。
+1. **Change something only when the user clearly asks**, only the photo the user named (default: the selected one). Looking at a photo
+   and analysing it never needs a change. Use the batch tool only when the user asks for several photos, and then always dry run first,
+   explain, and execute only after the user agrees.
+2. **Look before you change.** Call `lr_get_preview` first for the current state and the histogram numbers; change in **small steps**,
+   look again after each one (`lr_get_preview`, or `preview: true`), then decide the next step. There are per-call limits and a change
+   that is too big is refused: do not try to get around them, just use several steps.
+3. **Explain in plain words** what you changed, why, and what the user should see; the user may be a beginner. Quote the returned
+   numbers, do not only report parameters.
+4. **Undo if the user is not happy:** `lr_restore` (one change) or `lr_restore_original` (back to the start). If the user changed the
+   same setting by hand in the meantime, warn that it will be overwritten.
+5. **The first time the user uses the change tools on their real Lightroom catalog**, remind them to back up the catalog (the `.lrcat`
+   file) and suggest trying on a test catalog first.
+6. If a tool says "只读模式已开启" (read-only mode is on), the user created the switch file `C:\Users\<user>\LrMcp\readonly`: do **not**
+   delete it or look for a way around it; tell the user to delete the file themselves if they want to allow changes.
+7. Change only what the tool descriptions list. Do not claim you can change the white balance of a JPEG, masks or anything else that is
+   not listed, and do not use other means (such as operating the user interface) to do it.
 
-## 5. 对用户要讲清楚的几件事
+## 5. What to tell the user
 
-1. **隐私**：预览图和照片信息会发给用户正在使用的 AI 服务（你所在的这个）。这个项目本身不上传任何东西，但用户应只对愿意分享的照片使用。
-2. **修改是受保护的**：只能改一小批滑块，有范围和单次限幅，**写入前先把旧值存盘**，随时可以还原；用户可以创建文件 `C:\Users\<用户名>\LrMcp\readonly` 一键关掉所有修改。它在 `C:\Users\<用户名>\LrMcp` 里还会生成预览图、口令、日志和修改记录，预览图不会加入 Lightroom 目录。**真实作品请先备份目录。**
-3. **可以同时开多个 AI 会话**（例如 Claude 和 Codex 各一个）：每个会话的服务各占一个端口（58770–58789），插件会自动连上所有服务；同时发来的命令在 Lightroom 里排队逐个执行。`lr_status` 会显示另有几个会话。
-4. 这是个人项目，**不是 Adobe 官方产品**，早期版本，只在 Windows 11 + Lightroom Classic 15.2 上测过。
+1. **Privacy:** the preview images and photo information go to the AI service the user is using (the one you run in). This project itself
+   uploads nothing, but the user should only use it with photos they are happy to share.
+2. **Changes are protected:** a whitelist of settings, ranges and per-call limits; **the old values are saved to disk before writing** and
+   can be restored at any time; the user can create the file `C:\Users\<user>\LrMcp\readonly` to switch all changes off at once. That
+   folder also holds previews, tokens, logs and the change history; the previews are never added to the Lightroom catalog.
+   **Back up the catalog before using it on real work.**
+3. **Several AI sessions at once are fine** (for example one Claude and one Codex): each session's server takes its own port
+   (58770–58789), the plug-in connects to all of them, and commands arriving at the same time are queued inside Lightroom.
+   `lr_status` shows how many other sessions there are.
+4. **Updates:** once a day the server asks GitHub whether a newer release exists (anonymous, nothing about the user is sent) and
+   `lr_status` mentions it; nothing is downloaded or installed automatically. It can be switched off (see SECURITY.md).
+5. This is a personal project, **not an Adobe product**, an early version, tested only on Windows 11 + Lightroom Classic 15.2.
 
-## 6. 出问题怎么办
+## 6. When something goes wrong
 
-先调用 `lr_doctor`，它逐项检查并给出处理办法。常见情况：
+Call `lr_doctor` first; it checks item by item and says what to do. Common cases:
 
-| 现象 | 处理 |
+| Symptom | What to do |
 |---|---|
-| `lr_status` 说没连上 / 插件没连上 | ① Lightroom 是否已打开；② *文件 → 增效工具管理器* 里 LrMCP 是否已启用，必要时点"重新载入增效工具"；③ 插件是否真的装在 `%APPDATA%\Adobe\Lightroom\Modules\LrMcp.lrplugin`（见上面 MSIX 的提醒：必须由用户自己运行复制命令） |
-| 提示端口范围 58770–58789 都被占满 | 同时开了超过 20 个服务。关掉不用的 AI 会话 |
-| 工具列表里没有 `lr_*` | 客户端没登记成功或没重启。检查登记（`claude mcp get lightroom_mcp`），然后重启客户端 |
-| `lr_get_preview` 很慢或超时 | Lightroom 可能在忙（导入、生成预览）。等几秒重试 |
-| "没有选中的照片" | 请用户在 Lightroom 里点选一张照片 |
+| `lr_status` says not connected / the plug-in is not connected | ① Is Lightroom open? ② Is LrMCP enabled in *File → Plug-in Manager*? Click "Reload Plug-in" if needed. ③ Is the plug-in really in `%APPDATA%\Adobe\Lightroom\Modules\LrMcp.lrplugin`? (see the MSIX note above: the user must run the copy command themselves) |
+| Message that all ports 58770–58789 are taken | More than 20 servers are running at once. Close AI sessions that are not needed |
+| No `lr_*` tools in the tool list | The client registration failed or the client was not restarted. Check the registration (`claude mcp get lightroom_mcp`), then restart the client |
+| `lr_get_preview` is slow or times out | Lightroom may be busy (importing, building previews). Wait a few seconds and retry |
+| "没有选中的照片" (no photo selected) | Ask the user to click a photo in Lightroom |
 
-## 7. 卸载
+## 7. Uninstall
 
-`lrmcp unregister`（取消登记）→ 删除 `%APPDATA%\Adobe\Lightroom\Modules\LrMcp.lrplugin`（并重启 Lightroom）→ `pip uninstall lightroom-mcp` → 可选：删除 `C:\Users\<用户名>\LrMcp`。
+`lrmcp unregister` (remove the registration) → delete `%APPDATA%\Adobe\Lightroom\Modules\LrMcp.lrplugin` (and restart Lightroom) →
+`pip uninstall lightroom-mcp` → optional: delete `C:\Users\<user>\LrMcp`.
 
-## 8. 把问题反馈给开发者
+## 8. Send a problem report to the developer
 
-用户遇到问题时，请帮他整理一份反馈，**不要附照片**：
+When the user has a problem, help them write a report. **Do not attach photos.**
 
-1. 调用 `lr_doctor`，把输出保存下来。
-2. 记下：Windows 版本、Lightroom 版本、你所在的 AI 应用和版本、哪一步出错、出错信息。
-3. 如果用户有 GitHub 账号：打开 <https://github.com/Denvolatos/lightroom-mcp-win/issues/new/choose>，选"问题反馈"，把上面的内容填进去。
-4. 如果用户没有 GitHub 账号：把整理好的文字交给用户，让他直接发给把这个项目推荐给他的人。
+1. Call `lr_doctor` and keep its output.
+2. Note: the Windows version, the Lightroom version, your AI app and its version, which step failed, the error message.
+3. If the user has a GitHub account: open <https://github.com/Denvolatos/lightroom-mcp-win/issues/new/choose>, choose the bug report form
+   ("问题反馈 / Bug report") and fill in the above.
+4. If the user has no GitHub account: hand the written report to the user so they can send it to whoever recommended this project.
 
-反馈里请去掉用户不想公开的信息（比如用户名、私人路径）。
+Remove anything the user does not want to publish (for example the user name or private paths) from the report.
 
-## 9. 给想改代码的 AI
+## 9. For AIs that want to change the code
 
-见 [`AGENTS.md`](AGENTS.md)。
+See [`AGENTS.md`](AGENTS.md).
