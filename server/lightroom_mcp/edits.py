@@ -113,6 +113,9 @@ CURVE_KEYS = ("ToneCurvePV2012", "ToneCurvePV2012Red", "ToneCurvePV2012Green", "
 MAX_CURVE_POINTS = 16
 MAX_CURVE_DEVIATION = 90.0  # how far a point may be from the straight line (y = x) in one call
 
+META_FLAGS = ("pick", "none", "reject")
+META_LABELS = ("red", "yellow", "green", "blue", "purple", "none")
+META_MAX_TITLE, META_MAX_CAPTION, META_MAX_KEYWORD, META_MAX_KEYWORDS = 200, 1000, 60, 10
 MAX_BATCH_PHOTOS = 10      # photos per batch call
 PLAN_LIFETIME_SECONDS = 15 * 60
 # A batch changes sliders by the same RELATIVE amount on every photo. Composition (crop, straighten) is per photo and
@@ -418,6 +421,8 @@ class EditService:
     def restore(self, edit_id: str) -> dict:
         self.check_writable()
         record = self.store.load(edit_id)
+        if record.get("kind") == "meta":
+            return self._restore_meta(record)
         if record.get("kind") == "batch":
             return self._restore_batch(record)
         if record.get("kind") != "set":
@@ -496,6 +501,131 @@ class EditService:
             "verified": bool(data.get("verified")),
             "changes": self._summary(data.get("before", {}), data.get("after", {}), earliest),
         }
+
+    # ---- catalog information: rating, flag, colour label, title, caption, keywords ----------------
+    @staticmethod
+    def _quote(text: str) -> str:
+        return urllib.parse.quote(text, safe="")
+
+    @staticmethod
+    def _keyword_list(names, what: str) -> list[str]:
+        if names is None:
+            return []
+        if not isinstance(names, (list, tuple)) or not all(isinstance(n, str) for n in names):
+            raise EditError(f"{what} 必须是关键词的列表，例如 [\"sunset\", \"Torino\"]。")
+        clean = []
+        for n in names:
+            n = n.strip()
+            if not n or len(n) > META_MAX_KEYWORD or re.search(r"[\x00-\x1f\x7f,]", n):
+                raise EditError(f"{what} 里的关键词不合法：不能为空、不能超过 {META_MAX_KEYWORD} 个字符、不能含逗号或控制字符（{n!r}）。")
+            if n not in clean:
+                clean.append(n)
+        if len(clean) > META_MAX_KEYWORDS:
+            raise EditError(f"一次最多处理 {META_MAX_KEYWORDS} 个关键词，{what} 给了 {len(clean)} 个。")
+        return clean
+
+    def get_metadata(self, photo: str = "selected") -> dict:
+        return self.call("get_metadata", {"photo": photo}, timeout=30)
+
+    def _meta_params(self, rating, flag, color_label, title, caption, add_keywords, remove_keywords) -> tuple[dict, dict]:
+        """Validate and return (plain values for the record, command parameters for the plug-in)."""
+        plain: dict = {}
+        wire: dict = {}
+        if rating is not None:
+            if isinstance(rating, bool) or not isinstance(rating, int) or not 0 <= rating <= 5:
+                raise EditError("rating（星级）必须是 0 到 5 的整数，0 表示没有星。")
+            plain["rating"], wire["rating"] = rating, str(rating)
+        if flag is not None:
+            if flag not in META_FLAGS:
+                raise EditError("flag（旗标）必须是 pick（留用）、none（无）或 reject（排除）。")
+            plain["flag"], wire["flag"] = flag, flag
+        if color_label is not None:
+            if str(color_label).lower() not in META_LABELS:
+                raise EditError("color_label（颜色标签）必须是 red、yellow、green、blue、purple 或 none。")
+            plain["color_label"], wire["color"] = str(color_label).lower(), str(color_label).lower()
+        for name, value, limit, key in (("title（标题）", title, META_MAX_TITLE, "title"), ("caption（说明文字）", caption, META_MAX_CAPTION, "caption")):
+            if value is not None:
+                if not isinstance(value, str) or len(value) > limit or re.search(r"[\x00-\x1f\x7f]", value):
+                    raise EditError(f"{name} 必须是不超过 {limit} 个字符、不含控制字符的文字（空字符串表示清空）。")
+                plain[key], wire[key] = value, self._quote(value)
+        adds = self._keyword_list(add_keywords, "add_keywords")
+        removes = self._keyword_list(remove_keywords, "remove_keywords")
+        if set(adds) & set(removes):
+            raise EditError("同一个关键词不能同时出现在 add_keywords 和 remove_keywords 里。")
+        if adds:
+            plain["add_keywords"], wire["add_kw"] = adds, ",".join(self._quote(n) for n in adds)
+        if removes:
+            plain["remove_keywords"], wire["remove_kw"] = removes, ",".join(self._quote(n) for n in removes)
+        if not plain:
+            raise EditError("没有要修改的内容：至少给 rating、flag、color_label、title、caption、add_keywords、remove_keywords 之一。")
+        return plain, wire
+
+    def set_metadata(self, rating=None, flag=None, color_label=None, title=None, caption=None,
+                     add_keywords=None, remove_keywords=None, reason: str = "", photo: str = "selected") -> dict:
+        self.check_writable()
+        plain, wire = self._meta_params(rating, flag, color_label, title, caption, add_keywords, remove_keywords)
+        current = self.call("get_metadata", {"photo": photo}, timeout=30)
+        photo_id, before = current["photo"]["id"], current["metadata"]
+        record = {
+            "edit_id": self.store.new_id(), "kind": "meta", "status": "pending",
+            "created": time.strftime("%Y-%m-%d %H:%M:%S"), "created_ns": _now_ns(),
+            "photo_id": photo_id, "photo_name": current["photo"].get("name"),
+            "reason": str(reason)[:500], "requested": plain, "before": before,
+        }
+        self.store.save(record)   # the old values are on disk BEFORE anything is written
+        try:
+            data = self.call("set_metadata", {"photo": photo_id, "edit": record["edit_id"], **wire}, timeout=60)
+        except Exception as e:
+            record.update(status="failed", error=str(e))
+            self.store.save(record)
+            raise
+        after = data.get("after", {})
+        had = set(before.get("keywords", []))
+        record.update(status="applied", after=after, verified=bool(data.get("verified")),
+                      added_keywords=[k for k in plain.get("add_keywords", []) if k not in had],
+                      removed_keywords=[k for k in plain.get("remove_keywords", []) if k in had])
+        self.store.save(record)
+        return {
+            "edit_id": record["edit_id"], "photo": record["photo_name"], "photo_id": photo_id,
+            "verified": record["verified"], "before": before, "after": after,
+            "undo": f"lr_restore(edit_id=\"{record['edit_id']}\") 把这些信息写回修改前的样子（新建过的关键词会留在 Lightroom 的关键词列表里，只是从这张照片上去掉）。",
+        }
+
+    def _restore_meta(self, record: dict) -> dict:
+        if record.get("restored_by"):
+            return {"edit_id": record["edit_id"], "note": f"这次修改已经在 {record['restored_by']} 里还原过了，没有再做任何事。"}
+        if record.get("status") == "failed":
+            raise EditError("这次修改当时失败了，没有改动照片，不需要还原。")
+        before, asked = record["before"], record["requested"]
+        wire: dict = {}
+        if "rating" in asked:
+            wire["rating"] = str(int(before.get("rating", 0)))
+        if "flag" in asked:
+            wire["flag"] = before.get("flag", "none")
+        if "color_label" in asked:
+            label = str(before.get("color_label", "none")).lower()
+            wire["color"] = label if label in META_LABELS else "none"
+        for key in ("title", "caption"):
+            if key in asked:
+                wire[key] = self._quote(before.get(key, ""))
+        if record.get("removed_keywords"):
+            wire["add_kw"] = ",".join(self._quote(n) for n in record["removed_keywords"])
+        if record.get("added_keywords"):
+            wire["remove_kw"] = ",".join(self._quote(n) for n in record["added_keywords"])
+        if not wire:
+            raise EditError("这次修改没有改变任何东西，不需要还原。")
+        new_id = self.store.new_id()
+        data = self.call("set_metadata", {"photo": record["photo_id"], "edit": new_id, **wire}, timeout=60)
+        self.store.save({
+            "edit_id": new_id, "kind": "restore", "status": "applied", "of": [record["edit_id"]],
+            "created": time.strftime("%Y-%m-%d %H:%M:%S"), "created_ns": _now_ns(), "photo_id": record["photo_id"],
+            "photo_name": record.get("photo_name"), "requested": {}, "before": data.get("before", {}), "after": data.get("after", {}),
+            "verified": bool(data.get("verified")),
+        })
+        record["restored_by"] = new_id
+        self.store.save(record)
+        return {"edit_id": new_id, "restored": record["edit_id"], "photo": record.get("photo_name"),
+                "verified": bool(data.get("verified")), "now": data.get("after", {})}
 
     # ---- batch -----------------------------------------------------
     def _batch_photo_ids(self, photos) -> list[str]:

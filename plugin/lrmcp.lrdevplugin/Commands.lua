@@ -694,6 +694,187 @@ function M.restore_settings(params)
 	return { before = before, after = after, verified = verified, restored = count, photo = describe(photo) }
 end
 
+-- ---------------------------------------------------------------------------------------------------------------------
+-- Catalog information (v0.11): rating, flag, colour label, title, caption, keywords. These are not develop settings; they
+-- live in the catalog (and in XMP when Lightroom is set to write it). Every change is reversible: the server saves the
+-- old values and restores them by calling set_metadata again.
+-- ---------------------------------------------------------------------------------------------------------------------
+local FLAG_TO_PICK = { pick = 1, none = 0, reject = -1 }
+local PICK_TO_FLAG = { [1] = "pick", [0] = "none", [-1] = "reject" }
+local LABELS = { red = true, yellow = true, green = true, blue = true, purple = true, none = true }
+local MAX_TITLE, MAX_CAPTION, MAX_KEYWORD, MAX_KEYWORDS_PER_CALL = 200, 1000, 60, 10
+
+local function urlDecode(text)
+	return (text:gsub("%%(%x%x)", function(h)
+		return string.char(tonumber(h, 16))
+	end))
+end
+
+local function hasControlChars(text)
+	return text:find("[%c]") ~= nil
+end
+
+local function keywordNames(photo)
+	local names = {}
+	for _, keyword in ipairs(photo:getRawMetadata("keywords") or {}) do
+		names[#names + 1] = keyword:getName()
+	end
+	table.sort(names)
+	return names
+end
+
+local function readMetadata(photo)
+	local label = photo:getRawMetadata("colorNameForLabel")
+	return {
+		rating = photo:getRawMetadata("rating") or 0,
+		flag = PICK_TO_FLAG[photo:getRawMetadata("pickStatus")] or "none",
+		-- measured: Lightroom reports "no colour label" as "gray"
+		color_label = (label == nil or label == "" or label == "gray" or label == "grey") and "none" or label,
+		title = photo:getFormattedMetadata("title") or "",
+		caption = photo:getFormattedMetadata("caption") or "",
+		keywords = Json.array(keywordNames(photo)),
+	}
+end
+
+function M.get_metadata(params)
+	local photo = photoFromRef(LrApplication.activeCatalog(), params.photo)
+	return { photo = describe(photo), metadata = readMetadata(photo) }
+end
+
+local function splitKeywords(text, what)
+	local names = {}
+	for part in tostring(text):gmatch("[^,]+") do
+		local name = urlDecode(part)
+		if name == "" or #name > MAX_KEYWORD or hasControlChars(name) then
+			fail(what .. " 里有不合法的关键词（不能为空、不能超过 " .. MAX_KEYWORD .. " 个字符、不能含控制字符）。")
+		end
+		names[#names + 1] = name
+	end
+	if #names == 0 then
+		fail(what .. " 是空的。")
+	end
+	if #names > MAX_KEYWORDS_PER_CALL then
+		fail(string.format("一次最多处理 %d 个关键词。", MAX_KEYWORDS_PER_CALL))
+	end
+	return names
+end
+
+-- Parameters: photo=<"selected"|uuid> edit=<id> and any of: rating=0..5 flag=pick|none|reject color=<label>
+-- title=<percent-encoded> caption=<percent-encoded> add_kw=<name,name> remove_kw=<name,name> (names percent-encoded)
+function M.set_metadata(params)
+	if LrFileUtils.exists(readonlyPath) then
+		fail("只读模式已开启（" .. readonlyPath .. " 存在），不允许修改照片。")
+	end
+	local editId = params.edit
+	if not editId or not editId:match("^[%w%-]+$") then
+		fail("缺少或不合法的修改编号。")
+	end
+	local rating, flag, color, title, caption, addNames, removeNames
+	if params.rating ~= nil then
+		rating = finiteNumber(params.rating)
+		if not rating or rating ~= math.floor(rating) or rating < 0 or rating > 5 then
+			fail("星级必须是 0 到 5 的整数。")
+		end
+	end
+	if params.flag ~= nil then
+		flag = FLAG_TO_PICK[params.flag]
+		if flag == nil then
+			fail("旗标必须是 pick、none 或 reject。")
+		end
+	end
+	if params.color ~= nil then
+		color = params.color:lower()
+		if not LABELS[color] then
+			fail("颜色标签必须是 red、yellow、green、blue、purple 或 none。")
+		end
+	end
+	if params.title ~= nil then
+		title = urlDecode(params.title)
+		if #title > MAX_TITLE or hasControlChars(title) then
+			fail("标题太长或含控制字符。")
+		end
+	end
+	if params.caption ~= nil then
+		caption = urlDecode(params.caption)
+		if #caption > MAX_CAPTION or hasControlChars(caption) then
+			fail("说明文字太长或含控制字符。")
+		end
+	end
+	if params.add_kw ~= nil then
+		addNames = splitKeywords(params.add_kw, "add_kw")
+	end
+	if params.remove_kw ~= nil then
+		removeNames = splitKeywords(params.remove_kw, "remove_kw")
+	end
+	if rating == nil and flag == nil and color == nil and title == nil and caption == nil and not addNames and not removeNames then
+		fail("没有要修改的内容。")
+	end
+
+	local catalog = LrApplication.activeCatalog()
+	local photo = photoFromRef(catalog, params.photo)
+	if photo:getRawMetadata("isVideo") then
+		fail("这是视频文件，不支持修改。")
+	end
+	local before = readMetadata(photo)
+
+	local result = catalog:withWriteAccessDo("LrMCP " .. editId, function()
+		if rating ~= nil then
+			photo:setRawMetadata("rating", rating > 0 and rating or nil)
+		end
+		if flag ~= nil then
+			photo:setRawMetadata("pickStatus", flag)
+		end
+		if color ~= nil then
+			photo:setRawMetadata("colorNameForLabel", color)
+		end
+		if title ~= nil then
+			photo:setRawMetadata("title", title)
+		end
+		if caption ~= nil then
+			photo:setRawMetadata("caption", caption)
+		end
+		for _, name in ipairs(addNames or {}) do
+			local keyword = catalog:createKeyword(name, {}, true, nil, true)
+			if keyword then
+				photo:addKeyword(keyword)
+			end
+		end
+		if removeNames then
+			local wanted = {}
+			for _, name in ipairs(removeNames) do
+				wanted[name] = true
+			end
+			for _, keyword in ipairs(photo:getRawMetadata("keywords") or {}) do
+				if wanted[keyword:getName()] then
+					photo:removeKeyword(keyword)
+				end
+			end
+		end
+	end, { timeout = 15 })
+	if result ~= "executed" then
+		fail("Lightroom 现在不能写入（可能正忙），没有做任何修改，请稍后再试。")
+	end
+
+	local after = readMetadata(photo)
+	local verified = true
+	if rating ~= nil and after.rating ~= rating then verified = false end
+	if flag ~= nil and after.flag ~= PICK_TO_FLAG[flag] then verified = false end
+	if color ~= nil and after.color_label:lower() ~= color then verified = false end
+	if title ~= nil and after.title ~= title then verified = false end
+	if caption ~= nil and after.caption ~= caption then verified = false end
+	local nowHas = {}
+	for _, name in ipairs(after.keywords) do
+		nowHas[name] = true
+	end
+	for _, name in ipairs(addNames or {}) do
+		if not nowHas[name] then verified = false end
+	end
+	for _, name in ipairs(removeNames or {}) do
+		if nowHas[name] then verified = false end
+	end
+	return { before = before, after = after, verified = verified, photo = describe(photo) }
+end
+
 local COMMANDS = {
 	status = M.status,
 	list_selected = M.list_selected,
@@ -704,6 +885,8 @@ local COMMANDS = {
 	snapshot = M.snapshot,
 	apply_preset = M.apply_preset,
 	restore_settings = M.restore_settings,
+	get_metadata = M.get_metadata,
+	set_metadata = M.set_metadata,
 }
 
 function M.run(command, params)

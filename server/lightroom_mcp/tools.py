@@ -145,6 +145,25 @@ def build_server(bridge: Bridge | None, busy_message: str | None = None, updates
 
     @mcp.tool(annotations=READ_ONLY)
     @_guard
+    def lr_get_metadata(photo: str = "selected") -> str:
+        """读取一张照片的目录信息：星级（0 到 5）、旗标（pick 留用 / none / reject 排除）、颜色标签、标题、说明文字、关键词。"""
+        return _text(edits.get_metadata(_check_photo(photo)))
+
+    @mcp.tool(annotations=WRITES)
+    @_guard
+    def lr_set_metadata(rating: int | None = None, flag: str | None = None, color_label: str | None = None,
+                        title: str | None = None, caption: str | None = None,
+                        add_keywords: list[str] | None = None, remove_keywords: list[str] | None = None,
+                        reason: str = "", photo: str = "selected") -> str:
+        """修改一张照片的目录信息（不是调整参数），只给要改的项：rating 星级 0 到 5（0 是没有星）；flag：pick 留用 /
+        none / reject 排除；color_label：red、yellow、green、blue、purple 或 none；title 标题（最多 200 字，空字符串清空）；
+        caption 说明文字（最多 1000 字）；add_keywords / remove_keywords 关键词列表（一次最多 10 个，每个最多 60 个字符，
+        不含逗号；新关键词会被创建在 Lightroom 的关键词列表顶层）。一次只改一张照片，改之前旧值先存盘，
+        返回的 edit_id 可交给 lr_restore 还原。只在用户明确要求时才改，尤其是排除（reject）和清空标题/说明文字。"""
+        return _text(edits.set_metadata(rating, flag, color_label, title, caption, add_keywords, remove_keywords, reason, _check_photo(photo)))
+
+    @mcp.tool(annotations=READ_ONLY)
+    @_guard
     def lr_list_presets(query: str = "", limit: int = 30) -> str:
         """列出 Lightroom 里的开发预设（最多 50 个）：id、名称、所在文件夹、是否带蒙版（带蒙版的不能套用）。
         query：按名称或文件夹名搜索（一个词，不分大小写），不填就列出前几个；返回里有总数，可以用关键词缩小范围。"""
