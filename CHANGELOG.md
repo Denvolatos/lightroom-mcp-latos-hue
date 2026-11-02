@@ -28,6 +28,17 @@ Versions: a new feature raises the middle number, a small fix the last one. The 
   to the start, the preview is pixel-identical).
 - Not included: white balance (RAW values only appear after an edit; needs more measuring), tone curve, masks, crop.
 
+## 0.8.0 — crop and straighten
+
+- `lr_set_develop` can change the four crop edges (`CropLeft`, `CropTop`, `CropRight`, `CropBottom`, fractions of the image;
+  uncropped is 0, 0, 1, 1) and `CropAngle` (straighten, ±45°, at most ±10° per call). 89 sliders in total.
+- The crop must keep at least 10% of the width and of the height, with left < right and top < bottom; checked on the
+  final rectangle by both the server and the plug-in. Restoring puts the old edges back and the photo is uncropped again.
+- Measured (experiment 9): Lightroom stores out-of-range or inverted edges unchecked and then shows the photo as not cropped;
+  angles beyond ±45° stop working; writing the aspect-ratio lock leaves a side effect behind, so it is not allowed.
+- Which way a positive `CropAngle` turns is not confirmed (待验证); the tool text tells the assistant to check the preview.
+- Real-Lightroom acceptance run on a RAW and a JPEG of the test catalog: all checks pass, everything restored.
+
 ## 0.7.0 — detail and effects
 
 - 22 more sliders in `lr_set_develop` (84 in total): sharpening (amount, radius, detail, masking), noise reduction (luminance
