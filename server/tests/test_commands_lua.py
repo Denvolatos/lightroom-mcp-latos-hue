@@ -38,7 +38,7 @@ end
 function photo:applyDevelopSettings(settings, name)
   FAKE.writes[#FAKE.writes + 1] = { settings = settings, name = name }
   for k, v in pairs(settings) do
-    FAKE.values[k] = FAKE.round_to and (math.floor(v / FAKE.round_to + 0.5) * FAKE.round_to) or v
+    FAKE.values[k] = (FAKE.round_to and type(v) == 'number') and (math.floor(v / FAKE.round_to + 0.5) * FAKE.round_to) or v
   end
 end
 
@@ -89,7 +89,8 @@ function SET(key, value) FAKE.values[key] = value end
 function RESET()
   FAKE.readonly, FAKE.write_gate, FAKE.writes, FAKE.fail_read, FAKE.round_to = false, "executed", {}, nil, nil
   FAKE.values = { Exposure2012 = 0, Contrast2012 = 0, Saturation = 0, HueAdjustmentRed = 0, Sharpness = 40,
-                  WhiteBalance = 'As Shot', Temperature = 5600, Tint = 13 }
+                  WhiteBalance = 'As Shot', Temperature = 5600, Tint = 13,
+                  ToneCurvePV2012 = { 0, 0, 255, 255 }, ParametricHighlights = 0, ColorGradeBlending = 50 }
 end
 RESET()
 """
@@ -135,7 +136,7 @@ def test_a_normal_change_is_written_and_reported(lr):
 
 
 def test_unknown_parameter_is_refused_before_any_write(lr):
-    for key in ("CropLeft", "ToneCurvePV2012", "Sharpness"):
+    for key in ("CropLeft", "ToneCurve", "Sharpness"):
         reply = lr.run("set_develop", photo="selected", edit="e1", **{key: "1"})
         assert not reply["ok"] and "不允许修改" in reply["error"], key
     assert lr.writes() == 0
@@ -251,3 +252,36 @@ def test_white_balance_on_a_photo_without_kelvin_values_is_refused_clearly(lr):
 def test_unknown_white_balance_label_is_ignored_on_restore(lr):
     back = lr.run("set_develop", photo="selected", edit="w2", restore="1", wb="Evil_Label", Temperature="5600")
     assert back["ok"] and lr.values()["WhiteBalance"] == "Custom"
+
+
+def test_point_curve_is_written_and_read_back(lr):
+    reply = lr.run("set_develop", photo="selected", edit="c1", ToneCurvePV2012="0,0,64,50,192,205,255,255")
+    assert reply["ok"] and reply["data"]["verified"] is True
+    assert reply["data"]["before"]["ToneCurvePV2012"] == [0, 0, 255, 255]
+    assert reply["data"]["after"]["ToneCurvePV2012"] == [0, 0, 64, 50, 192, 205, 255, 255]
+
+
+def test_bad_curves_are_refused_by_the_plugin_itself(lr):
+    for bad in ("0,0", "0,0,255", "5,5,255,255", "0,0,100,100,100,120,255,255", "0,0,100,150,150,100,255,255",
+                "0,0,100,230,255,255", "0,0,300,300", "a,b,c,d", ""):
+        reply = lr.run("set_develop", photo="selected", edit="c1", ToneCurvePV2012=bad)
+        assert not reply["ok"], bad
+    assert lr.writes() == 0
+
+
+def test_curve_restore_skips_only_the_deviation_and_endpoint_rules(lr):
+    lr.set_value("ToneCurvePV2012", None)  # not needed: just prove restore accepts a steep earlier curve
+    reply = lr.run("set_develop", photo="selected", edit="c2", restore="1", ToneCurvePV2012="0,10,100,240,255,255")
+    assert not reply["ok"] and "读不到" in reply["error"]  # the fake has no curve value now
+    lr.reset()
+    reply = lr.run("set_develop", photo="selected", edit="c2", restore="1", ToneCurvePV2012="0,10,100,240,255,255")
+    assert reply["ok"]
+
+
+def test_colour_grading_and_parametric_sliders_use_the_same_rules(lr):
+    reply = lr.run("set_develop", photo="selected", edit="g1", ColorGradeBlending="70", ParametricHighlights="-20")
+    assert reply["ok"] and lr.values()["ColorGradeBlending"] == 70
+    reply = lr.run("set_develop", photo="selected", edit="g2", ColorGradeBlending="101")
+    assert not reply["ok"] and "取值范围" in reply["error"]
+    reply = lr.run("set_develop", photo="selected", edit="g3", ParametricHighlights="-80")
+    assert not reply["ok"] and "单次最多改" in reply["error"]

@@ -16,8 +16,8 @@ LIMITS_LUA = Path(__file__).resolve().parents[2] / "plugin" / "lrmcp.lrdevplugin
 class FakeLightroom:
     def __init__(self):
         self.photos = {
-            "AAAAAAAA-1111": {"name": "one.ARW", "wb": "As Shot", "values": {k: 0.0 for k in edits.LIMITS}},
-            "BBBBBBBB-2222": {"name": "two.JPG", "wb": "As Shot", "values": {k: 0.0 for k in edits.LIMITS}},
+            "AAAAAAAA-1111": {"name": "one.ARW", "wb": "As Shot", "values": {**{k: 0.0 for k in edits.LIMITS}, **{c: [0.0, 0.0, 255.0, 255.0] for c in edits.CURVE_KEYS}}},
+            "BBBBBBBB-2222": {"name": "two.JPG", "wb": "As Shot", "values": {**{k: 0.0 for k in edits.LIMITS}, **{c: [0.0, 0.0, 255.0, 255.0] for c in edits.CURVE_KEYS}}},
         }
         self.active = "AAAAAAAA-1111"
         self.write_calls = 0
@@ -60,6 +60,12 @@ class FakeLightroom:
         for k, text in params.items():
             if k in ("photo", "edit", "restore", "wb"):
                 continue
+            if k in edits.CURVE_KEYS:
+                nums = [float(n) for n in text.split(",")]
+                if not restoring:
+                    edits.validate_curve(k, nums)
+                changes[k] = nums
+                continue
             if k not in edits.LIMITS:
                 raise BridgeError(f"不允许修改这个参数：{k}")
             low, high, step = edits.LIMITS[k]
@@ -95,7 +101,7 @@ def test_changes_must_be_a_non_empty_dict(bad):
 
 
 def test_unknown_and_forbidden_keys_are_refused_with_the_allowed_list():
-    for key in ("Sharpness", "ToneCurvePV2012", "CropLeft", "WhiteBalance", "exposure", "../x"):
+    for key in ("Sharpness", "ToneCurve", "CropLeft", "WhiteBalance", "exposure", "../x"):
         with pytest.raises(EditError) as err:
             validate_changes({key: 1})
         assert "不允许修改" in str(err.value) and "Exposure2012" in str(err.value)
@@ -130,7 +136,7 @@ def test_python_and_lua_whitelists_are_identical():
         if m:
             lua[m.group(1)] = (float(m.group(2)), float(m.group(3)), float(m.group(4)))
     assert lua == edits.LIMITS
-    assert len(lua) == 37
+    assert len(lua) == 62
 
 
 # ---- set_develop -----------------------------------------------------------------------------------------------
@@ -324,3 +330,44 @@ def test_white_balance_range_is_checked():
     with pytest.raises(EditError):
         validate_changes({"Tint": 151})
     assert validate_changes({"Temperature": 6500, "Tint": -20}) == {"Temperature": 6500.0, "Tint": -20.0}
+
+
+# ---- batch 1: colour grading, calibration, parametric curve, point curves --------------------------------------
+def test_colour_grading_ranges():
+    assert validate_changes({"SplitToningShadowHue": 220, "SplitToningShadowSaturation": 25, "ColorGradeGlobalLum": -10})
+    for bad in ({"SplitToningShadowHue": 361}, {"ColorGradeMidtoneSat": -1}, {"ColorGradeBlending": 101}, {"RedHue": 150}):
+        with pytest.raises(EditError):
+            validate_changes(bad)
+
+
+def test_point_curve_validation():
+    good = [[0, 0], [64, 56], [192, 200], [255, 255]]
+    assert validate_changes({"ToneCurvePV2012": good})["ToneCurvePV2012"] == [0.0, 0.0, 64.0, 56.0, 192.0, 200.0, 255.0, 255.0]
+    bad_curves = [
+        [], [[0, 0]], [[0, 0], [255, 300]], [[5, 5], [255, 255]], [[0, 0], [100, 100], [100, 120], [255, 255]],
+        [[0, 0], [100, 150], [150, 100], [255, 255]],           # goes back down
+        [[0, 0], [100, 230], [255, 255]],                        # too far from the straight line
+        [[0, 0]] + [[i * 10, i * 10] for i in range(1, 20)] + [[255, 255]],  # too many points
+        [[0, 0], [True, 5], [255, 255]], "abc", [[0, 0], [float("nan"), 5], [255, 255]],
+    ]
+    for curve in bad_curves:
+        with pytest.raises(EditError):
+            validate_changes({"ToneCurvePV2012": curve})
+
+
+def test_curve_edit_and_restore_roundtrip(env):
+    lr, store, service, _ = env
+    result = service.set_develop({"ToneCurvePV2012": [[0, 0], [64, 50], [192, 205], [255, 255]], "ParametricHighlights": -20}, reason="s-curve")
+    assert result["verified"] and all(row["ok"] for row in result["changes"])
+    assert lr.photos["AAAAAAAA-1111"]["values"]["ToneCurvePV2012"] == [0.0, 0.0, 64.0, 50.0, 192.0, 205.0, 255.0, 255.0]
+    service.restore(result["edit_id"])
+    values = lr.photos["AAAAAAAA-1111"]["values"]
+    assert values["ToneCurvePV2012"] == [0.0, 0.0, 255.0, 255.0] and values["ParametricHighlights"] == 0.0
+
+
+def test_restore_original_after_two_curve_edits(env):
+    lr, store, service, _ = env
+    service.set_develop({"ToneCurvePV2012": [[0, 0], [100, 90], [255, 255]]})
+    service.set_develop({"ToneCurvePV2012": [[0, 0], [100, 120], [255, 255]]})
+    service.restore_original()
+    assert lr.photos["AAAAAAAA-1111"]["values"]["ToneCurvePV2012"] == [0.0, 0.0, 255.0, 255.0]

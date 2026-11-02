@@ -76,7 +76,7 @@ def main() -> int:
         plain_keys = [k for k in edits.LIMITS if k not in edits.WB_KEYS]
         base = edits.current_values(baseline_develop, plain_keys)
         has_kelvin = isinstance(baseline_develop["settings"].get("Temperature"), (int, float))
-        check("baseline read: all 35 non-white-balance sliders found", len(base) == 35)
+        check(f"baseline read: all {len(plain_keys)} non-white-balance sliders found", len(base) == len(plain_keys))
 
         # 1. a normal change
         e1 = service.set_develop({"Exposure2012": base["Exposure2012"] + 0.3, "Vibrance": base["Vibrance"] + 10}, reason="acceptance")
@@ -139,6 +139,34 @@ def main() -> int:
                 check("white balance on a JPEG is refused with a clear message", False, "no error")
             except EditError as e:
                 check("white balance on a JPEG is refused with a clear message", "JPEG" in str(e))
+
+        # 3c. batch 1: colour grading + calibration + parametric tone curve + a point curve, in one change
+        curve0 = baseline_develop["settings"].get("ToneCurvePV2012")
+        size_before = preview_size(bridge, photo_id)
+        eb = service.set_develop({
+            "SplitToningShadowHue": 220, "SplitToningShadowSaturation": base["SplitToningShadowSaturation"] + 25,
+            "SplitToningHighlightHue": 40, "SplitToningHighlightSaturation": base["SplitToningHighlightSaturation"] + 20,
+            "ColorGradeBlending": base["ColorGradeBlending"] + 10, "RedHue": base["RedHue"] + 10, "BlueSaturation": base["BlueSaturation"] - 15,
+            "ParametricHighlights": base["ParametricHighlights"] - 20,
+            "ToneCurvePV2012": [[0, 0], [64, 50], [192, 205], [255, 255]],
+        }, reason="acceptance batch 1")
+        check("batch 1 change verified (colour grading, calibration, parametric, point curve)", eb["verified"] and all(r["ok"] for r in eb["changes"]),
+              str([r["parameter"] for r in eb["changes"] if not r["ok"]]))
+        check("preview changed after the batch 1 edit", preview_size(bridge, photo_id) != size_before)
+        try:
+            service.set_develop({"ToneCurvePV2012": [[0, 0], [100, 230], [255, 255]]})
+            check("an extreme point curve is refused", False, "no error")
+        except EditError as e:
+            check("an extreme point curve is refused", "最多" in str(e))
+        try:
+            bridge.call("set_develop", {"photo": photo_id, "edit": "acceptance", "ToneCurvePV2012": "0,0,100,230,255,255"})
+            check("an extreme point curve is refused by the plug-in itself", False, "no error")
+        except BridgeError as e:
+            check("an extreme point curve is refused by the plug-in itself", "最多" in str(e), str(e)[:60])
+        rb = service.restore(eb["edit_id"])
+        backed = bridge.call("get_develop", {"photo": photo_id})["settings"]
+        check("restore brings the point curve and sliders back", rb["verified"] and backed.get("ToneCurvePV2012") == curve0
+              and abs(backed["ColorGradeBlending"] - base["ColorGradeBlending"]) < 1e-3)
 
         # 4. restore one edit: only that edit's sliders go back
         r1 = service.restore(e1["edit_id"])
