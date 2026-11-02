@@ -22,6 +22,7 @@ class FakeLightroom:
             "BBBBBBBB-2222": {"name": "two.JPG", "wb": "As Shot", "values": {**{k: 0.0 for k in edits.LIMITS}, **{c: [0.0, 0.0, 255.0, 255.0] for c in edits.CURVE_KEYS}, "Look": {"Name": "Adobe Color", "Amount": 1.0}}},
         }
         self.active = "AAAAAAAA-1111"
+        self.selected = None   # list of ids; None = only the active photo
         self.write_calls = 0
         self.fail_next_write = False
         self.seen_edit_file_before_write = None
@@ -36,7 +37,8 @@ class FakeLightroom:
     def __call__(self, command, params=None, timeout=30.0):
         params = params or {}
         if command == "list_selected":
-            return {"active_id": self.active, "count": 1, "photos": []}
+            ids = self.selected if self.selected is not None else [self.active]
+            return {"active_id": self.active, "count": len(ids), "photos": [{"id": i, "name": self.photos[i]["name"]} for i in ids[: params.get("limit", 20)]]}
         if command == "get_develop":
             pid, p = self._photo(params["photo"])
             v = p["values"]
@@ -341,7 +343,7 @@ def test_tools_are_registered_with_the_right_hints():
     assert hints == {
         "lr_status": True, "lr_list_selected": True, "lr_get_develop": True, "lr_get_preview": True, "lr_doctor": True,
         "lr_set_develop": False, "lr_restore": False, "lr_restore_original": False, "lr_list_edits": True,
-        "lr_list_presets": True, "lr_apply_preset": False,
+        "lr_list_presets": True, "lr_apply_preset": False, "lr_batch_set_develop": False,
     }
     set_tool = next(t for t in tools if t.name == "lr_set_develop")
     assert "Exposure2012" in set_tool.description and "单次最多改" in set_tool.description
@@ -514,3 +516,92 @@ def test_list_presets_uses_one_word(env):
     lr, store, service, _ = env
     data = service.list_presets("warm look")
     assert data["total"] == 2 and "warm" in data["note"]
+
+
+# ---- batch --------------------------------------------------------------------------------------------------------
+A, B = "AAAAAAAA-1111", "BBBBBBBB-2222"
+
+
+def test_batch_dry_run_changes_nothing_and_apply_needs_the_plan(env):
+    lr, store, service, _ = env
+    lr.selected = [A, B]
+    plan = service.batch_plan({"Exposure2012": 0.3, "Contrast2012": 10}, "selected", reason="brighter")
+    assert plan["nothing_was_changed"] and plan["will_change"] == 2 and plan["plan_id"]
+    assert lr.write_calls == 0 and not store.all()
+    first = plan["photos"][0]["changes"][0]
+    assert first["parameter"] == "Exposure2012" and abs(first["after"] - first["before"] - 0.3) < 1e-9
+    done = service.batch_apply(plan["plan_id"])
+    assert done["changed"] == 2 and all(r["verified"] for r in done["results"])
+    for pid in (A, B):
+        assert lr.photos[pid]["values"]["Exposure2012"] == 0.3 and lr.photos[pid]["values"]["Contrast2012"] == 10.0
+    with pytest.raises(EditError):    # the plan is single use
+        service.batch_apply(plan["plan_id"])
+
+
+def test_batch_restore_undoes_every_photo_and_is_idempotent(env):
+    lr, store, service, _ = env
+    lr.selected = [A, B]
+    done = service.batch_apply(service.batch_plan({"Exposure2012": 0.5}, "selected")["plan_id"])
+    result = service.restore(done["batch_id"])
+    assert not result["problems"] and len(result["restored"]) == 2
+    assert lr.photos[A]["values"]["Exposure2012"] == 0.0 and lr.photos[B]["values"]["Exposure2012"] == 0.0
+    assert "已经" in service.restore(done["batch_id"])["note"]
+    assert service.list_edits("all")["count"] >= 5   # 2 sets + 2 restores + the batch record
+
+
+def test_batch_refuses_what_cannot_be_done_per_photo_and_what_is_too_big(env):
+    lr, store, service, _ = env
+    lr.photos[A]["values"].update(Temperature=5600.0, Tint=13.0)
+    lr.photos[B]["values"].pop("Temperature")      # like a JPEG: no kelvin value
+    plan = service.batch_plan({"Temperature": 300}, [A, B])
+    by_id = {r["photo_id"]: r for r in plan["photos"]}
+    assert by_id[A]["will_change"] and not by_id[B]["will_change"] and "JPEG" in by_id[B]["reason_skipped"]
+    assert plan["will_change"] == 1 and plan["skipped"] == 1
+    for bad in ({"CropLeft": 0.1}, {"ToneCurvePV2012": 1}, {"Exposure2012": 2.0}, {"Exposure2012": True}, {"Nope": 1}, {}, "x"):
+        with pytest.raises(EditError):
+            service.batch_plan(bad, [A])
+    lr.photos[A]["values"]["Exposure2012"] = 4.9
+    plan = service.batch_plan({"Exposure2012": 0.5}, [A])    # 5.4 is out of range for that photo
+    assert plan["will_change"] == 0 and plan["plan_id"] is None
+    with pytest.raises(EditError):
+        service.batch_apply("nope")
+
+
+def test_batch_limits_on_photo_count_and_ids(env):
+    lr, store, service, _ = env
+    for bad in ([], ["../x"], ["selected"], [5], "abc", ["a" * 8] * 0):
+        with pytest.raises(EditError):
+            service.batch_plan({"Exposure2012": 0.1}, bad)
+    many = [f"PHOTO{i:04d}-0000" for i in range(11)]
+    with pytest.raises(EditError):
+        service.batch_plan({"Exposure2012": 0.1}, many)
+
+
+def test_batch_stops_at_the_first_failure_and_what_was_done_can_be_restored(env):
+    lr, store, service, _ = env
+    lr.selected = [A, B]
+    plan = service.batch_plan({"Exposure2012": 0.4}, "selected")
+    original = lr._set
+    calls = {"n": 0}
+
+    def flaky(params):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise BridgeError("Lightroom 现在不能写入")
+        return original(params)
+
+    lr._set = flaky
+    done = service.batch_apply(plan["plan_id"])
+    assert done["changed"] == 1 and done["stopped_early_at"] and "error" in done["results"][1]
+    assert lr.photos[A]["values"]["Exposure2012"] == 0.4 and lr.photos[B]["values"]["Exposure2012"] == 0.0
+    service.restore(done["batch_id"])
+    assert lr.photos[A]["values"]["Exposure2012"] == 0.0
+
+
+def test_batch_respects_read_only(env):
+    lr, store, service, tmp = env
+    (tmp / "readonly").write_text("1")
+    with pytest.raises(ReadOnlyError):
+        service.batch_plan({"Exposure2012": 0.1}, [A])
+    with pytest.raises(ReadOnlyError):
+        service.batch_apply("whatever")
