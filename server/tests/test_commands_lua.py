@@ -42,6 +42,25 @@ function photo:applyDevelopSettings(settings, name)
   end
 end
 
+-- presets: one plain colour preset, one with masks
+local presets = {
+  { uuid = "PRESET-PLAIN-0001", name = "Warm look",
+    settings = { Contrast2012 = 40, ColorGradeBlending = 70, Look = { Name = "Vivid" }, GrainSeed = 99, Version = "15.4" } },
+  { uuid = "PRESET-MASKS-0002", name = "Sky", settings = { MaskGroupBasedCorrections = { { Name = "sky" } } } },
+}
+function photo:applyDevelopPreset(preset)
+  FAKE.writes[#FAKE.writes + 1] = { preset = preset:getName() }
+  for k, v in pairs(preset.settings) do
+    if k ~= "Version" and k ~= "MaskGroupBasedCorrections" then FAKE.values[k] = v end
+  end
+end
+local presetObjects = {}
+for _, p in ipairs(presets) do
+  presetObjects[#presetObjects + 1] = { settings = p.settings, getUuid = function() return p.uuid end,
+                                        getName = function() return p.name end, getSetting = function() return p.settings end }
+end
+local folder = { getName = function() return "Test folder" end, getDevelopPresets = function() return presetObjects end }
+
 local catalog = {}
 function catalog:getPath() return "C:\\test\\test.lrcat" end
 function catalog:getTargetPhoto() return photo end
@@ -54,7 +73,7 @@ function catalog:withWriteAccessDo(name, fn, params)
 end
 
 local modules = {
-  LrApplication = { activeCatalog = function() return catalog end,
+  LrApplication = { activeCatalog = function() return catalog end, developPresetFolders = function() return { folder } end,
                     versionTable = function() return { major = 15, minor = 2, revision = 0, build_version = "x" } end },
   LrDate = { currentTime = function() return 0 end },
   LrExportSession = function() error("not used in these tests") end,
@@ -86,6 +105,9 @@ function RUN(command, params)
   return Json.encode({ ok = false, error = type(res) == "table" and res.lrmcp or tostring(res) })
 end
 function SET(key, value) FAKE.values[key] = value end
+function SET_JSON(key, text) FAKE.values[key] = Json.decode(text) end
+function DECODE(text) return Json.encode(Json.decode(text)) end
+function DECODE_FAILS(text) local ok, e = pcall(Json.decode, text) return (not ok) and (type(e) == "table" and e.lrmcp or tostring(e)) or false end
 function RESET()
   FAKE.readonly, FAKE.write_gate, FAKE.writes, FAKE.fail_read, FAKE.round_to = false, "executed", {}, nil, nil
   FAKE.values = { Exposure2012 = 0, Contrast2012 = 0, Saturation = 0, HueAdjustmentRed = 0, Sharpness = 40,
@@ -118,6 +140,15 @@ def lr():
 
         def reset(self):
             g.RESET()
+
+        def set_json(self, key, text):
+            g.SET_JSON(key, text)
+
+        def decode(self, text):
+            return g.DECODE(text)
+
+        def decode_fails(self, text):
+            return g.DECODE_FAILS(text)
 
         def set_value(self, key, value):
             g.SET(key, value)
@@ -297,3 +328,60 @@ def test_crop_rectangle_rule_and_restore_in_the_plugin(lr):
     assert not reply["ok"] and "单次最多改" in reply["error"]
     back = lr.run("set_develop", photo="selected", edit="k4", restore="1", CropLeft="0", CropRight="1", CropAngle="0")
     assert back["ok"] and lr.values()["CropLeft"] == 0 and lr.values()["CropRight"] == 1
+
+
+# ---- presets and the JSON decoder ---------------------------------------------------------------------------
+def test_json_decoder_round_trips_and_rejects_garbage(lr):
+    text = '{"a":1.5,"b":[1,2,{"c":"x y"}],"d":true,"e":"\u00e4\u4e2d","f":-3}'
+    assert json.loads(lr.decode(text)) == {"a": 1.5, "b": [1, 2, {"c": "x y"}], "d": True, "e": "\u00e4\u4e2d", "f": -3}
+    for bad in ('{"a":}', '{"a":1', '[1,2', '{"a":1} x', '{1:2}', '"abc', '{"a":nan}', '[' * 20 + ']' * 20, ''):
+        assert lr.decode_fails(bad), bad
+
+
+def test_list_presets_filters_and_flags_masks(lr):
+    reply = lr.run("list_presets", query="sky")
+    assert reply["ok"] and reply["data"]["matched"] == 1 and reply["data"]["presets"][0]["has_masks"] is True
+    reply = lr.run("list_presets")
+    assert reply["data"]["total"] == 2 and len(reply["data"]["presets"]) == 2
+
+
+def test_apply_preset_reports_everything_that_changed(lr):
+    reply = lr.run("set_develop", photo="selected", edit="p0", Contrast2012="5")
+    assert reply["ok"]
+    lr.set_json("Look", '{"Name":"Adobe Color"}')
+    reply = lr.run("apply_preset", photo="selected", edit="p1", preset="PRESET-PLAIN-0001")
+    data = reply["data"]
+    assert reply["ok"] and data["preset"] == "Warm look"
+    assert set(data["changed_keys"]) == {"Contrast2012", "ColorGradeBlending", "Look", "GrainSeed"}
+    assert data["new_keys"] == ["GrainSeed"] and data["tables_changed"] == ["Look"]
+    assert data["before"]["Contrast2012"] == 5 and "GrainSeed" not in data["before"]
+
+
+def test_masked_preset_and_bad_ids_are_refused_without_writing(lr):
+    for preset in ("PRESET-MASKS-0002", "PRESET-NOPE-9999", "../x", ""):
+        reply = lr.run("apply_preset", photo="selected", edit="p1", preset=preset)
+        assert not reply["ok"], preset
+    assert lr.writes() == 0
+    lr.set_flag("readonly", True)
+    reply = lr.run("apply_preset", photo="selected", edit="p1", preset="PRESET-PLAIN-0001")
+    assert not reply["ok"] and "只读模式" in reply["error"] and lr.writes() == 0
+
+
+def blob(values):
+    import urllib.parse
+    return urllib.parse.quote(json.dumps(values, separators=(",", ":")), safe="")
+
+
+def test_restore_settings_writes_back_only_known_keys_of_the_same_type_and_range(lr):
+    lr.set_json("Look", '{"Name":"Vivid"}')
+    ok = lr.run("restore_settings", photo="selected", edit="r1", blob=blob({"Contrast2012": 3, "Look": {"Name": "Adobe Color"}}))
+    assert ok["ok"] and ok["data"]["verified"] is True and lr.values()["Contrast2012"] == 3
+    for label, values in (("unknown key", {"NotASetting": 1}), ("wrong type", {"Contrast2012": "7"}),
+                          ("out of range", {"Contrast2012": 500}), ("masks", {"MaskGroupBasedCorrections": {}}),
+                          ("bad name", {"a b": 1})):
+        before = lr.writes()
+        reply = lr.run("restore_settings", photo="selected", edit="r2", blob=blob(values))
+        assert not reply["ok"] and lr.writes() == before, label
+    lr.set_flag("readonly", True)
+    reply = lr.run("restore_settings", photo="selected", edit="r3", blob=blob({"Contrast2012": 1}))
+    assert not reply["ok"] and "只读模式" in reply["error"]

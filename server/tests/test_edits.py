@@ -1,6 +1,8 @@
 import asyncio
+import copy
 import json
 import re
+import urllib.parse
 from pathlib import Path
 
 import pytest
@@ -16,8 +18,8 @@ LIMITS_LUA = Path(__file__).resolve().parents[2] / "plugin" / "lrmcp.lrdevplugin
 class FakeLightroom:
     def __init__(self):
         self.photos = {
-            "AAAAAAAA-1111": {"name": "one.ARW", "wb": "As Shot", "values": {**{k: 0.0 for k in edits.LIMITS}, **{c: [0.0, 0.0, 255.0, 255.0] for c in edits.CURVE_KEYS}}},
-            "BBBBBBBB-2222": {"name": "two.JPG", "wb": "As Shot", "values": {**{k: 0.0 for k in edits.LIMITS}, **{c: [0.0, 0.0, 255.0, 255.0] for c in edits.CURVE_KEYS}}},
+            "AAAAAAAA-1111": {"name": "one.ARW", "wb": "As Shot", "values": {**{k: 0.0 for k in edits.LIMITS}, **{c: [0.0, 0.0, 255.0, 255.0] for c in edits.CURVE_KEYS}, "Look": {"Name": "Adobe Color", "Amount": 1.0}}},
+            "BBBBBBBB-2222": {"name": "two.JPG", "wb": "As Shot", "values": {**{k: 0.0 for k in edits.LIMITS}, **{c: [0.0, 0.0, 255.0, 255.0] for c in edits.CURVE_KEYS}, "Look": {"Name": "Adobe Color", "Amount": 1.0}}},
         }
         self.active = "AAAAAAAA-1111"
         self.write_calls = 0
@@ -45,7 +47,50 @@ class FakeLightroom:
             return {"photo": {"id": pid, "name": p["name"]}, "settings": settings, "hsl": hsl}
         if command == "set_develop":
             return self._set(params)
+        if command == "list_presets":
+            return {"total": 2, "matched": 2, "shown": 2, "presets": [
+                {"id": "PRESET-AAAA-0001", "name": "Warm look", "folder": "Test", "has_masks": False},
+                {"id": "PRESET-BBBB-0002", "name": "Sky mask", "folder": "Test", "has_masks": True}]}
+        if command == "snapshot":
+            pid, p = self._photo(params["photo"])
+            return {"photo": {"id": pid, "name": p["name"]}, "settings": copy.deepcopy(p["values"]), "has_local_adjustments": False}
+        if command == "apply_preset":
+            return self._apply_preset(params)
+        if command == "restore_settings":
+            return self._restore_settings(params)
         raise AssertionError(f"unexpected command {command}")
+
+    def _apply_preset(self, params):
+        self.write_calls += 1
+        if params["preset"] == "PRESET-BBBB-0002":
+            raise BridgeError("这个预设带有蒙版/局部调整（自适应预设），暂不支持套用")
+        pid, p = self._photo(params["photo"])
+        v = p["values"]
+        before = copy.deepcopy(v)
+        v["Contrast2012"] = 40.0
+        v["Look"] = {"Name": "Vivid", "Amount": 1.0}
+        v["ToneCurvePV2012"] = [0.0, 0.0, 128.0, 140.0, 255.0, 255.0]
+        v["GrainSeed"] = 123.0           # a key that did not exist before: cannot be restored, cannot be deleted
+        p["wb"] = "Custom"
+        keys = sorted(k for k in set(before) | set(v) if before.get(k) != v.get(k))
+        scalars = {k: {"before": before.get(k), "after": v[k]} for k in keys if not isinstance(v[k], (dict, list)) and not isinstance(before.get(k), (dict, list))}
+        return {"preset": "Warm look", "changed_keys": keys, "changes": scalars,
+                "tables_changed": [k for k in keys if k not in scalars], "new_keys": [k for k in keys if k not in before],
+                "before": {k: before[k] for k in keys if k in before}, "photo": {"id": pid}}
+
+    def _restore_settings(self, params):
+        self.write_calls += 1
+        pid, p = self._photo(params["photo"])
+        values = json.loads(urllib.parse.unquote(params["blob"]))
+        for k, x in values.items():
+            if k not in p["values"]:
+                raise BridgeError(f"照片当前没有这个设置，没法写回：{k}")
+            if type(p["values"][k]) is not type(x):
+                raise BridgeError(f"类型对不上，已取消还原：{k}")
+        before = {k: p["values"][k] for k in values if not isinstance(p["values"][k], (dict, list))}
+        p["values"].update(values)
+        return {"before": before, "after": {k: x for k, x in values.items() if not isinstance(x, (dict, list))},
+                "verified": True, "restored": len(values)}
 
     def _set(self, params):
         self.write_calls += 1
@@ -296,6 +341,7 @@ def test_tools_are_registered_with_the_right_hints():
     assert hints == {
         "lr_status": True, "lr_list_selected": True, "lr_get_develop": True, "lr_get_preview": True, "lr_doctor": True,
         "lr_set_develop": False, "lr_restore": False, "lr_restore_original": False, "lr_list_edits": True,
+        "lr_list_presets": True, "lr_apply_preset": False,
     }
     set_tool = next(t for t in tools if t.name == "lr_set_develop")
     assert "Exposure2012" in set_tool.description and "单次最多改" in set_tool.description
@@ -398,3 +444,73 @@ def test_crop_ranges_and_rectangle_rule(env):
     service.restore(result["edit_id"])
     values = lr.photos["AAAAAAAA-1111"]["values"]
     assert values["CropLeft"] == 0.0 and values["CropRight"] == 1.0
+
+
+# ---- batch 4: presets --------------------------------------------------------------------------------------------
+def test_preset_apply_saves_the_whole_state_first_and_restore_brings_everything_back(env):
+    lr, store, service, _ = env
+    values = lr.photos["AAAAAAAA-1111"]["values"]
+    start = copy.deepcopy(values)
+    result = service.apply_preset("PRESET-AAAA-0001", reason="warm it up")
+    assert result["preset"] == "Warm look" and result["settings_changed"] >= 4
+    assert values["Contrast2012"] == 40.0 and values["Look"]["Name"] == "Vivid"
+    record = store.load(result["edit_id"])
+    assert record["status"] == "applied" and record["generic"] and "snapshot" not in record
+    assert record["before"]["Look"] == {"Name": "Adobe Color", "Amount": 1.0}
+    assert "GrainSeed" in record["new_keys"] and "GrainSeed" not in record["before"]
+    restored = service.restore(result["edit_id"])
+    assert restored["verified"]
+    now = {k: v for k, v in values.items() if k != "GrainSeed"}
+    assert now == start
+
+
+def test_preset_pending_record_holds_a_snapshot_before_anything_is_applied(env):
+    lr, store, service, _ = env
+    seen = {}
+    original = lr._apply_preset
+
+    def spy(params):
+        recs = store.all()
+        seen["snapshot_on_disk"] = bool(recs) and "snapshot" in recs[-1] and recs[-1]["status"] == "pending"
+        return original(params)
+
+    lr._apply_preset = spy
+    service.apply_preset("PRESET-AAAA-0001")
+    assert seen["snapshot_on_disk"] is True
+
+
+def test_masked_preset_is_refused_and_recorded_as_failed(env):
+    lr, store, service, _ = env
+    with pytest.raises(BridgeError):
+        service.apply_preset("PRESET-BBBB-0002")
+    records = store.all()
+    assert records[-1]["status"] == "failed" and "snapshot" not in records[-1]
+    with pytest.raises(EditError):
+        service.restore(records[-1]["edit_id"])
+
+
+def test_restore_original_mixes_slider_edits_and_a_preset(env):
+    lr, store, service, _ = env
+    values = lr.photos["AAAAAAAA-1111"]["values"]
+    start = copy.deepcopy(values)
+    service.set_develop({"Exposure2012": 0.5})
+    service.apply_preset("PRESET-AAAA-0001")
+    service.set_develop({"Contrast2012": 60.0})
+    service.restore_original()
+    assert {k: v for k, v in values.items() if k != "GrainSeed"} == start
+
+
+def test_preset_ids_are_checked_and_readonly_blocks(env):
+    lr, store, service, tmp = env
+    for bad in ("", "../x", "a b", "short", None, 5):
+        with pytest.raises(EditError):
+            service.apply_preset(bad)
+    (tmp / "readonly").write_text("1")
+    with pytest.raises(ReadOnlyError):
+        service.apply_preset("PRESET-AAAA-0001")
+
+
+def test_list_presets_uses_one_word(env):
+    lr, store, service, _ = env
+    data = service.list_presets("warm look")
+    assert data["total"] == 2 and "warm" in data["note"]
