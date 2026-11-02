@@ -88,6 +88,10 @@ local DEVELOP_KEYS = {
 	"VignetteAmount", "PostCropVignetteAmount", "GrainAmount",
 	"CropLeft", "CropTop", "CropRight", "CropBottom", "CropAngle",
 	"ConvertToGrayscale", "ProcessVersion", "CameraProfile",
+	"ColorGradeShadowLum", "ColorGradeHighlightLum", "ColorGradeMidtoneHue", "ColorGradeMidtoneSat", "ColorGradeMidtoneLum",
+	"ColorGradeGlobalHue", "ColorGradeGlobalSat", "ColorGradeGlobalLum", "ColorGradeBlending",
+	"ShadowTint", "RedHue", "RedSaturation", "GreenHue", "GreenSaturation", "BlueHue", "BlueSaturation",
+	"ToneCurvePV2012", "ToneCurvePV2012Red", "ToneCurvePV2012Green", "ToneCurvePV2012Blue",
 }
 local COLORS = { "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta" }
 
@@ -224,6 +228,58 @@ local RESERVED = { photo = true, edit = true, restore = true, wb = true }
 -- Changing Temperature/Tint also needs WhiteBalance = "Custom" (measured). Restoring writes the old label back; the
 -- label travels as a token without spaces and only these values are accepted.
 local WB_KEYS = { Temperature = true, Tint = true }
+-- Point curves travel as "x1,y1,x2,y2,..." (0..255). Same rules as the Python side; the deviation limit is the "step".
+local CURVE_KEYS = { ToneCurvePV2012 = true, ToneCurvePV2012Red = true, ToneCurvePV2012Green = true, ToneCurvePV2012Blue = true }
+local MAX_CURVE_POINTS = 16
+local MAX_CURVE_DEVIATION = 90
+
+local function parseCurve(key, text, restoring)
+	local flat = {}
+	for part in tostring(text):gmatch("[^,]+") do
+		local n = tonumber(part)
+		if n == nil or n ~= n or n < 0 or n > 255 then
+			fail(key .. " 里的坐标必须是 0 到 255 的数字：" .. tostring(part))
+		end
+		flat[#flat + 1] = n
+	end
+	local points = #flat / 2
+	if #flat == 0 or #flat % 2 ~= 0 or points < 2 or points > MAX_CURVE_POINTS then
+		fail(string.format("%s 需要 2 到 %d 个点（x,y 成对），收到 %g 个数。", key, MAX_CURVE_POINTS, #flat))
+	end
+	for i = 2, points do
+		if flat[2 * i - 1] <= flat[2 * i - 3] then
+			fail(key .. " 的点必须按 x 从小到大排列，且 x 不能重复。")
+		end
+	end
+	if not restoring then
+		if flat[1] ~= 0 or flat[#flat - 1] ~= 255 then
+			fail(key .. " 的第一个点的 x 必须是 0，最后一个点的 x 必须是 255。")
+		end
+		for i = 2, points do
+			if flat[2 * i] < flat[2 * i - 2] then
+				fail(key .. " 的 y 不能往回走（不支持反相曲线）。")
+			end
+		end
+		for i = 1, points do
+			if math.abs(flat[2 * i] - flat[2 * i - 1]) > MAX_CURVE_DEVIATION then
+				fail(string.format("%s 的每个点离直线（y = x）最多 %d，一次改太大了。", key, MAX_CURVE_DEVIATION))
+			end
+		end
+	end
+	return flat
+end
+
+local function sameNumbers(a, b)
+	if type(a) ~= "table" or type(b) ~= "table" or #a ~= #b then
+		return false
+	end
+	for i = 1, #a do
+		if type(b[i]) ~= "number" or math.abs(a[i] - b[i]) > 1e-3 then
+			return false
+		end
+	end
+	return true
+end
 local WB_LABELS = {
 	As_Shot = "As Shot", Auto = "Auto", Daylight = "Daylight", Cloudy = "Cloudy", Shade = "Shade",
 	Tungsten = "Tungsten", Fluorescent = "Fluorescent", Flash = "Flash", Custom = "Custom",
@@ -253,19 +309,24 @@ function M.set_develop(params)
 	local changes, count = {}, 0
 	for key, text in pairs(params) do
 		if not RESERVED[key] then
-			local limit = Limits[key]
-			if not limit then
-				fail("不允许修改这个参数：" .. tostring(key))
+			if CURVE_KEYS[key] then
+				changes[key] = parseCurve(key, text, restoring)
+				count = count + 1
+			else
+				local limit = Limits[key]
+				if not limit then
+					fail("不允许修改这个参数：" .. tostring(key))
+				end
+				local value = finiteNumber(text)
+				if not value then
+					fail(key .. " 的值不是有效数字：" .. tostring(text))
+				end
+				if value < limit[1] or value > limit[2] then
+					fail(string.format("%s 的取值范围是 %g 到 %g，收到 %g。", key, limit[1], limit[2], value))
+				end
+				changes[key] = value
+				count = count + 1
 			end
-			local value = finiteNumber(text)
-			if not value then
-				fail(key .. " 的值不是有效数字：" .. tostring(text))
-			end
-			if value < limit[1] or value > limit[2] then
-				fail(string.format("%s 的取值范围是 %g 到 %g，收到 %g。", key, limit[1], limit[2], value))
-			end
-			changes[key] = value
-			count = count + 1
 		end
 	end
 	if count == 0 then
@@ -286,17 +347,28 @@ function M.set_develop(params)
 	local before = {}
 	for key, value in pairs(changes) do
 		local now = current[key]
-		if type(now) ~= "number" then
-			if WB_KEYS[key] then
-				fail("这张照片读不到色温/色调的当前值（JPEG 没有开尔文值；没编辑过的 RAW 也可能读不到，先在 Lightroom 里对它做任意一次编辑再试）。照片没有改动。")
+		if CURVE_KEYS[key] then
+			if type(now) ~= "table" or #now < 4 then
+				fail("读不到 " .. key .. " 的当前曲线，已取消修改，照片没有改动。")
 			end
-			fail("读不到 " .. key .. " 的当前值，已取消修改，照片没有改动。")
-		end
-		before[key] = now
-		local step = Limits[key][3]
-		if not restoring and math.abs(value - now) > step + 1e-9 then
-			fail(string.format("%s 当前是 %g，目标 %g，单次最多改 ±%g。请分几次改，每次改完用 lr_get_preview 看一眼效果。",
-				key, now, value, step))
+			local copy = {}
+			for i = 1, #now do
+				copy[i] = now[i]
+			end
+			before[key] = copy
+		else
+			if type(now) ~= "number" then
+				if WB_KEYS[key] then
+					fail("这张照片读不到色温/色调的当前值（JPEG 没有开尔文值；没编辑过的 RAW 也可能读不到，先在 Lightroom 里对它做任意一次编辑再试）。照片没有改动。")
+				end
+				fail("读不到 " .. key .. " 的当前值，已取消修改，照片没有改动。")
+			end
+			before[key] = now
+			local step = Limits[key][3]
+			if not restoring and math.abs(value - now) > step + 1e-9 then
+				fail(string.format("%s 当前是 %g，目标 %g，单次最多改 ±%g。请分几次改，每次改完用 lr_get_preview 看一眼效果。",
+					key, now, value, step))
+			end
 		end
 	end
 
@@ -321,7 +393,11 @@ function M.set_develop(params)
 	local after, verified = {}, true
 	for key, value in pairs(changes) do
 		after[key] = stored[key]
-		if type(stored[key]) ~= "number" or math.abs(stored[key] - value) > VERIFY_TOLERANCE then
+		if CURVE_KEYS[key] then
+			if not sameNumbers(value, stored[key]) then
+				verified = false
+			end
+		elseif type(stored[key]) ~= "number" or math.abs(stored[key] - value) > VERIFY_TOLERANCE then
 			verified = false
 		end
 	end

@@ -134,7 +134,7 @@ def build_server(bridge: Bridge | None, busy_message: str | None = None, updates
 
     @mcp.tool(annotations=WRITES, description=SET_DESCRIPTION)
     @_guard
-    def lr_set_develop(changes: dict[str, float], reason: str = "", photo: str = "selected", preview: bool = False) -> list:
+    def lr_set_develop(changes: dict[str, float | list], reason: str = "", photo: str = "selected", preview: bool = False) -> list:
         result = edits.set_develop(changes, reason, _check_photo(photo))
         out: list = [_text(result)]
         if preview:

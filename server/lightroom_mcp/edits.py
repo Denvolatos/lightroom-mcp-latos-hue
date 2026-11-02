@@ -40,6 +40,41 @@ for _prefix in HSL_PREFIXES:
     for _color in COLORS:
         LIMITS[_prefix + _color] = (-100.0, 100.0, 30.0)
 
+
+# batch 1 (experiment 7): colour grading, calibration, parametric tone curve. Hue values are cyclic, so no step limit.
+LIMITS.update({
+    "SplitToningShadowHue": (0.0, 360.0, 360.0),
+    "SplitToningShadowSaturation": (0.0, 100.0, 30.0),
+    "ColorGradeShadowLum": (-100.0, 100.0, 30.0),
+    "SplitToningHighlightHue": (0.0, 360.0, 360.0),
+    "SplitToningHighlightSaturation": (0.0, 100.0, 30.0),
+    "ColorGradeHighlightLum": (-100.0, 100.0, 30.0),
+    "ColorGradeMidtoneHue": (0.0, 360.0, 360.0),
+    "ColorGradeMidtoneSat": (0.0, 100.0, 30.0),
+    "ColorGradeMidtoneLum": (-100.0, 100.0, 30.0),
+    "ColorGradeGlobalHue": (0.0, 360.0, 360.0),
+    "ColorGradeGlobalSat": (0.0, 100.0, 30.0),
+    "ColorGradeGlobalLum": (-100.0, 100.0, 30.0),
+    "SplitToningBalance": (-100.0, 100.0, 30.0),
+    "ColorGradeBlending": (0.0, 100.0, 30.0),
+    "ShadowTint": (-100.0, 100.0, 30.0),
+    "RedHue": (-100.0, 100.0, 30.0),
+    "RedSaturation": (-100.0, 100.0, 30.0),
+    "GreenHue": (-100.0, 100.0, 30.0),
+    "GreenSaturation": (-100.0, 100.0, 30.0),
+    "BlueHue": (-100.0, 100.0, 30.0),
+    "BlueSaturation": (-100.0, 100.0, 30.0),
+    "ParametricShadows": (-100.0, 100.0, 30.0),
+    "ParametricDarks": (-100.0, 100.0, 30.0),
+    "ParametricLights": (-100.0, 100.0, 30.0),
+    "ParametricHighlights": (-100.0, 100.0, 30.0),
+})
+
+# Point curves (flat list x1, y1, x2, y2, ...; 0..255). Not in LIMITS: they are lists, not numbers.
+CURVE_KEYS = ("ToneCurvePV2012", "ToneCurvePV2012Red", "ToneCurvePV2012Green", "ToneCurvePV2012Blue")
+MAX_CURVE_POINTS = 16
+MAX_CURVE_DEVIATION = 90.0  # how far a point may be from the straight line (y = x) in one call
+
 EDIT_ID = re.compile(r"^[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$")
 
 _last_ns = 0
@@ -68,19 +103,60 @@ def describe_limits() -> str:
                  "单次最多改 ±1000；Tint 色调 -150 到 +150（负偏绿、正偏洋红），单次最多改 ±30")
     lines.append("对比度/高光/阴影/白色/黑色/纹理/清晰度/去朦胧/自然饱和度/饱和度（Contrast2012, Highlights2012, Shadows2012, "
                  "Whites2012, Blacks2012, Texture, Clarity2012, Dehaze, Vibrance, Saturation）：-100 到 +100，单次最多改 ±30")
+    lines.append("颜色分级（先让对应的 Saturation > 0，色相才看得出来）：SplitToningShadowHue / SplitToningHighlightHue / ColorGradeMidtoneHue / "
+                 "ColorGradeGlobalHue 色相 0 到 360（循环，不限步长）；SplitToningShadowSaturation / SplitToningHighlightSaturation / "
+                 "ColorGradeMidtoneSat / ColorGradeGlobalSat 饱和度 0 到 100；ColorGradeShadowLum / ColorGradeHighlightLum / "
+                 "ColorGradeMidtoneLum / ColorGradeGlobalLum 明度 -100 到 100；SplitToningBalance -100 到 100；ColorGradeBlending 0 到 100。"
+                 "（除色相外）单次最多改 ±30")
+    lines.append("相机校准：ShadowTint, RedHue, RedSaturation, GreenHue, GreenSaturation, BlueHue, BlueSaturation：-100 到 +100，单次最多改 ±30")
+    lines.append("色调曲线·参数：ParametricShadows, ParametricDarks, ParametricLights, ParametricHighlights：-100 到 +100，单次最多改 ±30")
+    lines.append("色调曲线·点：ToneCurvePV2012（亮度）、ToneCurvePV2012Red / Green / Blue（三个通道），值是点的列表，"
+                 "例如 [[0,0],[64,56],[192,200],[255,255]]：x 是原亮度、y 是调整后的亮度（0 到 255），2 到 16 个点，"
+                 "第一个点 x=0、最后一个点 x=255，x 递增，y 不往回走，每个点离直线 y=x 最多 90")
     lines.append("HSL（HueAdjustment / SaturationAdjustment / LuminanceAdjustment + Red, Orange, Yellow, Green, Aqua, Blue, "
                  "Purple, Magenta）：-100 到 +100，单次最多改 ±30")
     return "\n".join(lines)
 
 
-def validate_changes(changes: object) -> dict[str, float]:
+def validate_curve(key: str, value: object) -> list[float]:
+    """A point curve as [[x, y], ...] (or a flat list). Returns the flat list [x1, y1, x2, y2, ...]."""
+    flat: list[float] = []
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            if isinstance(item, (list, tuple)):
+                flat.extend(item)
+            else:
+                flat.append(item)
+    if not flat or len(flat) % 2:
+        raise EditError(f"{key} 必须是点的列表，例如 [[0,0],[64,56],[192,200],[255,255]]（x 是原亮度，y 是调整后的亮度，都是 0 到 255）。")
+    for n in flat:
+        if isinstance(n, bool) or not isinstance(n, (int, float)) or not math.isfinite(n) or not 0 <= n <= 255:
+            raise EditError(f"{key} 里的坐标必须是 0 到 255 的数字，你给的是 {n!r}。")
+    xs, ys = flat[0::2], flat[1::2]
+    if not 2 <= len(xs) <= MAX_CURVE_POINTS:
+        raise EditError(f"{key} 需要 2 到 {MAX_CURVE_POINTS} 个点，你给了 {len(xs)} 个。")
+    if xs[0] != 0 or xs[-1] != 255:
+        raise EditError(f"{key} 的第一个点的 x 必须是 0，最后一个点的 x 必须是 255。")
+    if any(b <= a for a, b in zip(xs, xs[1:])):
+        raise EditError(f"{key} 的点必须按 x 从小到大排列，且 x 不能重复。")
+    if any(b < a for a, b in zip(ys, ys[1:])):
+        raise EditError(f"{key} 的 y 不能往回走（曲线必须一直向上或持平；不支持反相曲线）。")
+    if any(abs(y - x) > MAX_CURVE_DEVIATION for x, y in zip(xs, ys)):
+        raise EditError(f"{key} 的每个点离直线（y = x）最多 {MAX_CURVE_DEVIATION:g}，一次改太大了。请先改一部分，用 lr_get_preview 看效果再继续。")
+    return [float(n) for n in flat]
+
+
+def validate_changes(changes: object) -> dict[str, object]:
     """Check keys, types and ranges. The per-call step limit is enforced by the plug-in (it knows the current value)."""
     if not isinstance(changes, dict) or not changes:
         raise EditError("changes 必须是非空的 {参数名: 数值} 字典，例如 {\"Exposure2012\": 0.3}。")
     if len(changes) > config.MAX_KEYS_PER_EDIT:
         raise EditError(f"一次最多改 {config.MAX_KEYS_PER_EDIT} 个参数，你给了 {len(changes)} 个。请分几次改。")
-    clean: dict[str, float] = {}
+    clean: dict[str, object] = {}
     for key, value in changes.items():
+        if key in CURVE_KEYS:
+            clean[key] = validate_curve(key, value)
+            continue
         if key not in LIMITS:
             raise EditError(
                 f"不允许修改“{key}”。当前版本只允许这些：\n{describe_limits()}\n（色调曲线、蒙版、裁剪、预设暂不支持。）"
@@ -94,16 +170,28 @@ def validate_changes(changes: object) -> dict[str, float]:
     return clean
 
 
-def fmt(value: float) -> str:
-    """Number as text for the plug-in command line (no spaces, no locale)."""
+def fmt(value) -> str:
+    """Number (or point list) as text for the plug-in command line (no spaces, no locale)."""
+    if isinstance(value, (list, tuple)):
+        return ",".join(format(float(v), ".10g") for v in value)
     return format(float(value), ".10g")
 
 
-def current_values(develop: dict, keys) -> dict[str, float]:
+def as_number_or_list(value):
+    return [float(v) for v in value] if isinstance(value, (list, tuple)) else float(value)
+
+
+def current_values(develop: dict, keys) -> dict:
     """Pick the current value of each wanted key out of a ``get_develop`` reply."""
     out: dict[str, float] = {}
     for key in keys:
         value = None
+        if key in CURVE_KEYS:
+            curve = develop.get("settings", {}).get(key)
+            if not isinstance(curve, list) or len(curve) < 4:
+                raise EditError(f"读不到 {key} 的当前曲线，已取消修改。")
+            out[key] = [float(n) for n in curve]
+            continue
         for prefix, field in (("HueAdjustment", "hue"), ("SaturationAdjustment", "saturation"), ("LuminanceAdjustment", "luminance")):
             if key.startswith(prefix):
                 value = develop.get("hsl", {}).get(key[len(prefix):], {}).get(field)
@@ -199,13 +287,11 @@ class EditService:
         rows = []
         for key, want in requested.items():
             got = after.get(key)
-            rows.append({
-                "parameter": key,
-                "before": before.get(key),
-                "requested": want,
-                "after": got,
-                "ok": isinstance(got, (int, float)) and abs(got - want) < 1e-3,
-            })
+            if isinstance(want, list):
+                ok = isinstance(got, list) and len(got) == len(want) and all(abs(a - b) < 1e-3 for a, b in zip(got, want))
+            else:
+                ok = isinstance(got, (int, float)) and abs(got - want) < 1e-3
+            rows.append({"parameter": key, "before": before.get(key), "requested": want, "after": got, "ok": ok})
         return rows
 
     # ---- the four operations ---------------------------------------
@@ -252,7 +338,7 @@ class EditService:
             return {"edit_id": edit_id, "note": f"这次修改已经在 {record['restored_by']} 里还原过了，没有再做任何事。"}
         if record.get("status") == "failed":
             raise EditError("这次修改当时失败了，没有改动照片，不需要还原。")
-        values = {k: float(v) for k, v in record["before"].items()}
+        values = {k: as_number_or_list(v) for k, v in record["before"].items()}
         new_id = self.store.new_id()
         data = self._write(record["photo_id"], new_id, values, restoring=True, wb=record.get("before_wb"))
         self.store.save({
@@ -284,11 +370,11 @@ class EditService:
                    and r.get("status") in ("applied", "pending") and not r.get("restored_by")]
         if not records:
             return {"photo_id": photo_id, "note": "没有 LrMCP 改过这张照片（或都已还原），无需还原。"}
-        earliest: dict[str, float] = {}
+        earliest: dict = {}
         earliest_wb: str | None = None
         for r in records:  # records are sorted oldest first: keep the first old value of each slider
             for key, value in r.get("before", {}).items():
-                earliest.setdefault(key, float(value))
+                earliest.setdefault(key, as_number_or_list(value))
             if earliest_wb is None and r.get("before_wb"):
                 earliest_wb = r["before_wb"]
         plan = {"photo": records[0].get("photo_name"), "edits_undone": [r["edit_id"] for r in records], "will_write": earliest}
