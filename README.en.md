@@ -115,7 +115,9 @@ compatibility report, feature request) or start a **[discussion](../../discussio
 | 0.1 | Read-only: look at photos, develop settings, preview, histogram numbers, self check |
 | 0.2–0.11.1 | Guarded single-photo edits, catalog metadata, batch dry runs, presets, and restoration; see the tools above |
 | current development branch | Restore conflict detection, before/after previews, selected-photo review, and batch plans from verified edits |
-| later | RAW and clean Windows installer acceptance; then consider batch presets and export |
+| later | More RAW formats and clean Windows installer acceptance; then consider batch presets and export |
+
+On Lightroom Classic 15.0 with an isolated test catalog, an iPhone ProRAW DNG passed a temperature edit and full restoration. If `Temperature` / `Tint` is missing just after import, open the photo in Develop once before calling the tool.
 
 Masks and AI features depend on what Adobe's SDK offers and are not promised.
 

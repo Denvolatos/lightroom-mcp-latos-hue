@@ -319,8 +319,8 @@ def current_values(develop: dict, keys) -> dict:
             value = develop.get("settings", {}).get(key)
         if not isinstance(value, (int, float)):
             if key in WB_KEYS:
-                raise EditError("这张照片读不到色温/色调的当前值（JPEG 没有开尔文值；没编辑过的 RAW 也可能读不到，"
-                                "先在 Lightroom 里对它做任意一次编辑再试），已取消修改。")
+                raise EditError("这张照片读不到色温/色调的当前值（JPEG 没有开尔文值；RAW 首次导入后也可能暂时读不到，"
+                                "先在 Lightroom 的「修改照片」模块打开它再试），已取消修改。")
             raise EditError(f"读不到 {key} 的当前值，已取消修改。")
         out[key] = float(value)
     return out

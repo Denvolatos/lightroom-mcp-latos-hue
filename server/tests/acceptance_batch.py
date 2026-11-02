@@ -1,6 +1,6 @@
 """0.10 acceptance check: BATCH changes against a REAL Lightroom (test catalog only).
 
-SAFETY: only on the test catalog (path contains "ceshi") with 2 to 4 photos selected (at least one RAW and one JPEG
+SAFETY: only on the test catalog (path contains "ceshi") with 2 to 4 photos selected (at least one RAW/DNG and one JPEG
 makes the white balance skip visible). Everything is undone at the end and the WHOLE settings snapshot of every photo is
 compared with the start (keys that did not exist at the start are internal values and are not counted).
 The plug-in must be loaded. Usage: python acceptance_batch.py
@@ -91,8 +91,8 @@ def main():
         check("lr_restore(batch_id) undoes every photo", not undone["problems"] and all(not differences(starts[i], now[i]) for i in starts))
 
         # 4. white balance: RAW photos can, JPEG photos are skipped with a reason
-        raws = [p for p in photos if p["format"] == "RAW"]
-        jpgs = [p for p in photos if p["format"] != "RAW"]
+        raws = [p for p in photos if p["format"] in ("RAW", "DNG")]
+        jpgs = [p for p in photos if p["format"] not in ("RAW", "DNG")]
         wb = service.batch_plan({"Temperature": 200}, "selected")
         by_id = {r["photo_id"]: r for r in wb["photos"]}
         check("white balance batch: RAW photos are planned", all(by_id[p["id"]]["will_change"] for p in raws))
