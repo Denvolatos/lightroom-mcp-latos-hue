@@ -98,6 +98,149 @@ encode = function(v, out)
 	end
 end
 
+-- Strict decoder for the values the server sends back when restoring (preset undo). Size and depth are limited;
+-- "null" members are skipped. Raises error({ lrmcp = message }) on bad input.
+local MAX_DEPTH = 8
+local STRING_ESCAPES = { ['"'] = '"', ["\\"] = "\\", ["/"] = "/", b = "\b", f = "\f", n = "\n", r = "\r", t = "\t" }
+
+local function utf8char(code)
+	if code < 0x80 then
+		return string.char(code)
+	elseif code < 0x800 then
+		return string.char(0xC0 + math.floor(code / 0x40), 0x80 + code % 0x40)
+	end
+	return string.char(0xE0 + math.floor(code / 0x1000), 0x80 + math.floor(code / 0x40) % 0x40, 0x80 + code % 0x40)
+end
+
+function Json.decode(text)
+	local pos = 1
+	local function bad(message)
+		error({ lrmcp = "收到的数据格式不对（" .. message .. "），已取消。" }, 0)
+	end
+	local function skip()
+		pos = text:find("%S", pos) or (#text + 1)
+	end
+	local parseValue
+
+	local function parseString()
+		local out = {}
+		pos = pos + 1
+		while true do
+			local c = text:sub(pos, pos)
+			if c == "" then
+				bad("字符串没有结束")
+			elseif c == '"' then
+				pos = pos + 1
+				return table.concat(out)
+			elseif c == "\\" then
+				local n = text:sub(pos + 1, pos + 1)
+				if STRING_ESCAPES[n] then
+					out[#out + 1] = STRING_ESCAPES[n]
+					pos = pos + 2
+				elseif n == "u" then
+					local hex = text:sub(pos + 2, pos + 5)
+					if not hex:match("^%x%x%x%x$") then
+						bad("u 转义不对")
+					end
+					out[#out + 1] = utf8char(tonumber(hex, 16))
+					pos = pos + 6
+				else
+					bad("未知的转义")
+				end
+			else
+				out[#out + 1] = c
+				pos = pos + 1
+			end
+		end
+	end
+
+	parseValue = function(depth)
+		if depth > MAX_DEPTH then
+			bad("嵌套太深")
+		end
+		skip()
+		local c = text:sub(pos, pos)
+		if c == "{" then
+			local obj = {}
+			pos = pos + 1
+			skip()
+			if text:sub(pos, pos) == "}" then
+				pos = pos + 1
+				return obj
+			end
+			while true do
+				skip()
+				if text:sub(pos, pos) ~= '"' then
+					bad("对象的键必须是字符串")
+				end
+				local key = parseString()
+				skip()
+				if text:sub(pos, pos) ~= ":" then
+					bad("缺少冒号")
+				end
+				pos = pos + 1
+				obj[key] = parseValue(depth + 1)
+				skip()
+				local d = text:sub(pos, pos)
+				pos = pos + 1
+				if d == "}" then
+					return obj
+				elseif d ~= "," then
+					bad("对象里缺少逗号")
+				end
+			end
+		elseif c == "[" then
+			local arr = {}
+			pos = pos + 1
+			skip()
+			if text:sub(pos, pos) == "]" then
+				pos = pos + 1
+				return arr
+			end
+			while true do
+				local v = parseValue(depth + 1)
+				if v == nil then
+					bad("数组里不能有 null")
+				end
+				arr[#arr + 1] = v
+				skip()
+				local d = text:sub(pos, pos)
+				pos = pos + 1
+				if d == "]" then
+					return arr
+				elseif d ~= "," then
+					bad("数组里缺少逗号")
+				end
+			end
+		elseif c == '"' then
+			return parseString()
+		elseif text:sub(pos, pos + 3) == "true" then
+			pos = pos + 4
+			return true
+		elseif text:sub(pos, pos + 4) == "false" then
+			pos = pos + 5
+			return false
+		elseif text:sub(pos, pos + 3) == "null" then
+			pos = pos + 4
+			return nil
+		end
+		local num = text:match("^-?%d+%.?%d*[eE]?[+-]?%d*", pos)
+		local value = num and tonumber(num)
+		if value == nil or value ~= value or value == math.huge or value == -math.huge then
+			bad("无法识别的内容")
+		end
+		pos = pos + #num
+		return value
+	end
+
+	local result = parseValue(1)
+	skip()
+	if pos <= #text then
+		bad("末尾有多余的内容")
+	end
+	return result
+end
+
 function Json.encode(v)
 	local out = {}
 	encode(v, out)

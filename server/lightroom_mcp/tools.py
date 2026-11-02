@@ -143,6 +143,28 @@ def build_server(bridge: Bridge | None, busy_message: str | None = None, updates
             out.append(picture)
         return out
 
+    @mcp.tool(annotations=READ_ONLY)
+    @_guard
+    def lr_list_presets(query: str = "", limit: int = 30) -> str:
+        """列出 Lightroom 里的开发预设（最多 50 个）：id、名称、所在文件夹、是否带蒙版（带蒙版的不能套用）。
+        query：按名称或文件夹名搜索（一个词，不分大小写），不填就列出前几个；返回里有总数，可以用关键词缩小范围。"""
+        return _text(edits.list_presets(query, limit))
+
+    @mcp.tool(annotations=WRITES)
+    @_guard
+    def lr_apply_preset(preset_id: str, reason: str = "", photo: str = "selected", preview: bool = False) -> list:
+        """给一张照片套用一个开发预设（preset_id 来自 lr_list_presets）。预设可能一次改动很多地方（曲线、颜色分级、黑白、
+        镜头外观……），所以套之前要和用户说清楚，套完用 lr_get_preview 看效果。套之前整张照片的设置先存盘；
+        用 lr_restore 或 lr_restore_original 可以完全还原。带蒙版/AI 的预设，以及已经有蒙版的照片，会被拒绝。一次只套一张照片。
+        reason：一句话说明为什么套这个预设。preview：为 true 时套完顺便返回一张预览图。"""
+        result = edits.apply_preset(preset_id, reason, _check_photo(photo))
+        out: list = [_text(result)]
+        if preview:
+            info, picture = preview_of(result["photo_id"], config.PREVIEW_DEFAULT_EDGE)
+            out[0] = _text({**result, "preview": info})
+            out.append(picture)
+        return out
+
     @mcp.tool(annotations=WRITES)
     @_guard
     def lr_restore(edit_id: str) -> str:

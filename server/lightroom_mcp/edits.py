@@ -14,6 +14,7 @@ import os
 import re
 import secrets
 import time
+import urllib.parse
 from pathlib import Path
 from typing import Callable
 
@@ -112,6 +113,8 @@ CURVE_KEYS = ("ToneCurvePV2012", "ToneCurvePV2012Red", "ToneCurvePV2012Green", "
 MAX_CURVE_POINTS = 16
 MAX_CURVE_DEVIATION = 90.0  # how far a point may be from the straight line (y = x) in one call
 
+PRESET_ID = re.compile(r"^[A-Za-z0-9\-]{8,64}$")
+MAX_PRESET_ROWS_IN_REPLY = 60
 EDIT_ID = re.compile(r"^[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$")
 
 _last_ns = 0
@@ -240,7 +243,14 @@ def fmt(value) -> str:
 
 
 def as_number_or_list(value):
-    return [float(v) for v in value] if isinstance(value, (list, tuple)) else float(value)
+    """Numbers and number lists become floats; anything else (strings, flags, tables of a preset's old values) is kept."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, (list, tuple)) and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in value):
+        return [float(v) for v in value]
+    return value
 
 
 def current_values(develop: dict, keys) -> dict:
@@ -344,12 +354,19 @@ class EditService:
         params.update({k: fmt(v) for k, v in values.items()})
         return self.call("set_develop", params, timeout=60)
 
+    def _write_generic(self, photo_id: str, edit_id: str, values: dict) -> dict:
+        """Write back old values of any setting (used to undo presets). The plug-in checks key, type and range itself."""
+        blob = urllib.parse.quote(json.dumps(values, ensure_ascii=False, separators=(",", ":")), safe="")
+        return self.call("restore_settings", {"photo": photo_id, "edit": edit_id, "blob": blob}, timeout=60)
+
     @staticmethod
     def _summary(before: dict, after: dict, requested: dict) -> list[dict]:
         rows = []
         for key, want in requested.items():
             got = after.get(key)
-            if isinstance(want, list):
+            if not isinstance(want, (int, float, list)) or isinstance(want, bool):
+                ok = got == want
+            elif isinstance(want, list):
                 ok = isinstance(got, list) and len(got) == len(want) and all(abs(a - b) < 1e-3 for a, b in zip(got, want))
             else:
                 ok = isinstance(got, (int, float)) and abs(got - want) < 1e-3
@@ -403,7 +420,11 @@ class EditService:
             raise EditError("这次修改当时失败了，没有改动照片，不需要还原。")
         values = {k: as_number_or_list(v) for k, v in record["before"].items()}
         new_id = self.store.new_id()
-        data = self._write(record["photo_id"], new_id, values, restoring=True, wb=record.get("before_wb"))
+        if record.get("generic"):
+            data = self._write_generic(record["photo_id"], new_id, values)
+            values = {k: v for k, v in values.items() if not isinstance(v, (dict, list))}  # what the summary can compare
+        else:
+            data = self._write(record["photo_id"], new_id, values, restoring=True, wb=record.get("before_wb"))
         self.store.save({
             "edit_id": new_id, "kind": "restore", "status": "applied", "of": [edit_id],
             "created": time.strftime("%Y-%m-%d %H:%M:%S"), "created_ns": _now_ns(), "photo_id": record["photo_id"],
@@ -445,7 +466,14 @@ class EditService:
             return {**plan, "dry_run": True,
                     "warning": "会把这些滑块写回 LrMCP 第一次改动之前的值；如果你期间手动改过同一个滑块，也会被覆盖。"}
         new_id = self.store.new_id()
-        data = self._write(photo_id, new_id, earliest, restoring=True, wb=earliest_wb)
+        if any(r.get("generic") for r in records):
+            payload = dict(earliest)
+            if earliest_wb and any(k in WB_KEYS for k in payload) and "WhiteBalance" not in payload:
+                payload["WhiteBalance"] = earliest_wb
+            data = self._write_generic(photo_id, new_id, payload)
+            earliest = {k: v for k, v in earliest.items() if not isinstance(v, (dict, list))}
+        else:
+            data = self._write(photo_id, new_id, earliest, restoring=True, wb=earliest_wb)
         self.store.save({
             "edit_id": new_id, "kind": "restore", "status": "applied", "of": plan["edits_undone"],
             "created": time.strftime("%Y-%m-%d %H:%M:%S"), "created_ns": _now_ns(), "photo_id": photo_id, "photo_name": plan["photo"],
@@ -459,6 +487,61 @@ class EditService:
             "edit_id": new_id, "photo": plan["photo"], "edits_undone": plan["edits_undone"],
             "verified": bool(data.get("verified")),
             "changes": self._summary(data.get("before", {}), data.get("after", {}), earliest),
+        }
+
+    # ---- presets ---------------------------------------------------
+    def list_presets(self, query: str = "", limit: int = 30) -> dict:
+        words = str(query).split()
+        data = self.call("list_presets", {"query": words[0] if words else "", "limit": max(1, min(int(limit), 50))}, timeout=60)
+        if len(words) > 1:
+            data["note"] = f"只用了第一个词“{words[0]}”来搜索（一次只能搜一个词）。"
+        return data
+
+    def apply_preset(self, preset_id: str, reason: str = "", photo: str = "selected") -> dict:
+        self.check_writable()
+        if not isinstance(preset_id, str) or not PRESET_ID.match(preset_id):
+            raise EditError("preset_id 不合法：请用 lr_list_presets 返回的 id。")
+        photo_id, develop = self._resolve_photo(photo)
+        snap = self.call("snapshot", {"photo": photo_id}, timeout=60)
+        if snap.get("has_local_adjustments"):
+            raise EditError("这张照片已经有蒙版/局部调整，套预设可能影响它们且无法安全还原，已取消。")
+        record = {
+            "edit_id": self.store.new_id(), "kind": "set", "status": "pending", "generic": True,
+            "created": time.strftime("%Y-%m-%d %H:%M:%S"), "created_ns": _now_ns(),
+            "photo_id": photo_id, "photo_name": develop["photo"].get("name"),
+            "reason": str(reason)[:500], "requested": {"preset": preset_id}, "before": {},
+            "snapshot": snap.get("settings", {}),  # the whole state is on disk BEFORE the preset is applied
+        }
+        self.store.save(record)
+        try:
+            data = self.call("apply_preset", {"photo": photo_id, "edit": record["edit_id"], "preset": preset_id}, timeout=60)
+        except Exception as e:
+            record.update(status="failed", error=str(e))
+            record.pop("snapshot", None)
+            self.store.save(record)
+            raise
+        changed = list(data.get("changed_keys", []))
+        before = dict(data.get("before") or {})
+        for key in changed:  # normally identical; the saved snapshot fills any gap
+            if key not in before and record["snapshot"].get(key) is not None:
+                before[key] = record["snapshot"][key]
+        name = data.get("preset") or preset_id
+        record.update(status="applied", before=before, requested={"preset": name}, preset_id=preset_id,
+                      changed_keys=changed, new_keys=list(data.get("new_keys", [])), verified=bool(changed))
+        record.pop("snapshot", None)
+        self.store.save(record)
+        rows = [{"parameter": k, "before": v.get("before"), "after": v.get("after")} for k, v in sorted((data.get("changes") or {}).items())]
+        return {
+            "edit_id": record["edit_id"], "photo": record["photo_name"], "photo_id": photo_id, "preset": name,
+            "settings_changed": len(changed),
+            "changes": rows[:MAX_PRESET_ROWS_IN_REPLY],
+            "more_changes_not_shown": max(0, len(rows) - MAX_PRESET_ROWS_IN_REPLY),
+            "tables_changed": list(data.get("tables_changed", [])),
+            "note": ("这个预设没有改变任何设置（照片本来就是这个状态）。" if not changed else
+                     "预设可能一次改动很多地方，请用 lr_get_preview 看效果。"),
+            "undo": f"lr_restore(edit_id=\"{record['edit_id']}\") 写回套预设之前的设置（预设改过的全部设置，不只是它列出的）；"
+                    "lr_restore_original 写回 LrMCP 第一次改这张照片之前的状态。"
+                    + ("（预设新增的 " + ", ".join(record["new_keys"]) + " 是 Lightroom 自己生成的内部值，没法删除，不影响画面。）" if record["new_keys"] else ""),
         }
 
     def list_edits(self, photo: str = "all", limit: int = 20) -> dict:

@@ -428,12 +428,282 @@ function M.set_develop(params)
 	return { before = before, before_wb = beforeWb, after = after, verified = verified, photo = describe(photo) }
 end
 
+-- ---------------------------------------------------------------------------------------------------------------------
+-- Develop presets (v0.9). A preset can touch many settings, including ones this project does not otherwise write
+-- (looks, camera profiles, black & white mixer...). It is applied by Lightroom itself; undo works by writing back the old
+-- values of every setting that changed, which the server saved first (snapshot) and gets back from apply_preset.
+-- Presets that carry masks / AI local adjustments are refused.
+-- ---------------------------------------------------------------------------------------------------------------------
+local function deepcopy(v)
+	if type(v) ~= "table" then
+		return v
+	end
+	local c = {}
+	for k, x in pairs(v) do
+		c[k] = deepcopy(x)
+	end
+	return c
+end
+
+local function serialize(v)
+	if type(v) ~= "table" then
+		return type(v) == "string" and string.format("%q", v) or tostring(v)
+	end
+	local keys = {}
+	for k in pairs(v) do
+		keys[#keys + 1] = k
+	end
+	table.sort(keys, function(a, b)
+		return tostring(a) < tostring(b)
+	end)
+	local parts = {}
+	for _, k in ipairs(keys) do
+		parts[#parts + 1] = tostring(k) .. "=" .. serialize(v[k])
+	end
+	return "{" .. table.concat(parts, ",") .. "}"
+end
+
+local function sameValue(a, b)
+	if type(a) == "number" and type(b) == "number" then
+		return math.abs(a - b) <= 1e-6
+	end
+	if type(a) ~= type(b) then
+		return false
+	end
+	if type(a) == "table" then
+		return serialize(a) == serialize(b)
+	end
+	return a == b
+end
+
+local function countNodes(v)
+	if type(v) ~= "table" then
+		return 1
+	end
+	local n = 1
+	for _, x in pairs(v) do
+		n = n + countNodes(x)
+	end
+	return n
+end
+
+local function findPreset(uuid)
+	for _, folder in ipairs(LrApplication.developPresetFolders()) do
+		for _, preset in ipairs(folder:getDevelopPresets()) do
+			if preset:getUuid() == uuid then
+				return preset, folder
+			end
+		end
+	end
+end
+
+function M.list_presets(params)
+	local query = params.query and params.query ~= "" and params.query:lower() or nil
+	local limit = math.max(1, math.min(tonumber(params.limit) or 30, 50))
+	local rows, total, matched = {}, 0, 0
+	for _, folder in ipairs(LrApplication.developPresetFolders()) do
+		local folderName = tostring(folder:getName())
+		for _, preset in ipairs(folder:getDevelopPresets()) do
+			total = total + 1
+			local name = tostring(preset:getName())
+			if not query or name:lower():find(query, 1, true) or folderName:lower():find(query, 1, true) then
+				matched = matched + 1
+				if #rows < limit then
+					local s = preset:getSetting() or {}
+					rows[#rows + 1] = {
+						id = preset:getUuid(),
+						name = name,
+						folder = folderName,
+						has_masks = hasEntries(s.MaskGroupBasedCorrections),
+					}
+				end
+			end
+		end
+	end
+	return { total = total, matched = matched, shown = #rows, presets = Json.array(rows) }
+end
+
+-- All develop settings of a photo (read only), so the server can save them before a preset is applied.
+function M.snapshot(params)
+	local photo = photoFromRef(LrApplication.activeCatalog(), params.photo)
+	local all = photo:getDevelopSettings()
+	local settings = deepcopy(all)
+	settings.MaskGroupBasedCorrections = nil -- local adjustments are not part of what presets may change here
+	return { photo = describe(photo), settings = settings, has_local_adjustments = hasEntries(all.MaskGroupBasedCorrections) }
+end
+
+-- Parameters: photo=<"selected"|uuid> edit=<id> preset=<preset uuid>
+function M.apply_preset(params)
+	if LrFileUtils.exists(readonlyPath) then
+		fail("只读模式已开启（" .. readonlyPath .. " 存在），不允许修改照片。")
+	end
+	local editId = params.edit
+	if not editId or not editId:match("^[%w%-]+$") then
+		fail("缺少或不合法的修改编号。")
+	end
+	local presetId = params.preset
+	if not presetId or not presetId:match("^[%w%-]+$") then
+		fail("缺少或不合法的预设 id（用 lr_list_presets 查）。")
+	end
+	local preset = findPreset(presetId)
+	if not preset then
+		fail("找不到这个预设：id 无效。用 lr_list_presets 查。")
+	end
+	if hasEntries((preset:getSetting() or {}).MaskGroupBasedCorrections) then
+		fail("这个预设带有蒙版/局部调整（自适应预设），暂不支持套用，也没法安全还原。请让用户在 Lightroom 里自己套用。")
+	end
+	local catalog = LrApplication.activeCatalog()
+	local photo = photoFromRef(catalog, params.photo)
+	if photo:getRawMetadata("isVideo") then
+		fail("这是视频文件，不支持修改。")
+	end
+	if hasEntries(photo:getDevelopSettings().MaskGroupBasedCorrections) then
+		fail("这张照片已经有蒙版/局部调整，套预设可能影响它们且无法安全还原，已取消。")
+	end
+
+	local before = deepcopy(photo:getDevelopSettings())
+	local result = catalog:withWriteAccessDo("LrMCP " .. editId, function()
+		photo:applyDevelopPreset(preset)
+	end, { timeout = 15 })
+	if result ~= "executed" then
+		fail("Lightroom 现在不能写入（可能正忙），没有做任何修改，请稍后再试。")
+	end
+	local after = photo:getDevelopSettings()
+
+	local keys, seen = {}, {}
+	for k in pairs(before) do
+		seen[k] = true
+	end
+	for k in pairs(after) do
+		seen[k] = true
+	end
+	for k in pairs(seen) do
+		if k ~= "MaskGroupBasedCorrections" and serialize(before[k]) ~= serialize(after[k]) then
+			keys[#keys + 1] = k
+		end
+	end
+	table.sort(keys)
+	local changes, tables, newKeys, oldValues = {}, {}, {}, {}
+	for _, k in ipairs(keys) do
+		if before[k] == nil then
+			newKeys[#newKeys + 1] = k
+		else
+			oldValues[k] = deepcopy(before[k])
+		end
+		if type(after[k]) == "table" or type(before[k]) == "table" then
+			tables[#tables + 1] = k
+		else
+			changes[k] = { before = before[k], after = after[k] }
+		end
+	end
+	return {
+		preset = preset:getName(),
+		changed_keys = Json.array(keys),
+		changes = changes,
+		tables_changed = Json.array(tables),
+		new_keys = Json.array(newKeys),
+		before = oldValues,
+		photo = describe(photo),
+	}
+end
+
+-- Writes back old values (JSON in the percent-encoded parameter "blob"). Only keys that exist now, with the same type,
+-- inside the known ranges, and never local adjustments.
+-- Parameters: photo=<"selected"|uuid> edit=<id> blob=<percent-encoded JSON object>
+function M.restore_settings(params)
+	if LrFileUtils.exists(readonlyPath) then
+		fail("只读模式已开启（" .. readonlyPath .. " 存在），不允许修改照片。")
+	end
+	local editId = params.edit
+	if not editId or not editId:match("^[%w%-]+$") then
+		fail("缺少或不合法的修改编号。")
+	end
+	local blob = params.blob
+	if not blob or blob == "" or #blob > 150000 then
+		fail("缺少要还原的数据，或数据太大。")
+	end
+	local text = blob:gsub("%%(%x%x)", function(h)
+		return string.char(tonumber(h, 16))
+	end)
+	local values = Json.decode(text)
+	if type(values) ~= "table" or next(values) == nil then
+		fail("没有要还原的内容。")
+	end
+	local catalog = LrApplication.activeCatalog()
+	local photo = photoFromRef(catalog, params.photo)
+	if photo:getRawMetadata("isVideo") then
+		fail("这是视频文件，不支持修改。")
+	end
+	local current = photo:getDevelopSettings()
+	local count = 0
+	for key, value in pairs(values) do
+		count = count + 1
+		if count > 300 then
+			fail("要还原的项目太多。")
+		end
+		if type(key) ~= "string" or not key:match("^[%w_]+$") then
+			fail("不合法的参数名。")
+		end
+		if key == "MaskGroupBasedCorrections" then
+			fail("不允许通过这个途径改蒙版/局部调整。")
+		end
+		local now = current[key]
+		if now == nil then
+			fail("照片当前没有这个设置，没法写回：" .. key)
+		end
+		if type(now) ~= type(value) then
+			fail("类型对不上，已取消还原：" .. key)
+		end
+		if type(value) == "number" then
+			if value ~= value or value == math.huge or value == -math.huge then
+				fail(key .. " 的值不是有效数字。")
+			end
+			local limit = Limits[key]
+			if limit and (value < limit[1] or value > limit[2]) then
+				fail(string.format("%s 的取值范围是 %g 到 %g，收到 %g。", key, limit[1], limit[2], value))
+			end
+		elseif type(value) == "string" then
+			if #value > 200 then
+				fail(key .. " 的文字太长。")
+			end
+		elseif type(value) == "table" then
+			if countNodes(value) > 2000 then
+				fail(key .. " 的内容太大。")
+			end
+		end
+	end
+	local result = catalog:withWriteAccessDo("LrMCP " .. editId, function()
+		photo:applyDevelopSettings(values, "LrMCP " .. editId)
+	end, { timeout = 15 })
+	if result ~= "executed" then
+		fail("Lightroom 现在不能写入（可能正忙），没有做任何修改，请稍后再试。")
+	end
+	local stored = photo:getDevelopSettings()
+	local verified, after, before = true, {}, {}
+	for key, value in pairs(values) do
+		if not sameValue(value, stored[key]) then
+			verified = false
+		end
+		if type(value) ~= "table" then
+			after[key] = stored[key]
+		end
+		if type(current[key]) ~= "table" then
+			before[key] = current[key]
+		end
+	end
+	return { before = before, after = after, verified = verified, restored = count, photo = describe(photo) }
+end
+
 local COMMANDS = {
 	status = M.status,
 	list_selected = M.list_selected,
 	get_develop = M.get_develop,
 	get_preview = M.get_preview,
 	set_develop = M.set_develop,
+	list_presets = M.list_presets,
+	snapshot = M.snapshot,
+	apply_preset = M.apply_preset,
+	restore_settings = M.restore_settings,
 }
 
 function M.run(command, params)
