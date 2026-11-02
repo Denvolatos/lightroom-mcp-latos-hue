@@ -28,6 +28,19 @@ Versions: a new feature raises the middle number, a small fix the last one. The 
   to the start, the preview is pixel-identical).
 - Not included: white balance (RAW values only appear after an edit; needs more measuring), tone curve, masks, crop.
 
+## 0.11.0 — catalog information
+
+- New tools `lr_get_metadata` and `lr_set_metadata` (14 tools in total): rating (0–5), flag (pick / none / reject), colour label,
+  title (200 characters), caption (1000 characters) and keywords (add / remove, up to 10 per call, new keywords are created at
+  the top level). One photo at a time; the old values are saved first and `lr_restore` writes back only what was changed.
+  Keywords created by a change stay in Lightroom's keyword list after a restore (the SDK cannot delete keywords).
+- Measured: Lightroom reports "no colour label" as `gray`; this is shown as `none`.
+- Masks are NOT supported. Experiment 11 measured that mask data written through `applyDevelopSettings` is discarded when the
+  photo is loaded into the develop engine, and that reads of the active photo do not show masks, so a mask feature could not
+  be made reliable. The code was removed again; the measurement scripts stay in the development folder.
+- Real-Lightroom acceptance run (`acceptance_metadata.py`) on a RAW of the test catalog: write, read back, two-step restore
+  and final state identical to the start.
+
 ## 0.10.0 — batch changes
 
 - New tool `lr_batch_set_develop` (12 tools in total): adds the same RELATIVE change to the sliders of up to 10 photos.
