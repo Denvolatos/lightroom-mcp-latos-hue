@@ -31,7 +31,7 @@ STUB = """<script>
     status: ()=>Promise.resolve({state:'connected', text:'Lightroom 已连接', hint:'', photo:{id:'P', name:'DSC08238.ARW'}}),
     preview_state: ()=>Promise.resolve({type:'preview', state:'none', message:'Lightroom 中未选中照片'}), set_preview_edge: ()=>Promise.resolve({ok:true}),
     get_settings: ()=>Promise.resolve({settings, providers, current_provider:'claude', edges:[768,1024,1536,2048],
-      about:{app_version:'0.1.0', lightroom_version:'15.0.0', plugin_version:'0.15.0', data_dir:'~/LrMcp', project_url:'https://github.com/Denvolatos/lightroom-mcp-win'}}),
+      about:{app_version:'0.7.0', lightroom_version:'15.0.0', plugin_version:'0.15.0', data_dir:'~/LrMcp', project_url:'https://github.com/Denvolatos/lightroom-mcp-win'}}),
     choose_folder: ()=>Promise.resolve({ok:true, path:'D:\\\\修图素材'}),
     check_folder: p=>Promise.resolve(p.indexOf('Windows')>=0 ? {ok:false, message:'不能使用系统或程序目录，请选择其他位置。'} : {ok:true, exists:true}),
     save_settings: (c, create)=>{ window.__CALLS__.push(c);
