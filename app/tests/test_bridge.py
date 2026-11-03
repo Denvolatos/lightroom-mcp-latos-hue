@@ -13,7 +13,6 @@ def test_command_has_required_flags():
     for flag in ["-p", "--strict-mcp-config", "--mcp-config", "--setting-sources", "--disable-slash-commands",
                  "--tools", "--system-prompt", "--allowedTools", "--permission-mode", "--disallowedTools"]:
         assert flag in cmd, flag
-    assert cmd[cmd.index("--permission-mode") + 1] == "dontAsk"
     assert cmd[cmd.index("--output-format") + 1] == "stream-json" and "--verbose" in cmd
     assert cmd[cmd.index("--tools") + 1] == ""          # 内置工具全关
     assert cmd[cmd.index("--setting-sources") + 1] == ""
@@ -23,14 +22,59 @@ def test_never_bare():
     assert "--bare" not in make_cmd()
 
 
-def test_only_readonly_allowed_and_writes_blocked():
-    cmd = make_cmd()
-    allowed = cmd[cmd.index("--allowedTools") + 1: cmd.index("--disallowedTools")]
+def split_allowed(cmd):
+    return cmd[cmd.index("--allowedTools") + 1: cmd.index("--disallowedTools")]
+
+
+def split_disallowed(cmd):
+    i = cmd.index("--disallowedTools") + 1
+    out = []
+    while i < len(cmd) and not cmd[i].startswith("--"):
+        out.append(cmd[i])
+        i += 1
+    return out
+
+
+def test_confirm_on_writes_go_through_permission_tool():
+    cmd = cb.build_command("x", Path("m.json"), None, "claude", confirm=True)
+    allowed = split_allowed(cmd)
     assert allowed and all(a.startswith("mcp__lightroom_mcp__lr_") for a in allowed)
-    for w in cb.WRITE_TOOLS:
+    for w in cb.ENABLED_WRITE_TOOLS:                  # 写入类不在放行清单里，必须经确认
         assert f"mcp__lightroom_mcp__{w}" not in allowed
-        assert f"mcp__lightroom_mcp__{w}" in cmd
+    assert cmd[cmd.index("--permission-mode") + 1] == "default"
+    assert cmd[cmd.index("--permission-prompt-tool") + 1] == "mcp__lrapp_confirm__approve"
+
+
+def test_confirm_off_writes_allowed_directly():
+    cmd = cb.build_command("x", Path("m.json"), None, "claude", confirm=False)
+    allowed = split_allowed(cmd)
+    for w in cb.ENABLED_WRITE_TOOLS:
+        assert f"mcp__lightroom_mcp__{w}" in allowed
+    assert cmd[cmd.index("--permission-mode") + 1] == "dontAsk"
+    assert "--permission-prompt-tool" not in cmd
+
+
+def test_other_writes_always_hidden():
+    for confirm in (True, False):
+        cmd = cb.build_command("x", Path("m.json"), None, "claude", confirm=confirm)
+        blocked = split_disallowed(cmd)
+        assert cb.ENABLED_WRITE_TOOLS == ["lr_set_develop", "lr_restore", "lr_restore_original"]
+        for w in cb.WRITE_TOOLS:
+            full = f"mcp__lightroom_mcp__{w}"
+            if w in cb.ENABLED_WRITE_TOOLS:
+                assert full not in blocked
+            else:
+                assert full in blocked and full not in split_allowed(cmd)
     assert set(cb.READONLY_TOOLS).isdisjoint(cb.WRITE_TOOLS)
+
+
+def test_mcp_config_confirm_server_uses_env_placeholders(tmp_path):
+    data = json.loads(cb.write_mcp_config(tmp_path, confirm=True).read_text(encoding="utf-8"))
+    assert set(data["mcpServers"]) == {"lightroom_mcp", "lrapp_confirm"}
+    env = data["mcpServers"]["lrapp_confirm"]["env"]
+    assert env == {"LRAPP_PORT": "${LRAPP_PORT}", "LRAPP_TOKEN": "${LRAPP_TOKEN}"}   # 口令不落盘
+    off = json.loads(cb.write_mcp_config(tmp_path, confirm=False).read_text(encoding="utf-8"))
+    assert list(off["mcpServers"]) == ["lightroom_mcp"]
 
 
 def test_readonly_list_matches_server_annotations():
@@ -42,6 +86,7 @@ def test_readonly_list_matches_server_annotations():
     wr = {n for a, n in pairs if a != "READ_ONLY"}
     assert ro == set(cb.READONLY_TOOLS)
     assert wr == set(cb.WRITE_TOOLS)
+    assert set(cb.ENABLED_WRITE_TOOLS) <= wr
 
 
 def test_resume_only_when_session():
@@ -50,10 +95,8 @@ def test_resume_only_when_session():
     assert cmd[cmd.index("--resume") + 1] == "abc-123"
 
 
-def test_mcp_config_only_lightroom(tmp_path):
+def test_mcp_config_has_no_secrets(tmp_path):
     p = cb.write_mcp_config(tmp_path)
-    data = json.loads(p.read_text(encoding="utf-8"))
-    assert list(data["mcpServers"]) == ["lightroom_mcp"]
     assert "key" not in p.read_text(encoding="utf-8").lower()
 
 
@@ -72,6 +115,7 @@ def test_parse_session_text_tool_done():
         {"type": "tool_use", "name": "mcp__lightroom_mcp__lr_status", "input": {}}]}), st)
     assert [e["type"] for e in ev] == ["tool"]            # 文字已流式输出过，不重复
     assert ev[0]["name"] == "lr_status" and "Lightroom" in ev[0]["label"]
+    assert ev[0]["input"] == {} and "id" in ev[0]
     ev = cb.parse_line(line(type="result", is_error=False, result="好", session_id="S1", total_cost_usd=0.04,
                             usage={"input_tokens": 2, "cache_creation_input_tokens": 100,
                                    "cache_read_input_tokens": 10, "output_tokens": 4}), st)
@@ -118,3 +162,18 @@ def test_timeout_gives_chinese_message(monkeypatch, tmp_path):
     cb.ClaudeSession(tmp_path).send("hi", out.append)
     assert any(e["type"] == "error" and e["message"] == cb.MSG_TIMEOUT for e in out)
     assert out[-1]["type"] == "done"
+
+
+def test_parse_tool_result():
+    ev = cb.parse_line(line(type="user", message={"content": [
+        {"type": "tool_result", "tool_use_id": "T1", "content": [{"type": "text", "text": "结果"}], "is_error": True}]}), {})
+    assert ev == [{"type": "tool_result", "id": "T1", "text": "结果", "is_error": True}]
+    ev = cb.parse_line(line(type="user", message={"content": [
+        {"type": "tool_result", "tool_use_id": "T2", "content": "纯文本"}]}), {})
+    assert ev[0]["text"] == "纯文本" and ev[0]["is_error"] is False
+
+
+def test_system_prompt_is_formal():
+    for word in ("哈", "呢", "吧", "！", "你好", "大白话"):
+        assert word not in cb.SYSTEM_PROMPT
+    assert "正式" in cb.SYSTEM_PROMPT and "reason" in cb.SYSTEM_PROMPT
