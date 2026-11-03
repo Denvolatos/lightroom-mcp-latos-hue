@@ -30,6 +30,7 @@
   .btn.primary { background: var(--accent2); border-color: var(--accent2); }
   .btn.primary:hover { background: var(--accent); border-color: var(--accent); }
   .btn.small { padding: 2px 10px; font-size: 12px; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
   .spacer { flex: 1; }
   .status { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
@@ -156,6 +157,26 @@
   .kv span:nth-child(odd) { color: var(--muted); } .kv span:nth-child(even) { user-select: text; word-break: break-all; }
   .sfoot { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
   .sfoot .msg-line { flex: 1; font-size: 12px; } .sfoot .msg-line.ok { color: var(--ok); } .sfoot .msg-line.bad { color: var(--bad); }
+  /* ---------- import dialog / library ---------- */
+  .dialog.imp { width: 600px; max-width: calc(100vw - 40px); max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
+  .dialog.imp .body { overflow: auto; margin: 0 -6px; padding: 0 6px; user-select: text; }
+  .dialog.imp .row { flex: none; }
+  .imp .big { font-size: 15px; margin: 2px 0 10px; }
+  .imp .kvl { display: grid; grid-template-columns: 110px 1fr; gap: 4px 8px; margin: 6px 0; font-size: 13px; }
+  .imp .kvl > span:nth-child(odd) { color: var(--muted); } .imp .kvl > span:nth-child(even) { word-break: break-all; }
+  .imp .bad { color: var(--bad); font-size: 12px; margin: 4px 0; } .imp .okmsg { color: var(--ok); font-size: 12px; }
+  .imp .warn { color: var(--warn); font-size: 12px; margin: 4px 0; } .imp .mute { color: var(--muted); font-size: 12px; margin: 4px 0; }
+  .imp input[type=text] { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
+  .bar { height: 10px; border-radius: 99px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; margin: 10px 0 8px; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent2); transition: width .2s; }
+  .imp table td, .imp table th { font-size: 12px; vertical-align: top; }
+  .imp .plist { max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; margin-top: 6px; }
+  .libhead { display: flex; align-items: center; gap: 6px; padding: 6px 8px 2px; color: var(--muted); font-size: 12px; }
+  .libgrp { padding: 3px 8px; cursor: pointer; border-radius: 6px; display: flex; gap: 6px; align-items: center; }
+  .libgrp:hover { background: var(--panel2); } .libgrp .cnt { color: var(--muted); font-size: 11px; margin-left: auto; }
+  .libfile { padding: 2px 8px 2px 26px; font-size: 12px; cursor: pointer; border-radius: 6px; display: flex; gap: 8px; }
+  .libfile:hover, .libfile.on { background: var(--panel2); } .libfile .sz { color: var(--muted); margin-left: auto; font-variant-numeric: tabular-nums; }
+  .libinfo { margin: 6px 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; color: var(--muted); user-select: text; }
   ::-webkit-scrollbar { width: 8px; height: 8px; } ::-webkit-scrollbar-thumb { background: #3a3f46; border-radius: 4px; }
 </style>
 </head>
@@ -163,7 +184,7 @@
 
 <div class="topbar">
   <span class="brand">修图助手</span><span class="badge" id="demobadge">界面演示 · 示例数据</span>
-  <button class="btn" onclick="toast('导入：功能开发中')">导入</button>
+  <button class="btn" id="impbtn" onclick="startImport()">导入</button>
   <button class="btn" onclick="openExport()">导出</button>
   <button class="btn" onclick="undo()">撤销</button>
   <button class="btn" id="newchat" onclick="newChat()" style="display:none">新对话</button>
@@ -187,8 +208,14 @@
     </div>
     <div class="lower">
       <div class="section-title">文件 <span class="spacer"></span>
-        <button class="btn small" onclick="toast('新建分类：功能开发中')">新建分类</button></div>
-      <div class="pane" id="files"></div>
+        <button class="btn small" id="newcat" onclick="toast('新建分类：功能开发中')">新建分类</button></div>
+      <div class="pane" id="files" style="flex:none;max-height:36%"></div>
+      <div id="libwrap" style="display:none;flex:1;min-height:0;flex-direction:column;border-top:1px solid var(--line)">
+        <div class="libhead"><span id="libtitle">软件文件夹</span><span class="spacer"></span>
+          <button class="btn small" id="libref" title="重新读取软件文件夹">刷新</button>
+          <button class="btn small" id="libopen" title="在资源管理器中打开软件文件夹">打开文件夹</button></div>
+        <div class="pane" id="lib" style="flex:1"></div>
+      </div>
     </div>
   </div>
 
@@ -235,6 +262,14 @@
   </div>
 </div>
 
+<div class="mask" id="imask">
+  <div class="dialog imp" role="dialog" aria-label="导入照片">
+    <h3 id="im_title">导入照片</h3>
+    <div class="body" id="im_body"></div>
+    <div class="row" id="im_foot"></div>
+  </div>
+</div>
+
 <div class="mask" id="smask">
   <div class="dialog wide" role="dialog" aria-label="设置">
     <h3>设置</h3>
@@ -243,7 +278,7 @@
         <h4>常规</h4>
         <div class="srow"><span class="lab">软件文件夹</span>
           <span class="inline"><input type="text" id="s_folder" readonly><button class="btn small" id="s_pick">选择文件夹</button></span>
-          <span class="sub">用于存放导入的照片及相关文件（导入功能后续提供）。</span>
+          <span class="sub">导入时，照片会复制到该文件夹，再加入 Lightroom 目录；原片不会被移动或删除。</span>
           <span class="ferr" id="e_folder"></span></div>
       </div>
       <div class="sgroup">
@@ -308,14 +343,15 @@ $('#ltabs').onclick = e => { const t=e.target.closest('.tab'); if(!t) return;
   document.querySelectorAll('#ltabs .tab').forEach(x=>x.classList.toggle('on',x===t)); ltab=t.dataset.t; renderLeft(); };
 
 /* ---- files ---- */
-function renderFilesReal(){   // 真实模式：不显示示例文件，只列出 Lightroom 当前选中的照片
+function renderFilesReal(){   // 真实模式：上方显示 Lightroom 当前选中的照片，下方是软件文件夹的只读目录
   const box=$('#files'), p=pv&&pv.photo, ok=pv&&pv.state==='ok', key=(p&&p.name||'')+'|'+(ok?pv.current.url:'');
+  $('#libwrap').style.display='flex'; $('#newcat').style.display='none';
   if (box.dataset.k===key) return; box.dataset.k=key;
-  box.innerHTML = (p&&p.name) ? `<div class="list-item" style="background:var(--panel2);border-color:var(--accent)">${ok?`<img class="thumb" style="object-fit:cover" src="${esc(pv.current.url)}" alt="">`:'<div class="thumb" style="background:var(--bg)"></div>'}<span class="name">${esc(p.name)}</span></div>` : '<div class="empty">Lightroom 中未选中照片</div>';
-  box.insertAdjacentHTML('beforeend','<div class="empty">文件列表：功能开发中。当前仅显示 Lightroom 中选中的照片。</div>');
+  box.innerHTML = '<div class="folder" style="margin-top:0">当前选中</div>' + ((p&&p.name) ? `<div class="list-item" style="background:var(--panel2);border-color:var(--accent)">${ok?`<img class="thumb" style="object-fit:cover" src="${esc(pv.current.url)}" alt="">`:'<div class="thumb" style="background:var(--bg)"></div>'}<span class="name">${esc(p.name)}</span></div>` : '<div class="empty">Lightroom 中未选中照片</div>');
 }
 function renderFiles(){
   if (REAL()) return renderFilesReal();
+  $('#libwrap').style.display='none'; $('#newcat').style.display='';
   const box=$('#files'); box.innerHTML=''; box.dataset.k=''; let last='';
   PHOTOS.forEach((p,i)=>{
     if(p.f!==last){ last=p.f; box.insertAdjacentHTML('beforeend',`<div class="folder">📁 ${p.f}</div>`); }
@@ -452,6 +488,7 @@ window.onClaudeEvent = function(ev){
   else if (ev.type==='confirm'){ cur=null; showConfirm(ev); }
   else if (ev.type==='confirm_done'){ closeConfirm(ev); }
   else if (ev.type==='stopped'){ cur=null; note('已停止'); }
+  else if (ev.type && ev.type.indexOf('import_')===0){ onImportEvent(ev); }
   else if (ev.type==='done'){
     if (!cur && ev.text && !ev.is_error && !$('#msgs').lastChild.classList.contains('ai')) say(ev.text,'ai');
     cur=null; setBusy(false);
@@ -508,6 +545,126 @@ function closeExport(){ $('#mask').classList.remove('show'); }
 function doExport(){ closeExport(); toast('导出功能开发中（所选格式：'+$('#exfmt').value+'）'); }
 $('#mask').onclick=e=>{ if(e.target.id==='mask') closeExport(); };
 
+
+/* ---- import ---- */
+let IM = {cat:'', stage:null, pstage:null};
+const fmtSize = n => n>=1073741824 ? (n/1073741824).toFixed(2)+' GB' : n>=1048576 ? (n/1048576).toFixed(1)+' MB' : n>=1024 ? (n/1024).toFixed(1)+' KB' : n+' B';
+const fmtTime = s => { s=Math.round(s||0); return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); };
+function imOpen(title){ $('#im_title').textContent=title; $('#imask').classList.add('show'); }
+function imClose(){ $('#imask').classList.remove('show'); IM.stage=null; IM.pstage=null; }
+function imSet(body, buttons){   // buttons: [{label, cls, onclick, disabled, id}]
+  $('#im_body').innerHTML=body; const f=$('#im_foot'); f.innerHTML='';
+  (buttons||[]).forEach(b=>{ const e=document.createElement('button'); e.className='btn '+(b.cls||''); e.textContent=b.label; e.disabled=!!b.disabled; if(b.id) e.id=b.id; e.onclick=b.onclick; f.appendChild(e); });
+}
+function infoDialog(title, text){ return askDialog(title, text, '知道了'); }
+async function startImport(){
+  if (!REAL()) return toast('界面演示中，导入不可用');
+  if (IM.stage) { $('#imask').classList.add('show'); return; }
+  IM.cat=''; IM.stage='scanning';      // 先置状态：扫描很快结束时，完成事件可能先于本函数返回
+  const r = await window.pywebview.api.choose_source_folder();
+  if (!r.ok){ IM.stage=null; if (r.message) await infoDialog('无法导入', r.message); return; }
+  if (IM.stage==='scanning') imScanning(0);
+}
+function imScanning(n){
+  imOpen('导入照片');
+  imSet(`<div class="big">正在扫描来源文件夹</div><div class="mute">已找到 ${n} 张照片。扫描只读取文件名，不会改动存储卡上的任何内容。</div>`,
+    [{label:'取消', onclick:async()=>{ await window.pywebview.api.import_cancel(); imClose(); }}]);
+}
+async function imConfirm(){
+  IM.stage='confirm'; imOpen('导入照片');
+  const cur = $('#im_cat') ? $('#im_cat').value : IM.cat;
+  const p = await window.pywebview.api.import_prepare(cur);
+  if (!p.found){ imSet(`<div class="bad">${esc((p.errors&&p.errors._)||'没有可导入的内容。')}</div>`, [{label:'关闭', onclick:async()=>{ await window.pywebview.api.import_close(); imClose(); }}]); return; }
+  const f=p.found, errs=Object.entries(p.errors||{});
+  const errHTML = errs.filter(([k])=>k!=='category').map(([,m])=>`<div class="bad">${esc(m)}</div>`).join('');
+  const catErr = (p.errors&&p.errors.category) ? `<div class="bad">${esc(p.errors.category)}</div>` : '';
+  const notes = [];
+  notes.push('<div class="mute">原片仅被读取，不会移动、删除或修改；照片复制到软件文件夹后再加入 Lightroom 目录。同名且大小相同的文件视为已导入并跳过，不会覆盖已有文件。</div>');
+  if (!p.lr_connected) notes.push('<div class="warn">Lightroom 当前未连接：将只复制照片，稍后可在结果页选择“重新尝试加入 Lightroom”。</div>');
+  if (!p.base_exists && !(p.errors&&p.errors.base)) notes.push('<div class="warn">软件文件夹尚不存在，开始导入时将询问是否创建。</div>');
+  if (f.skipped_links) notes.push(`<div class="mute">已忽略 ${f.skipped_links} 个快捷方式或链接。</div>`);
+  imSet(`<div class="big">找到 ${f.n} 张（RAW ${f.raw}、JPEG ${f.jpeg}、其他 ${f.other}），共 ${esc(f.size_text)}</div>
+    <div class="kvl"><span>来源文件夹</span><span>${esc(p.source)}</span>
+      <span>软件文件夹</span><span>${esc(p.base)}${p.base_is_default?'（默认位置，可在设置中更换）':''}</span>
+      <span>分类文件夹名</span><span><input type="text" id="im_cat" maxlength="60" placeholder="可选，留空则直接放入软件文件夹" value="${esc(cur)}"></span>
+      <span>保存到</span><span>${esc(p.target)}</span>
+      <span>磁盘剩余空间</span><span>${esc(p.free_text)}（本次需要约 ${esc(p.needed_text)}）</span></div>${catErr}${errHTML}${notes.join('')}`,
+    [{label:'取消', onclick:async()=>{ await window.pywebview.api.import_cancel(); imClose(); }},
+     {label:'开始导入', cls:'primary', id:'im_go', disabled:!p.can_start, onclick:imBegin}]);
+  const inp=$('#im_cat'); let t=null;
+  inp.oninput=()=>{ clearTimeout(t); t=setTimeout(()=>{ IM.cat=inp.value; imConfirm().then(()=>{ const i=$('#im_cat'); i.focus(); i.setSelectionRange(i.value.length,i.value.length); }); },350); };
+}
+async function imBegin(){
+  const cat=$('#im_cat').value; IM.cat=cat;
+  let r = await window.pywebview.api.import_start(cat, false);
+  if (r.needs_create){
+    if (!await askDialog('创建文件夹', '软件文件夹不存在：\n'+r.base+'\n是否创建？', '创建')) return;
+    r = await window.pywebview.api.import_start(cat, true);
+  }
+  if (!r.ok){ await infoDialog('无法开始导入', r.message||'无法开始导入。'); imConfirm(); return; }
+  IM.stage='copying'; IM.pstage=null;
+  imProgress({i:0,n:0,name:'',elapsed:0,counts:{copied:0,skipped:0,failed:0,lr_ok:0,lr_uncertain:0,lr_pending:0,lr_failed:0}});
+}
+function countsLine(c){ return `已复制 ${c.copied}　跳过 ${c.skipped}　失败 ${c.failed}　已加入 Lightroom ${c.lr_ok}`+(c.lr_uncertain?`　需确认 ${c.lr_uncertain}`:'')+(c.lr_pending?`　尚未加入 ${c.lr_pending}`:'')+(c.lr_failed?`　加入失败 ${c.lr_failed}`:''); }
+function imProgress(ev){
+  if (IM.stage!=='copying' && IM.stage!=='retry') IM.stage='copying';
+  imOpen(ev.mode==='retry'?'重新加入 Lightroom':'正在导入');
+  const n=ev.n||0, i=Math.min(ev.i+1,n), pct = n? Math.round(ev.i/n*100):0;
+  if ($('#im_bar') && IM.pstage==='on'){ $('#im_bar').style.width=pct+'%'; $('#im_line').textContent = n?`第 ${i}/${n} 个　${ev.name||''}`:'准备中'; $('#im_time').textContent='已用时 '+fmtTime(ev.elapsed); $('#im_counts').textContent=countsLine(ev.counts); return; }
+  IM.pstage='on';
+  imSet(`<div class="big" id="im_line">${n?`第 ${i}/${n} 个　${esc(ev.name||'')}`:'准备中'}</div><div class="bar"><i id="im_bar" style="width:${pct}%"></i></div>
+    <div class="mute" id="im_time">已用时 ${fmtTime(ev.elapsed)}</div><div class="mute" id="im_counts">${esc(countsLine(ev.counts))}</div>
+    <div class="mute">取消后将在当前照片处理完成后停止，已完成的保留。</div>`,
+    [{label:'取消导入', onclick:async(e)=>{ e.target.disabled=true; e.target.textContent='正在停止'; await window.pywebview.api.import_cancel(); }}]);
+}
+function imResult(ev){
+  IM.stage='done'; IM.pstage=null; imOpen('导入结果'); const c=ev.counts;
+  const rows = (ev.problems||[]).map(p=>{ const what = p.copy==='failed' ? '复制' : '加入 Lightroom';
+    return `<tr><td>${esc(p.name)}</td><td>${what}</td><td>${p.lr==='uncertain'?'请在 Lightroom 中确认：':''}${esc(p.reason||'')}</td></tr>`; }).join('');
+  const lines = [];
+  if (ev.cancelled) lines.push('<div class="warn">已取消。已完成的照片保留，未处理的没有复制。</div>');
+  if (c.lr_pending) lines.push(`<div class="warn">有 ${c.lr_pending} 张已复制但尚未加入 Lightroom。</div>`);
+  if (c.lr_uncertain) lines.push(`<div class="warn">有 ${c.lr_uncertain} 张需要在 Lightroom 中确认是否已加入（软件不会自动重试，以免重复添加）。</div>`);
+  if (!ev.cancelled && !c.failed && !c.lr_pending && !c.lr_uncertain && !c.lr_failed) lines.push('<div class="okmsg">全部完成。</div>');
+  imSet(`<div class="big">${esc(countsLine(c))}</div><div class="mute">共 ${ev.n} 张，用时 ${fmtTime(ev.elapsed)}。</div>${lines.join('')}
+    ${rows?`<div class="plist"><table><thead><tr><th>文件</th><th>环节</th><th>原因</th></tr></thead><tbody>${rows}</tbody></table>${ev.problems_more?`<div class="mute">另有 ${ev.problems_more} 项未列出。</div>`:''}</div>`:''}`,
+    [ev.pending_retry?{label:'重新尝试加入 Lightroom', onclick:async()=>{ const r=await window.pywebview.api.import_retry_lr(); if(!r.ok) await infoDialog('无法重新加入', r.message); else { IM.stage='retry'; IM.pstage=null; } }}:null,
+     {label:'关闭', cls:'primary', onclick:async()=>{ await window.pywebview.api.import_close(); imClose(); }}].filter(Boolean));
+  loadLibrary();
+}
+function onImportEvent(ev){
+  if (ev.type==='import_scan'){
+    if (ev.state==='scanning'){ if(IM.stage==='scanning'){ imScanning(ev.found||0); } }
+    else if (ev.state==='done'){ if (ev.error){ imOpen('导入照片'); imSet(`<div class="bad">${esc(ev.error)}</div>`, [{label:'关闭', onclick:async()=>{ await window.pywebview.api.import_close(); imClose(); }}]); } else imConfirm(); }
+    else if (ev.state==='cancelled'){ imClose(); }
+  } else if (ev.type==='import_progress'){ imProgress(ev); }
+  else if (ev.type==='import_done'){ imResult(ev); }
+}
+
+/* ---- 软件文件夹（只读目录） ---- */
+let LIB = null, libOpen = {}, libSel = null;
+async function loadLibrary(){
+  if (!REAL()) return;
+  try { LIB = await window.pywebview.api.library_list(200); } catch(e){ return; }
+  renderLibrary();
+}
+function renderLibrary(){
+  const box=$('#lib'); if(!LIB){ box.innerHTML=''; return; }
+  $('#libtitle').textContent='软件文件夹'+(LIB.exists?`（${LIB.total} 张）`:'');
+  if (!LIB.exists){ box.innerHTML=`<div class="empty">软件文件夹尚不存在。完成一次导入后会自动创建。</div><div class="empty" style="user-select:text">${esc(LIB.base)}</div>`; return; }
+  if (!LIB.total){ box.innerHTML=`<div class="empty">软件文件夹中暂无照片。</div><div class="empty" style="user-select:text">${esc(LIB.base)}</div>`; return; }
+  let h='';
+  LIB.groups.forEach(g=>{ const open = libOpen[g.name]!==false;
+    h+=`<div class="libgrp" data-g="${esc(g.name)}"><span>${open?'▾':'▸'}</span><span>${esc(g.name)}</span><span class="cnt">${g.count}</span></div>`;
+    if (open) g.files.forEach(f=>{ h+=`<div class="libfile${libSel&&libSel.g===g.name&&libSel.n===f.name?' on':''}" data-g="${esc(g.name)}" data-n="${esc(f.name)}" data-s="${f.size}"><span>${esc(f.name)}</span><span class="sz">${fmtSize(f.size)}</span></div>`; }); });
+  if (LIB.more>0) h+=`<div class="empty">仅显示前 ${LIB.shown} 项，另有 ${LIB.more} 项未显示。</div>`;
+  if (libSel) h+=`<div class="libinfo">${esc(libSel.n)} · ${fmtSize(libSel.s)}<br>位置：${esc(libSel.g==='（未分类）'?LIB.base:LIB.base+'\\'+libSel.g)}<br>软件暂不能在 Lightroom 中选中该照片，请在 Lightroom 中选择照片。</div>`;
+  box.innerHTML=h;
+  box.querySelectorAll('.libgrp').forEach(e=>e.onclick=()=>{ libOpen[e.dataset.g] = libOpen[e.dataset.g]===false; renderLibrary(); });
+  box.querySelectorAll('.libfile').forEach(e=>e.onclick=()=>{ libSel={g:e.dataset.g,n:e.dataset.n,s:Number(e.dataset.s)}; renderLibrary(); });
+}
+$('#libref').onclick=()=>{ libSel=null; loadLibrary(); };
+$('#libopen').onclick=async()=>{ const r=await window.pywebview.api.open_library(); if(!r.ok) toast(r.message); };
 
 /* ---- settings dialog ---- */
 let SET = null, setConfirm = true;
@@ -580,7 +737,12 @@ if (location.hash !== '#demo') window.addEventListener('pywebviewready', ()=>{
     $('#edge').value=String(r.settings.preview_edge); }).catch(()=>{});
   const poll=()=>window.pywebview.api.status().then(s=>{ showStatus(s); if (s.photo && s.photo.name && s.photo.name!==photoName){ photoName=s.photo.name; renderStage(); } }).catch(()=>{});
   window.pywebview.api.preview_state().then(r=>{ pv=r; renderStage(); }).catch(()=>{});
-  poll(); setInterval(poll, 3000); renderParams(); renderStage(); });
+  poll(); setInterval(poll, 3000); renderParams(); renderStage(); loadLibrary();
+  window.pywebview.api.import_state().then(st=>{   // 页面重新加载时接续导入界面
+    if (st.stage==='scanning'){ IM.stage='scanning'; imScanning(0); }
+    else if (st.stage==='ready'){ imConfirm(); }
+    else if (st.stage==='copying'&&st.progress){ IM.stage='copying'; imProgress(st.progress); }
+    else if (st.stage==='done'&&st.result){ imResult(st.result); } }).catch(()=>{}); });
 function renderAll(){ renderLeft(); renderFiles(); renderStage(); renderParams(); }
 renderAll();
 /* 截图用：地址后加 #demo 会自动演示一轮 */
