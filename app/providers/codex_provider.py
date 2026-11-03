@@ -57,10 +57,11 @@ def build_command(path: str, thread_id: str | None, workdir: Path, prompt: str) 
     cmd += ["-c", 'web_search="disabled"', "-c", 'sandbox_mode="read-only"',
             "-c", f"mcp_servers.lightroom_mcp.command={json.dumps(sys.executable.replace(os.sep, '/'))}",
             "-c", f"mcp_servers.lightroom_mcp.args={json.dumps([str(PROXY).replace(os.sep, '/')])}",
+            "-c", 'mcp_servers.lightroom_mcp.env_vars=["LRAPP_PORT", "LRAPP_TOKEN"]',
             "-c", f"mcp_servers.lightroom_mcp.enabled_tools={json.dumps(TOOLS)}",
             "-c", "mcp_servers.lightroom_mcp.required=true"]
-    cmd += [thread_id, prompt] if thread_id else ["--sandbox", "read-only", "--skip-git-repo-check",
-                                                 "-C", str(workdir), prompt]
+    cmd += [thread_id, "-"] if thread_id else ["--sandbox", "read-only", "--skip-git-repo-check",
+                                              "-C", str(workdir), "-"]
     return cmd
 
 
@@ -129,12 +130,13 @@ class CodexProvider(AIProvider):
         self.workdir.mkdir(parents=True, exist_ok=True)
         self._stop.clear()
         env = codex_env({**self._env, **(options.get("extra_env") or {})})
-        cmd = build_command(path, self.thread_id, self.workdir, SYSTEM_PROMPT + "\n\n用户：" + text)
+        prompt = SYSTEM_PROMPT + "\n\n用户：" + text
+        cmd = build_command(path, self.thread_id, self.workdir, prompt)
         parts: dict[str, str] = {}
         message: list[str] = []
         tokens, finished, failed, timed_out = 0, False, False, False
         try:
-            self._proc = subprocess.Popen(cmd, cwd=str(self.workdir), stdin=subprocess.DEVNULL,
+            self._proc = subprocess.Popen(cmd, cwd=str(self.workdir), stdin=subprocess.PIPE,
                                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
                                           encoding="utf-8", errors="replace", env=env, creationflags=NO_WINDOW)
         except OSError:
@@ -151,6 +153,15 @@ class CodexProvider(AIProvider):
 
         watchdog = threading.Timer(TIMEOUT_SECONDS, timeout)
         watchdog.start()
+
+        def write_prompt():
+            try:
+                proc.stdin.write(prompt)
+                proc.stdin.close()
+            except (OSError, ValueError):
+                pass  # The process may exit or be stopped before reading the prompt.
+
+        threading.Thread(target=write_prompt, daemon=True).start()
         try:
             for line in proc.stdout:
                 try:

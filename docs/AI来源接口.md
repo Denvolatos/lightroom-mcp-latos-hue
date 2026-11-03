@@ -200,6 +200,8 @@ class TestMyProvider(ProviderContract):
 
 使用前需安装并登录 Codex CLI（`codex login`）。默认读取 Codex 自己的登录目录；若用户迁移过该目录，可在启动软件前设置 `LRAPP_CODEX_HOME`。软件不复制或保存登录凭据。Codex 预览图会发送给用户选择的 Codex 服务。
 
+Codex 的 MCP 配置通过 `env_vars` 转发确认端点的环境变量名，令牌值不写入命令行或配置文件；代理启动 Lightroom 子进程前会移除这两个变量。提示词通过标准输入传入，避免 Windows 命令行长度限制。实际 Codex 子进程的环境继承和完整确认流程仍需实机验证。
+
 以下是当前实现的验证范围；未勾选项目仍需实机验证：
 
 - [x] `codex exec --json` 输出逐行 JSON；适配 `thread.started`、`item.*`、`turn.completed` 和失败事件

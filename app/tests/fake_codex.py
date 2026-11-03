@@ -3,12 +3,15 @@ import json
 import sys
 import time
 
+sys.stdin.reconfigure(encoding="utf-8")
+sys.stdout.reconfigure(encoding="utf-8")
+
 
 def emit(value):
     print(json.dumps(value, ensure_ascii=False), flush=True)
 
 
-prompt = sys.argv[-1]
+prompt = sys.stdin.read()
 emit({"type": "thread.started", "thread_id": "TEST-THREAD"})
 emit({"type": "turn.started"})
 if prompt.endswith("boom"):

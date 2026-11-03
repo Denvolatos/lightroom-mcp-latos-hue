@@ -211,10 +211,14 @@ class TestCodexProvider(ProviderContract):
     def make(self, tmp_path, monkeypatch):
         fake = str(Path(__file__).with_name("fake_codex.py"))
         monkeypatch.setattr(cp, "build_command", lambda path, thread, workdir, prompt:
-                            [sys.executable, fake, prompt])
+                            [sys.executable, fake])
         p = CodexProvider(workdir=tmp_path, find=lambda: sys.executable, login_check=lambda path: True)
         assert p.start()
         return p
 
     def context_size(self, p):
         return 1 if p.thread_id else 0
+
+    def test_long_prompt_uses_stdin(self, provider):
+        events = self.run(provider, "长" * 100000)
+        assert events[-1]["type"] == "done" and not events[-1]["is_error"]

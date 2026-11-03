@@ -221,3 +221,20 @@ def test_provider_switch_takes_effect_on_new_chat_only(api, monkeypatch):
     api.reset()
     assert api._provider.id == "other" and old_closed and "start" in calls and "reset" not in calls
     assert api._backend.session is api._provider
+
+
+def test_switch_to_codex_updates_import_and_export_services(api, monkeypatch):
+    from unittest.mock import MagicMock
+    import main
+
+    new_lr = MagicMock()
+    new_provider = MagicMock(id="codex")
+    new_provider.id = "codex"
+    monkeypatch.setattr(main, "LrService", lambda *a, **k: new_lr)
+    monkeypatch.setattr(main, "create_provider", lambda *a, **k: new_provider)
+    monkeypatch.setattr(main, "PreviewManager", lambda *a, **k: MagicMock())
+    monkeypatch.setattr(main, "PreviewServer", lambda *a, **k: MagicMock())
+    monkeypatch.setattr(main, "Backend", lambda *a, **k: MagicMock())
+    api._settings.data["provider"] = "codex"
+    assert api._apply_provider_choice()
+    assert api._import.lr is new_lr and api._export.lr is new_lr

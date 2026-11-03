@@ -106,6 +106,7 @@ class Api:
             self._backend = Backend(self._lr, self._session, self._tracker, self._emit,
                                     state_file=None, previews=self._preview)
             self._import.lr = self._lr
+            self._export.lr = self._lr
             threading.Thread(target=self._lr.start, daemon=True).start()
             self._preview.server.start()
             self._preview.start()
