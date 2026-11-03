@@ -20,6 +20,8 @@ from providers import available_providers, create_provider, is_selectable  # noq
 import settings as appsettings  # noqa: E402
 from import_service import ImportService  # noqa: E402
 from export_service import ExportService  # noqa: E402
+from pick_service import PickService  # noqa: E402
+from pick_apply import ApplyService  # noqa: E402
 from preview import PreviewManager, PreviewServer, PreviewStore  # noqa: E402
 from ports import STATE_DIR  # noqa: E402
 
@@ -59,6 +61,10 @@ class Api:
         self._backend = Backend(self._lr, self._session, self._tracker, self._emit, state_file=None, previews=self._preview)
         self._import = ImportService(self._settings, self._lr, self._emit)
         self._export = ExportService(self._settings, self._lr, self._emit)
+        self._pick = PickService(self._lr, self._preview.server, self._emit, send_fn=self._pick_send, stop_fn=self._pick_stop,
+                                 status_fn=lambda: self._provider.status(), ready_fn=lambda: self._backend.wait_ready(),
+                                 acquire_fn=self._pick_acquire, release_fn=self._pick_release)
+        self._apply = ApplyService(self._lr, self._pick.ranking, self._emit)
 
     def _start_background(self) -> None:
         """窗口一出现就预热：Bridge、常驻 claude（含 lightroom_mcp 与确认服务）同时启动，之后每条消息零启动开销。"""
@@ -327,6 +333,76 @@ class Api:
     def reveal_last_export(self) -> dict:
         """在资源管理器中显示本次导出的结果文件（路径来自后端记录）。"""
         return self._export.reveal_last()
+
+    # ---- AI 挑片 ---------------------------------------------------
+    def _pick_acquire(self) -> bool:
+        """与对话共用"忙"标记；挑片期间一切需要确认的工具直接拒绝（AI 只能查看照片）。"""
+        with self._lock:
+            if self._busy:
+                return False
+            self._busy = True
+        self._hub.deny_all = True
+        return True
+
+    def _pick_release(self) -> None:
+        self._hub.deny_all = False
+        if self._persistent:
+            self._hub.finish_turn()
+        else:
+            self._hub.end_turn()
+        self._busy = False
+
+    def _pick_send(self, prompt: str, on_event) -> None:
+        if self._persistent:
+            self._provider.send(prompt, on_event)
+        else:
+            token = self._hub.begin_turn()
+            self._provider.send(prompt, on_event, confirm=True, extra_env={"LRAPP_PORT": str(self._hub.port), "LRAPP_TOKEN": token})
+
+    def _pick_stop(self) -> None:
+        self._hub.cancel_all()
+        self._provider.stop()
+
+    def pick_prepare(self) -> dict:
+        """点"AI 挑片"：读取 Lightroom 当前选中的照片并检查张数。"""
+        return self._pick.prepare()
+
+    def pick_start(self, options: dict) -> dict:
+        """开始比较。options 只含评判标准、自定义文字、结果数量；照片由后端自己从 Lightroom 读取。结果经 pick_done 事件给出。"""
+        return self._pick.start(options)
+
+    def pick_stop(self) -> dict:
+        return self._pick.stop()
+
+    def pick_state(self) -> dict:
+        return self._pick.state()
+
+    def pick_close(self) -> dict:
+        return self._pick.close()
+
+    def pick_preview(self, photo_id: str) -> dict:
+        """放大预览一张本次比较的照片（只接受本次选中照片的 id）。"""
+        return self._pick.preview_url(photo_id)
+
+    def pick_apply_prepare(self) -> dict:
+        """生成确认清单（原星级/旗标 → 新星级/旗标）。此时不写入任何内容。"""
+        return self._apply.prepare()
+
+    def pick_apply_confirm(self, photo_ids: list) -> dict:
+        """用户点"确认写入"：只写清单里勾选的照片，且只写星级和旗标。结果经 pick_apply_done 事件给出。"""
+        return self._apply.confirm(photo_ids)
+
+    def pick_apply_cancel(self) -> dict:
+        return self._apply.cancel()
+
+    def pick_apply_state(self) -> dict:
+        return self._apply.state_public()
+
+    def pick_apply_undo(self, force: bool = False) -> dict:
+        return self._apply.undo(bool(force))
+
+    def pick_apply_close(self) -> dict:
+        return self._apply.close()
 
     def selection_state(self) -> dict:
         """Lightroom 当前选中的全部照片（页面刚加载时取一次，之后靠 selection 事件更新）。"""

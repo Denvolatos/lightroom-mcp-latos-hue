@@ -17,6 +17,7 @@ TIMEOUT_SECONDS = 120
 MSG_DENIED = "用户在界面中拒绝了该项调整，未执行。"
 MSG_TIMEOUT = f"确认超过 {TIMEOUT_SECONDS} 秒未响应，已视为拒绝，未执行。"
 MSG_CANCELLED = "本轮已被停止，该项调整未执行。"
+MSG_PICK_READONLY = "AI 挑片期间只能查看照片，不允许任何修改，该操作未执行。"
 AUTO_TOOLS = ("lr_set_develop", "lr_restore", "lr_restore_original")   # “逐项确认”关闭时自动放行的工具
 
 
@@ -56,6 +57,7 @@ class ConfirmHub:
         self.current_values = current_values      # callable(keys) -> dict，可为 None
         self.port = 0
         self.auto_allow = False                   # True（逐项确认关）：上述工具不弹卡片，直接放行
+        self.deny_all = False                     # True（AI 挑片期间）：一切需要确认的工具直接拒绝，不放行也不弹卡片
         self._token: str | None = None
         self._pending: dict[str, dict] = {}
         self._lock = threading.Lock()
@@ -127,6 +129,8 @@ class ConfirmHub:
     # ---- 请求与应答 ------------------------------------------------
     def request(self, tool_name: str, tool_input: dict, tool_use_id: str = "") -> dict:
         """阻塞到用户应答、超时或被取消。返回 {"allow", "message"}。"""
+        if self.deny_all:
+            return {"allow": False, "message": MSG_PICK_READONLY}
         if self.auto_allow and tool_name.split("__")[-1] in AUTO_TOOLS:
             return {"allow": True, "message": ""}
         cur = {}
