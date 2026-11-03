@@ -1000,6 +1000,48 @@ class EditService:
             "message": f"{name} 本来就在目录里，没有重复添加。" if already else f"已把 {name} 添加到目录（没有移动、复制或删除任何文件）。",
         }
 
+    # ---- export for the desktop app (NOT an MCP tool; lr_export stays JPEG-only and cannot choose a format) ----
+    def export_photo_for_app(self, folder: str, format: str = "jpeg", long_edge: int = 0, quality: int = 90,
+                             metadata: str = "minimal", bit_depth: int = 16, photo: str = "selected") -> dict:
+        """Export the selected photo as JPEG or TIFF into an existing local folder. The plug-in re-checks the folder.
+
+        Export changes no photo, so the read-only switch does not block it (same as lr_export). A timeout gives
+        {"status": "uncertain"}: the file may or may not exist, check the folder before trying again.
+        """
+        def is_int(v):
+            return isinstance(v, int) and not isinstance(v, bool)
+
+        if format not in ("jpeg", "tiff"):
+            raise EditError("format 只能是 jpeg 或 tiff。")
+        if not is_int(long_edge) or (long_edge != 0 and not 256 <= long_edge <= 20000):
+            raise EditError("long_edge 要么是 0（原始尺寸），要么在 256 到 20000 之间。")
+        if not is_int(quality) or not 40 <= quality <= 100:
+            raise EditError("quality 要在 40 到 100 之间。")
+        if not is_int(bit_depth) or bit_depth not in (8, 16):
+            raise EditError("bit_depth 只能是 8 或 16。")
+        if metadata not in ("minimal", "all"):
+            raise EditError("metadata 只能是 minimal 或 all。")
+        if photo != "selected" and not (isinstance(photo, str) and re.fullmatch(r"[A-Za-z0-9\-]{1,64}", photo)):
+            raise EditError('photo 只能是 "selected" 或照片 id。')
+        if (not isinstance(folder, str) or not folder.strip() or len(folder) > 400 or re.search(r"[\x00-\x1f\x7f]", folder)
+                or folder.startswith(("\\\\", "//")) or not (re.match(r"^[A-Za-z]:[\\/]", folder) or folder.startswith("/"))):
+            raise EditError("导出文件夹要是本机文件夹的完整路径，比如 D:\\照片\\导出；网络路径（\\\\...）不允许。")
+        params = {"photo": photo, "folder": urllib.parse.quote(folder, safe=""), "format": format,
+                  "long_edge": str(long_edge), "metadata": metadata}
+        if format == "jpeg":
+            params["quality"] = str(quality)
+        else:
+            params["bit_depth"] = str(bit_depth)   # quality does not apply to TIFF and is not sent
+        try:
+            data = self.call("export_photo", params, timeout=300)
+        except BridgeTimeout as e:
+            return {
+                "status": "uncertain", "format": format, "folder": folder,
+                "message": "Lightroom 没有在时限内回复，不确定有没有导出成功。请到文件夹里确认有没有新文件（不要急着重试，以免重复导出）。",
+                "error": str(e),
+            }
+        return {"status": "exported", **data}
+
     # ---- presets ---------------------------------------------------
     def list_presets(self, query: str = "", limit: int = 30) -> dict:
         words = str(query).split()
