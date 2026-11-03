@@ -5,10 +5,13 @@ undone; at the end the WHOLE settings snapshot (every key, tables included) is c
 start (GrainSeed, DepthMapInfo: internal values Lightroom creates itself and cannot delete) are not counted as differences.
 The plug-in (0.9.x) must have been reloaded. Usage: python acceptance_presets.py
 """
+import hashlib
 import sys
 import tempfile
 import time
 from pathlib import Path
+
+from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -42,11 +45,18 @@ def differences(start, now):
     return [f"{k}: {start.get(k)!r} -> {now.get(k)!r}" for k in keys]
 
 
-def preview_size(bridge, photo_id):
-    path = Path(bridge.call("get_preview", {"photo": photo_id, "long_edge": 512}, timeout=90)["path"])
-    size = path.stat().st_size
+def preview_pixels(bridge, photo_id, long_edge):
+    """A digest of the picture's PIXELS. The file size is no proof of identical pictures: the JPEG embeds the (changing) file name,
+    so two pictures with the same pixels can differ by a few bytes."""
+    path = Path(bridge.call("get_preview", {"photo": photo_id, "long_edge": long_edge}, timeout=90)["path"])
+    with Image.open(path) as im:
+        digest = hashlib.sha1(im.convert("RGB").tobytes()).hexdigest()[:12]
     path.unlink(missing_ok=True)
-    return size
+    return digest
+
+
+def preview_size(bridge, photo_id):
+    return preview_pixels(bridge, photo_id, 512)
 
 
 def settled_preview_size(bridge, photo_id, wanted, tries=6):

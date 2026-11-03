@@ -99,12 +99,25 @@ local modules = {
   LrApplication = { activeCatalog = function() return catalog end, developPresetFolders = function() return { folder } end,
                     versionTable = function() return { major = 15, minor = 2, revision = 0, build_version = "x" } end },
   LrDate = { currentTime = function() return 0 end },
-  LrExportSession = function() error("not used in these tests") end,
-  LrFileUtils = { exists = function(path) if FAKE.readonly and path:find("readonly", 1, true) then return "file" end return false end,
+  LrExportSession = function(args)
+    return { doExportOnCurrentTask = function()
+      local s = args.exportSettings
+      FAKE.last_export = s
+      if not FAKE.export_fails then FAKE.files[s.LR_export_destinationPathPrefix .. "\\" .. s.LR_tokenCustomString .. ".jpg"] = true end
+    end }
+  end,
+  LrFileUtils = { exists = function(path)
+                    if FAKE.readonly and path:find("readonly", 1, true) then return "file" end
+                    if FAKE.folders[path] then return "directory" end
+                    if FAKE.files[path] then return "file" end
+                    return false
+                  end,
                   createAllDirectories = function() end, delete = function() end,
-                  fileAttributes = function() return {} end },
+                  fileAttributes = function() return { fileSize = 12345 } end },
   LrPathUtils = { child = child, getStandardFilePath = function() return "C:\\Users\\test" end,
-                  leafName = function(p) return (p:match("([^\\]+)$")) end },
+                  leafName = function(p) return (p:match("([^\\]+)$")) end,
+                  removeExtension = function(p) return (p:gsub("%.[^%.\\]+$", "")) end,
+                  isAbsolute = function(p) return p:match("^%a:[\\/]") ~= nil or p:sub(1, 1) == "/" end },
 }
 function import(name) return assert(modules[name], "no fake for " .. name) end
 
@@ -131,8 +144,11 @@ function SET(key, value) FAKE.values[key] = value end
 function SET_JSON(key, text) FAKE.values[key] = Json.decode(text) end
 function DECODE(text) return Json.encode(Json.decode(text)) end
 function DECODE_FAILS(text) local ok, e = pcall(Json.decode, text) return (not ok) and (type(e) == "table" and e.lrmcp or tostring(e)) or false end
+function EXPORT_SETTING(key) return FAKE.last_export and FAKE.last_export[key] end
+function MAKE_FOLDER(path) FAKE.folders[path] = true end
 function SET_LABEL(v) FAKE.meta.label = v end
 function RESET()
+  FAKE.files, FAKE.folders, FAKE.last_export, FAKE.export_fails = {}, {}, nil, false
   FAKE.meta = { rating = nil, pick = 0, label = "", title = "", caption = "", keywords = { newKeyword("Torino") } }
   FAKE.readonly, FAKE.write_gate, FAKE.writes, FAKE.fail_read, FAKE.round_to = false, "executed", {}, nil, nil
   FAKE.values = { Exposure2012 = 0, Contrast2012 = 0, Saturation = 0, HueAdjustmentRed = 0, Sharpness = 40,
@@ -165,6 +181,12 @@ def lr():
 
         def reset(self):
             g.RESET()
+
+        def export_setting(self, key):
+            return g.EXPORT_SETTING(key)
+
+        def make_folder(self, path):
+            g.MAKE_FOLDER(path)
 
         def set_label(self, value):
             g.SET_LABEL(value)
@@ -459,3 +481,69 @@ def test_gray_means_no_colour_label(lr):
     lr.set_label("gray")
     reply = lr.run("get_metadata", photo="selected")
     assert reply["data"]["metadata"]["color_label"] == "none"
+
+
+# ---- export ---------------------------------------------------------------------------------------------------------
+import urllib.parse as _up
+
+OUT = "D:\\\u7167\u7247\\\u5bfc\u51fa"   # a Chinese folder name, to prove the percent-encoding round trip
+
+
+def enc(path):
+    return _up.quote(path, safe="")
+
+
+def test_export_needs_a_destination_the_user_named(lr):
+    reply = lr.run("export_photo", photo="selected")
+    assert not reply["ok"] and "请让用户说清楚导出到哪里" in reply["error"]
+
+
+def test_export_into_the_folder_the_user_named_and_never_overwrite(lr):
+    lr.make_folder(OUT)
+    first = lr.run("export_photo", photo="selected", folder=enc(OUT))
+    data = first["data"]
+    assert first["ok"] and data["file"] == "one_LrMCP_full.jpg" and data["folder"] == OUT and data["destination"] == "folder"
+    assert data["path"] == OUT + "\\one_LrMCP_full.jpg" and data["bytes"] == 12345
+    assert data["width"] == 6000 and data["height"] == 4000 and data["quality"] == 90 and data["metadata"] == "minimal"
+    assert lr.export_setting("LR_size_doConstrain") is False and abs(lr.export_setting("LR_jpeg_quality") - 0.9) < 1e-9
+    assert lr.run("export_photo", photo="selected", folder=enc(OUT))["data"]["file"] == "one_LrMCP_full_2.jpg"
+
+
+def test_export_refuses_folders_that_are_not_ok(lr):
+    for path in ("\\\\server\\share\\x", "//server/share", "relative\\dir", "D:\\a\\..\\b", "C:\\Windows\\Temp",
+                 "C:\\Program Files\\X", "C:\\Users\\me\\AppData\\Roaming", "C:\\Users\\me\\.ssh", "C:\\Users\\me\\LrMcp\\previews",
+                 "/System/Library", "/etc", "D:\\a\x07b", "D:\\" + "x" * 500):
+        lr.make_folder(path)   # even if it exists, these are refused
+        reply = lr.run("export_photo", photo="selected", folder=enc(path))
+        assert not reply["ok"], path
+    reply = lr.run("export_photo", photo="selected", folder=enc("D:\\missing"))
+    assert not reply["ok"] and "不存在" in reply["error"]
+    assert lr.run("export_photo", photo="selected", folder=enc("C:\\Users\\me\\LrMcp\\exports"))["error"].count("不存在") == 1  # allowed place, but missing
+
+
+def test_export_named_places_and_options(lr):
+    for name in ("desktop", "pictures", "documents"):
+        data = lr.run("export_photo", photo="selected", destination=name)["data"]
+        assert data["destination"] == name and data["folder"] == "C:\\Users\\test"
+    data = lr.run("export_photo", photo="selected", long_edge="1024", quality="75", metadata="all", destination="data")["data"]
+    assert data["file"] == "one_LrMCP_1024px.jpg" and data["folder"].endswith("LrMcp\\exports")
+    assert data["width"] == 1024 and data["height"] == 683 and data["quality"] == 75 and data["metadata"] == "all"
+    assert lr.export_setting("LR_size_doConstrain") is True and lr.export_setting("LR_size_maxWidth") == 1024
+    assert lr.export_setting("LR_minimizeEmbeddedMetadata") is False
+    assert lr.run("export_photo", photo="selected", destination="data", quality="5")["data"]["quality"] == 40
+    assert not lr.run("export_photo", photo="selected", destination="somewhere")["ok"]
+
+
+def test_export_bad_sizes_and_the_file_name_is_not_chosen_by_the_request(lr):
+    lr.make_folder(OUT)
+    for params in (dict(long_edge="100"), dict(long_edge="99999"), dict(long_edge="nan")):
+        assert not lr.run("export_photo", photo="selected", folder=enc(OUT), **params)["ok"], params
+    data = lr.run("export_photo", photo="selected", folder=enc(OUT), name="evil.exe", file="C:\\evil.jpg", path="C:\\evil")["data"]
+    assert data["file"] == "one_LrMCP_full.jpg" and data["path"].startswith(OUT)
+
+
+def test_export_reports_a_missing_file(lr):
+    lr.make_folder(OUT)
+    lr.set_flag("export_fails", True)
+    reply = lr.run("export_photo", photo="selected", folder=enc(OUT))
+    assert not reply["ok"] and "没有生成导出文件" in reply["error"]

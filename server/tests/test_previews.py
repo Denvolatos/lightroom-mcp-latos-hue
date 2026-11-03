@@ -88,3 +88,37 @@ def test_clean_old_removes_only_old_jpgs(tmp_path):
     os.utime(old, (long_ago, long_ago))
     assert previews.clean_old(tmp_path, max_age=24 * 3600) == 1
     assert not old.exists() and new.exists() and keep.exists()
+
+
+def test_regions_and_sky_like_blue(tmp_path):
+    img = Image.new("RGB", (300, 200), (30, 110, 220))          # blue top ...
+    for x in range(300):
+        for y in range(110, 200):
+            img.putpixel((x, y), (190, 110, 30))                # ... orange bottom
+    path = tmp_path / "scene.jpg"
+    img.save(path)
+    stats = previews.analyze(path)
+    assert len(stats["regions_3x3"]) == 9
+    top_left, bottom_right = stats["regions_3x3"][0], stats["regions_3x3"][8]
+    assert top_left["hue_name"] == "蓝" and bottom_right["hue_name"] == "橙" and top_left["row"] == 0 and bottom_right["col"] == 2
+    sky = stats["sky_like_blue"]
+    assert 50 <= sky["share_percent"] <= 60 and 205 <= sky["mean_hue_deg"] <= 220 and sky["mean_hue_name"] == "蓝"
+    assert any("疑似天空" in n for n in stats["notes_heuristic"])
+
+
+def test_no_sky_like_blue_in_an_orange_picture(tmp_path):
+    path = make(tmp_path, "orange.jpg", (200, 110, 30))
+    assert previews.analyze(path)["sky_like_blue"] is None
+
+
+def test_compose_side_by_side_returns_one_jpeg(tmp_path):
+    a = make(tmp_path, "a.jpg", (30, 110, 220)).read_bytes()
+    b = make(tmp_path, "b.jpg", (200, 110, 30)).read_bytes()
+    data = previews.compose_side_by_side([a, b], ["A", "B"], height=120)
+    assert data.startswith(b"\xff\xd8")
+    import io
+    with Image.open(io.BytesIO(data)) as out:
+        assert out.height == 120 and out.width > 120
+    import pytest
+    with pytest.raises(ValueError):
+        previews.compose_side_by_side([a], ["A", "B"])

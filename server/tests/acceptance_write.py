@@ -7,9 +7,12 @@ It uses its own temporary edit folder, so your real ~/LrMcp/edits records are no
 
 Stop any other lrmcp server on port 58770 first. Usage: python acceptance_write.py
 """
+import hashlib
 import sys
 import tempfile
 from pathlib import Path
+
+from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -26,9 +29,18 @@ def check(label: str, ok: bool, detail: str = "") -> None:
     print(f"{'PASS' if ok else 'FAIL'}  {label}{(' — ' + detail) if detail else ''}")
 
 
-def preview_size(bridge: Bridge, photo_id: str) -> int:
-    data = bridge.call("get_preview", {"photo": photo_id, "long_edge": 1024}, timeout=60)
-    return Path(data["path"]).stat().st_size
+def preview_pixels(bridge, photo_id, long_edge):
+    """A digest of the picture's PIXELS. The file size is no proof of identical pictures: the JPEG embeds the (changing) file name,
+    so two pictures with the same pixels can differ by a few bytes."""
+    path = Path(bridge.call("get_preview", {"photo": photo_id, "long_edge": long_edge}, timeout=90)["path"])
+    with Image.open(path) as im:
+        digest = hashlib.sha1(im.convert("RGB").tobytes()).hexdigest()[:12]
+    path.unlink(missing_ok=True)
+    return digest
+
+
+def preview_size(bridge: Bridge, photo_id: str) -> str:
+    return preview_pixels(bridge, photo_id, 1024)
 
 
 def everything(develop: dict) -> dict:
@@ -264,7 +276,7 @@ def main() -> int:
              and baseline.get(k) != final.get(k)}
     check(f"EVERY value get_develop reports is back to the start ({len(baseline)} values)", not diffs, str(diffs)[:200])
     final_size = preview_size(bridge, photo_id)
-    check("preview file size equals the baseline (pixel-identical)", final_size == baseline_size, f"{final_size} vs {baseline_size}")
+    check("preview PIXELS equal the baseline (pixel-identical)", final_size == baseline_size, f"{final_size} vs {baseline_size}")
     bridge.stop()
     print(f"\n{'ALL PASSED' if failures == 0 else str(failures) + ' FAILED'}")
     return 1 if failures else 0

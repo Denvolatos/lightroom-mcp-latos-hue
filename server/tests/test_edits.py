@@ -10,6 +10,7 @@ from PIL import Image as PILImage
 
 from lightroom_mcp import edits
 from lightroom_mcp.bridge import BridgeError, BridgeTimeout
+from lightroom_mcp.versions import VersionStore
 from lightroom_mcp.edits import EditError, EditService, EditStore, ReadOnlyError, validate_changes
 
 LIMITS_LUA = Path(__file__).resolve().parents[2] / "plugin" / "lrmcp.lrdevplugin" / "Limits.lua"
@@ -170,7 +171,7 @@ def env(tmp_path):
     lr = FakeLightroom()
     store = EditStore(tmp_path / "edits")
     lr.store = store
-    service = EditService(lr, store, readonly_file=tmp_path / "readonly")
+    service = EditService(lr, store, readonly_file=tmp_path / "readonly", versions=VersionStore(tmp_path / "versions"))
     return lr, store, service, tmp_path
 
 
@@ -435,6 +436,8 @@ def test_tools_are_registered_with_the_right_hints():
         "lr_set_develop": False, "lr_restore": False, "lr_restore_original": False, "lr_list_edits": True,
         "lr_list_presets": True, "lr_apply_preset": False, "lr_batch_set_develop": False,
         "lr_plan_from_edit": True, "lr_get_metadata": True, "lr_set_metadata": False,
+        "lr_export": False, "lr_save_version": False, "lr_list_versions": True, "lr_apply_version": False, "lr_delete_version": False,
+        "lr_compare": True,
     }
     for tool in tools:   # every description is English first and also has the Chinese text
         text = tool.description or ""
@@ -912,3 +915,93 @@ def test_metadata_edits_do_not_disturb_restore_original_of_develop_changes(env):
     service.set_metadata(rating=5)
     service.restore_original()
     assert lr.photos[A]["values"]["Exposure2012"] == 0.0 and lr.photos[A]["meta"]["rating"] == 5
+
+
+# ---- named versions -------------------------------------------------------------------------------------------------
+JPEG = b"\xff\xd8\xff\xe0" + b"0" * 100
+
+
+def test_save_and_list_versions_keep_only_what_can_be_changed(env):
+    lr, store, service, tmp = env
+    result = service.save_version("电影感", "冷暗部暖亮部", thumbnail=JPEG)
+    assert result["version"] == "电影感" and result["has_preview_picture"] and result["saved_settings"] > 80
+    saved = service.versions.get(A, "电影感")
+    assert set(saved["settings"]) <= set(edits.LIMITS) | set(edits.CURVE_KEYS) | {"WhiteBalance"} and "Look" not in saved["settings"]
+    listing = service.list_versions()
+    assert listing["count"] == 1 and listing["versions"][0]["name"] == "电影感" and listing["versions"][0]["note"] == "冷暗部暖亮部"
+    with pytest.raises(EditError):                      # the same name again needs overwrite
+        service.save_version("电影感")
+    assert service.save_version("电影感", "new", overwrite=True)["version"] == "电影感"
+    assert service.versions.get(A, "电影感")["note"] == "new"
+
+
+def test_version_names_and_limits_are_checked(env):
+    lr, store, service, _ = env
+    for bad in ("", "   ", "x" * 41, "a\nb", None, 5):
+        with pytest.raises(EditError):
+            service.save_version(bad)
+    with pytest.raises(EditError):
+        service.save_version("ok", "n" * 201)
+    for i in range(50):
+        service.save_version(f"v{i}")
+    with pytest.raises(EditError, match="最多"):
+        service.save_version("one too many")
+    with pytest.raises(EditError, match="没有叫"):
+        service.apply_version("never saved")
+
+
+def test_a_bad_thumbnail_is_dropped_but_the_version_is_kept(env):
+    lr, store, service, _ = env
+    assert service.save_version("a", thumbnail=b"not a jpeg")["has_preview_picture"] is False
+    assert service.save_version("b", thumbnail=JPEG + b"0" * 500_000)["has_preview_picture"] is False
+    assert service.versions.thumbnail_path(A, "a") is None
+
+
+def test_apply_version_goes_back_in_one_change_past_the_step_limit_and_can_be_undone(env):
+    lr, store, service, _ = env
+    values = lr.photos[A]["values"]
+    service.set_develop({"Exposure2012": 0.8, "Contrast2012": 20})
+    service.set_develop({"Contrast2012": 45})
+    service.save_version("bold", thumbnail=JPEG)
+    service.set_develop({"Exposure2012": 0.0})
+    service.set_develop({"Contrast2012": 20})
+    service.set_develop({"Contrast2012": 0})
+    values["Look"] = {"Name": "untouched by versions", "Amount": 1.0}
+    result = service.apply_version("bold")
+    assert result["verified"] and result["settings_changed"] == 2
+    assert values["Exposure2012"] == 0.8 and values["Contrast2012"] == 45   # +45 in one go: beyond the +-30 limit of set_develop
+    assert values["Look"]["Name"] == "untouched by versions"
+    assert service.apply_version("bold")["settings_changed"] == 0           # already there: nothing is written
+    service.restore(result["edit_id"])
+    assert values["Exposure2012"] == 0.0 and values["Contrast2012"] == 0.0
+
+
+def test_versions_are_per_photo_and_respect_the_read_only_switch(env):
+    lr, store, service, tmp = env
+    service.save_version("only for one", photo=A)
+    with pytest.raises(EditError, match="没有叫"):
+        service.apply_version("only for one", photo=B)
+    assert service.list_versions(photo=B)["count"] == 0
+    (tmp / "readonly").write_text("1")
+    with pytest.raises(ReadOnlyError):
+        service.apply_version("only for one", photo=A)
+    assert service.list_versions(photo=A)["count"] == 1                      # reading and saving a version stay possible
+    service.save_version("also fine", photo=A)
+
+
+def test_delete_version_removes_only_that_version(env):
+    lr, store, service, _ = env
+    service.save_version("keep", thumbnail=JPEG)
+    service.save_version("drop", thumbnail=JPEG)
+    service.delete_version("drop")
+    assert [v["name"] for v in service.list_versions()["versions"]] == ["keep"]
+    assert service.versions.thumbnail_path(A, "drop") is None and service.versions.thumbnail_path(A, "keep") is not None
+    with pytest.raises(EditError):
+        service.delete_version("drop")
+
+
+def test_version_folder_names_cannot_escape(env):
+    _, _, service, tmp = env
+    for bad in ("../x", "a/b", "", "short"):
+        with pytest.raises(Exception):
+            service.versions.save(bad, "n", "x", "", {}, None)
