@@ -1003,6 +1003,93 @@ function M.export_photo(params)
 	}
 end
 
+-- ---------------------------------------------------------------------------------------------------------------------
+-- Import (v0.15): adds ONE photo file that already sits on this computer to the catalog, the same as "Add" in Lightroom's
+-- import dialog (nothing is moved, copied or deleted; no develop or metadata preset). It is for the desktop app only and is
+-- NOT an MCP tool, so the AI cannot call it. Because a path comes from a request, it is checked here and not trusted:
+-- a local drive path (X:\...), no network path, no "..", nothing under the system folders of BLOCKED_FOLDERS (this tool's own
+-- data folder included), an existing file (not a folder) with a photo extension. Parameter: path=<percent-encoded>.
+-- ---------------------------------------------------------------------------------------------------------------------
+local IMPORT_EXTENSIONS = {
+	jpg = true, jpeg = true, arw = true, cr2 = true, cr3 = true, nef = true, nrw = true, raf = true, orf = true,
+	rw2 = true, dng = true, tif = true, tiff = true, heic = true, heif = true, png = true,
+}
+
+local function checkImportPath(path)
+	if path == "" or #path > 400 or path:find("%c") then
+		fail("照片路径不合法（为空、太长或含控制字符）。")
+	end
+	if path:sub(1, 2) == "\\\\" or path:sub(1, 2) == "//" then
+		fail("不允许导入网络路径上的照片。请用本机磁盘上的文件。")
+	end
+	if not path:match("^%a:[\\/]") then
+		fail("照片路径必须是本机的完整路径，比如 D:\\照片\\a.jpg 。")
+	end
+	local norm = (path:gsub("\\", "/")):lower()
+	norm = norm:gsub("//+", "/")
+	for part in norm:gmatch("[^/]+") do
+		if part == ".." then
+			fail("路径里不能有 .. 。")
+		end
+	end
+	for _, bad in ipairs(BLOCKED_FOLDERS) do
+		if (norm .. "/"):find(bad, 1, true) then
+			fail("这个位置不允许导入（系统目录，或本工具自己的数据目录）：" .. path)
+		end
+	end
+	local ext = path:match("%.([^%.\\/]+)$")
+	if not ext or not IMPORT_EXTENSIONS[ext:lower()] then
+		fail("不支持这种文件格式（只接受常见的照片格式：jpg jpeg arw cr2 cr3 nef nrw raf orf rw2 dng tif tiff heic heif png）：" .. path)
+	end
+	local kind = LrFileUtils.exists(path)
+	if kind == "directory" then
+		fail("这是一个文件夹，不是照片文件：" .. path)
+	end
+	if kind ~= "file" then
+		fail("这个文件不存在：" .. path .. "。导入不会替你创建或复制文件。")
+	end
+end
+
+function M.import_photo(params)
+	local raw = params.path
+	if raw == nil or raw == "" then
+		fail("请给出要导入的照片路径（path）。")
+	end
+	local path = (raw:gsub("%%(%x%x)", function(h)
+		return string.char(tonumber(h, 16))
+	end))
+	checkImportPath(path)
+	local catalog = LrApplication.activeCatalog()
+	local name = LrPathUtils.leafName(path)
+	local existing = catalog:findPhotoByPath(path)
+	if existing then
+		return { already = true, imported = false, id = existing:getRawMetadata("uuid"), name = name, photo = describe(existing) }
+	end
+
+	local added, addError
+	local result = catalog:withWriteAccessDo("LrMCP import", function()
+		local ok, res = pcall(function()
+			return catalog:addPhoto(path)
+		end)
+		if ok then
+			added = res
+		else
+			addError = type(res) == "table" and res.lrmcp or tostring(res)
+		end
+	end, { timeout = 15 })
+	if result ~= "executed" then
+		fail("Lightroom 现在不能写入（可能正忙），没有导入任何照片，请稍后再试。")
+	end
+	if addError then
+		fail("Lightroom 拒绝导入这个文件：" .. addError)
+	end
+	local photo = added or catalog:findPhotoByPath(path)
+	if not photo then
+		fail("Lightroom 没有报错，但在目录里没找到这张照片，请在 Lightroom 里确认。")
+	end
+	return { already = false, imported = true, id = photo:getRawMetadata("uuid"), name = name, photo = describe(photo) }
+end
+
 local COMMANDS = {
 	status = M.status,
 	list_selected = M.list_selected,
@@ -1014,6 +1101,7 @@ local COMMANDS = {
 	apply_preset = M.apply_preset,
 	restore_settings = M.restore_settings,
 	export_photo = M.export_photo,
+	import_photo = M.import_photo,
 	get_metadata = M.get_metadata,
 	set_metadata = M.set_metadata,
 }

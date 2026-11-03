@@ -4,13 +4,13 @@
 一个 Lightroom 插件加一个小型 MCP 服务：能看到你选中的照片、读取调整参数，并把预览图和直方图数字交给 AI。
 还能对受限的调整参数做小步修改、整理目录信息，并保存旧值用于还原。
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.14.0-orange)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.15.0-orange)
 
 [English](README.en.md) · [更新日志](CHANGELOG.md) · [安全说明](SECURITY.md) · [参与贡献](CONTRIBUTING.md)
 
 > 🤖 **你是 AI 助手，用户让你看这个仓库？** 请读 [`AI_GUIDE.md`](AI_GUIDE.md)，里面有完整的安装和使用步骤。
 
-> ⚠️ **早期版本（0.14.0）**：只在 Windows 11 + Lightroom Classic 15.2 上测过。安装包已发布但尚未在干净电脑上做过安装/卸载测试（待验证）。与 Adobe 无关联。
+> ⚠️ **早期版本（0.15.0）**：只在 Windows 11 + Lightroom Classic 15.2 上测过。安装包已发布但尚未在干净电脑上做过安装/卸载测试（待验证）。与 Adobe 无关联。
 
 ## ✨ 能做什么
 
@@ -126,6 +126,7 @@ Claude 桌面版暂不自动登记（配置文件位置取决于安装方式）�
 |---|---|
 | 0.1 | 只读：看照片、调整参数、预览、直方图数字、自检 |
 | 0.2–0.11.2 | 受保护的单张修改、目录信息、批量预演、预设与还原；详见上面的工具列表 |
+| 0.15 | 导入命令：只供本机桌面软件使用（不是 AI 工具，工具数不变），把磁盘上的一张照片以“添加不移动”的方式加进目录，路径与格式由插件重新校验（升级后需重载一次插件） |
 | 0.14 | 重连修复：服务重启后插件约一两秒内重新连上，不用再重载插件（升级后需重载一次插件） |
 | 0.13 | 全尺寸导出（到你在对话里说的位置）、命名版本、并排对比、预览数字里的区域分析 |
 | 0.12 | 还原冲突保护、修图前后对比预览、多张照片挑片预览、从已验证的修改生成批量预演（来自贡献者 Galio1991 的 PR） |

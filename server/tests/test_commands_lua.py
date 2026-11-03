@@ -89,9 +89,26 @@ function catalog:createKeyword(name) return newKeyword(name) end
 function catalog:getTargetPhoto() return photo end
 function catalog:getTargetPhotos() return { photo } end
 function catalog:findPhotoByUuid(id) if id == FAKE.uuid then return photo end end
+function catalog:findPhotoByPath(p) return FAKE.in_catalog[p] end
+function catalog:addPhoto(p, ...)
+  if select("#", ...) > 0 then error("addPhoto must get the path only") end
+  FAKE.writes[#FAKE.writes + 1] = { added = p, in_gate = FAKE.in_gate }
+  if FAKE.add_fails then error("The file is corrupt.") end
+  local fresh = setmetatable({}, { __index = photo })
+  function fresh:getRawMetadata(key)
+    if key == "uuid" then return "NEWPHOTO-9999" end
+    if key == "path" then return p end
+    return photo:getRawMetadata(key)
+  end
+  FAKE.in_catalog[p] = fresh
+  return fresh
+end
 function catalog:withWriteAccessDo(name, fn, params)
   if FAKE.write_gate ~= "executed" then return FAKE.write_gate end
-  fn({})
+  FAKE.in_gate = true
+  local ok, err = pcall(fn, {})
+  FAKE.in_gate = false
+  if not ok then error(err, 0) end
   return "executed"
 end
 
@@ -146,9 +163,21 @@ function DECODE(text) return Json.encode(Json.decode(text)) end
 function DECODE_FAILS(text) local ok, e = pcall(Json.decode, text) return (not ok) and (type(e) == "table" and e.lrmcp or tostring(e)) or false end
 function EXPORT_SETTING(key) return FAKE.last_export and FAKE.last_export[key] end
 function MAKE_FOLDER(path) FAKE.folders[path] = true end
+function MAKE_FILE(path) FAKE.files[path] = true end
+function ADDED_PATHS()
+  local out = {}
+  for _, w in ipairs(FAKE.writes) do if w.added then out[#out + 1] = w.added .. (w.in_gate and "|gate" or "|NOGATE") end end
+  return table.concat(out, ";")
+end
+function ALREADY_IN_CATALOG(path)
+  FAKE.in_catalog[path] = setmetatable({}, { __index = {
+    getRawMetadata = function(self, key) if key == "uuid" then return "OLDPHOTO-1" end if key == "path" then return path end return nil end,
+    getFormattedMetadata = function() return nil end } })
+end
 function SET_LABEL(v) FAKE.meta.label = v end
 function RESET()
   FAKE.files, FAKE.folders, FAKE.last_export, FAKE.export_fails = {}, {}, nil, false
+  FAKE.in_catalog, FAKE.add_fails, FAKE.in_gate = {}, false, false
   FAKE.meta = { rating = nil, pick = 0, label = "", title = "", caption = "", keywords = { newKeyword("Torino") } }
   FAKE.readonly, FAKE.write_gate, FAKE.writes, FAKE.fail_read, FAKE.round_to = false, "executed", {}, nil, nil
   FAKE.values = { Exposure2012 = 0, Contrast2012 = 0, Saturation = 0, HueAdjustmentRed = 0, Sharpness = 40,
@@ -187,6 +216,15 @@ def lr():
 
         def make_folder(self, path):
             g.MAKE_FOLDER(path)
+
+        def make_file(self, path):
+            g.MAKE_FILE(path)
+
+        def added(self):
+            return str(g.ADDED_PATHS())
+
+        def already_in_catalog(self, path):
+            g.ALREADY_IN_CATALOG(path)
 
         def set_label(self, value):
             g.SET_LABEL(value)
@@ -547,3 +585,71 @@ def test_export_reports_a_missing_file(lr):
     lr.set_flag("export_fails", True)
     reply = lr.run("export_photo", photo="selected", folder=enc(OUT))
     assert not reply["ok"] and "没有生成导出文件" in reply["error"]
+
+
+
+# ---- import (v0.15, desktop app only) -----------------------------------------------------------------------------------
+PHOTO_FILE = "D:\\\u7167\u7247\\a b.JPG"   # Chinese folder, a space and an upper-case extension
+
+
+def test_import_adds_the_photo_inside_the_write_gate_and_nothing_else(lr):
+    lr.make_file(PHOTO_FILE)
+    reply = lr.run("import_photo", path=enc(PHOTO_FILE))
+    data = reply["data"]
+    assert reply["ok"] and data["imported"] is True and data["already"] is False
+    assert data["id"] == "NEWPHOTO-9999" and data["name"] == "a b.JPG"
+    assert lr.added() == PHOTO_FILE + "|gate"
+    assert lr.writes() == 1   # only addPhoto: no develop settings, metadata or presets
+
+
+def test_import_of_a_photo_already_in_the_catalog_adds_nothing(lr):
+    lr.make_file(PHOTO_FILE)
+    lr.already_in_catalog(PHOTO_FILE)
+    data = lr.run("import_photo", path=enc(PHOTO_FILE))["data"]
+    assert data["already"] is True and data["imported"] is False and data["id"] == "OLDPHOTO-1"
+    assert lr.writes() == 0
+
+
+@pytest.mark.parametrize("name", ["x.jpg", "x.jpeg", "x.ARW", "x.cr2", "x.CR3", "x.nef", "x.nrw", "x.raf", "x.orf", "x.rw2",
+                                  "x.dng", "x.tif", "x.TIFF", "x.heic", "x.heif", "x.PnG"])
+def test_import_accepts_every_listed_extension_in_any_case(lr, name):
+    path = "D:\\ceshi\\" + name
+    lr.make_file(path)
+    assert lr.run("import_photo", path=enc(path))["ok"], name
+
+
+@pytest.mark.parametrize("path", [
+    "\\\\server\\share\\a.jpg", "//server/share/a.jpg", "relative\\a.jpg", "/etc/a.jpg", "D:a.jpg",
+    "D:\\a\\..\\b\\a.jpg", "D:/a/../a.jpg",
+    "C:\\Windows\\a.jpg", "C:\\Program Files\\X\\a.jpg", "C:\\Program Files (x86)\\a.jpg", "C:\\ProgramData\\a.jpg",
+    "C:\\Users\\me\\AppData\\Local\\a.jpg", "C:\\Users\\me\\.ssh\\a.jpg", "C:\\Users\\me\\LrMcp\\previews\\a.jpg",
+    "C:\\Users\\me\\LrMcp\\exports\\a.jpg",
+    "D:\\a\x07b.jpg", "D:\\" + "x" * 500 + ".jpg", "",
+    "D:\\ceshi\\a.txt", "D:\\ceshi\\a.exe", "D:\\ceshi\\a.jpg.exe", "D:\\ceshi\\noextension", "D:\\ceshi\\a.gif", "D:\\ceshi\\a.jpg.",
+])
+def test_import_refuses_bad_paths_and_writes_nothing(lr, path):
+    lr.make_file(path)   # even when the file exists
+    reply = lr.run("import_photo", path=enc(path))
+    assert not reply["ok"], path
+    assert lr.writes() == 0 and lr.added() == ""
+
+
+def test_import_refuses_missing_files_and_folders(lr):
+    reply = lr.run("import_photo", path=enc("D:\\ceshi\\missing.jpg"))
+    assert not reply["ok"] and "不存在" in reply["error"]
+    lr.make_folder("D:\\ceshi\\folder.jpg")
+    reply = lr.run("import_photo", path=enc("D:\\ceshi\\folder.jpg"))
+    assert not reply["ok"] and "文件夹" in reply["error"]
+    assert not lr.run("import_photo")["ok"]
+    assert lr.writes() == 0
+
+
+def test_import_reports_a_busy_catalog_and_lightrooms_own_error(lr):
+    lr.make_file(PHOTO_FILE)
+    lr.set_flag("write_gate", "queued")
+    reply = lr.run("import_photo", path=enc(PHOTO_FILE))
+    assert not reply["ok"] and "不能写入" in reply["error"] and lr.added() == ""
+    lr.set_flag("write_gate", "executed")
+    lr.set_flag("add_fails", True)
+    reply = lr.run("import_photo", path=enc(PHOTO_FILE))
+    assert not reply["ok"] and "The file is corrupt." in reply["error"]

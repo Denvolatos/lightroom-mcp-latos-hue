@@ -3,6 +3,19 @@
 Versions: a new feature raises the middle number, a small fix the last one. The server version lives in
 `server/lightroom_mcp/__init__.py`, the plug-in version in `plugin/lrmcp.lrdevplugin/Version.lua` (and `Info.lua`).
 
+## 0.15.0 — import command for the desktop app
+
+- New plug-in command `import_photo`: adds one photo file that is already on this computer to the Lightroom catalog, the same as
+  "Add" (not move) in the import dialog. It is for the desktop app on this computer only and is **not an MCP tool**: the tool list
+  is unchanged (22 tools), so an AI assistant cannot call it.
+- The plug-in does not trust the path it is given. It refuses: anything that is not a local drive path (`X:\...`), network paths
+  (`\\server\share\...`), `..` in the path, system and program folders and this tool's own data folder (the same list as export),
+  files that do not exist or are folders, and any extension outside `jpg jpeg arw cr2 cr3 nef nrw raf orf rw2 dng tif tiff heic
+  heif png` (case does not matter). A photo that is already in the catalog is not added twice (the reply says `already`).
+- Nothing is moved, copied or deleted, and no develop or metadata preset is applied. The server side
+  (`EditService.import_photo`) is refused by the read-only switch; a timeout is reported as "uncertain, check in Lightroom".
+- After updating, reload the plug-in once in Lightroom (the new command lives in the plug-in).
+
 ## 0.14.0 — reconnect fix
 
 - Root cause: when a server stopped and a new one took the same port straight away, the plug-in's old poller still held the
