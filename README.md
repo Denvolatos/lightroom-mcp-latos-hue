@@ -4,7 +4,7 @@
 一个 Lightroom 插件加一个小型 MCP 服务：能看到你选中的照片、读取调整参数，并把预览图和直方图数字交给 AI。
 还能对受限的调整参数做小步修改、整理目录信息，并保存旧值用于还原。
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.15.0-orange)
+![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.15.0-orange)
 
 [English](README.en.md) · [更新日志](CHANGELOG.md) · [安全说明](SECURITY.md) · [参与贡献](CONTRIBUTING.md)
 
@@ -151,6 +151,8 @@ Claude 桌面版暂不自动登记（配置文件位置取决于安装方式）�
 
 ## ⚖️ 许可证与声明
 
-[MIT](LICENSE)。第三方依赖见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+本项目的代码以 [GNU AGPL-3.0](LICENSE) 授权。简单说：你可以自由地使用、修改和分享；如果你把修改后的版本分发出去（或通过网络提供给别人使用），必须同样以 AGPL-3.0 公开源码，不能闭源。
+从 2026-11-03 的提交起按 AGPL-3.0 授权；此前已发布的 v0.1.0 至 v0.14.0 仍按 MIT 授权。
+第三方依赖见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 Adobe、Lightroom 是 Adobe Inc. 的商标；本项目与 Adobe 无关联，未获其认可或赞助。
 Adobe Lightroom Classic SDK 不在本仓库内，也不要提交。

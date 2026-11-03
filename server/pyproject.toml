@@ -7,7 +7,7 @@ name = "lightroom-mcp"
 dynamic = ["version"]
 description = "Let Claude / Codex look at your photos in Adobe Lightroom Classic (Windows). Read-only MCP server."
 requires-python = ">=3.10"
-license = "MIT"
+license = "AGPL-3.0-only"
 dependencies = [
     "mcp>=2.3,<3",
     "pillow",

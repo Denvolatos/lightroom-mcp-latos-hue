@@ -3,6 +3,12 @@
 Versions: a new feature raises the middle number, a small fix the last one. The server version lives in
 `server/lightroom_mcp/__init__.py`, the plug-in version in `plugin/lrmcp.lrdevplugin/Version.lua` (and `Info.lua`).
 
+## Unreleased — license
+
+- The project's own code is now licensed under the **GNU AGPL-3.0** (was MIT), from the commits of 2026-11-03 on. In short: free
+  to use, change and share; a distributed (or network-served) modified version must publish its source under the AGPL-3.0 too.
+  The releases v0.1.0 to v0.14.0 that were published before stay under the MIT license.
+
 ## 0.15.0 — import command for the desktop app
 
 - New plug-in command `import_photo`: adds one photo file that is already on this computer to the Lightroom catalog, the same as

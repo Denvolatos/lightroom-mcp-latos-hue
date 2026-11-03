@@ -14,6 +14,8 @@ Thanks for looking! This is a small hobby project; issues and pull requests are 
 4. Plug-in code stays small and boring: the Lightroom Lua sandbox is picky (no `os.getenv`, `os.execute`; most SDK
    calls need an async task; writes need `withWriteAccessDo`). `docs/实验记录.md` lists what was measured on LrC 15.2.
 5. Messages shown to users are in Chinese (the code and tool names are English).
+6. **License / 许可证：** 你提交的贡献按本项目的 GNU AGPL-3.0 授权（见 `LICENSE`）。
+   Contributions you submit are licensed under the project's GNU AGPL-3.0 (see `LICENSE`).
 
 ## Setup / 开发环境
 
