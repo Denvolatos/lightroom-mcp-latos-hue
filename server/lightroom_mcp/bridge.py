@@ -40,9 +40,15 @@ class BridgeTimeout(BridgeError):
 
 
 def restrict_to_current_user(path: Path) -> None:
-    """Best effort: only the current user may read the token file (Windows ACL)."""
+    """Best effort: only the current user may read the token file (Windows ACL; elsewhere mode 600)."""
+    if os.name != "nt":
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        return
     user = os.environ.get("USERNAME")
-    if os.name != "nt" or not user:
+    if not user:
         return
     try:
         subprocess.run(
@@ -65,7 +71,9 @@ class _Server(ThreadingHTTPServer):
     """On Windows SO_REUSEADDR lets several processes bind the same port, which would break the
     one-instance rule (and let another program take the port). Bind exclusively instead."""
 
-    allow_reuse_address = False
+    # Windows: never (see above). Elsewhere SO_REUSEADDR is the normal way to rebind a port still in TIME_WAIT
+    # (macOS refuses otherwise) and does not let a second process listen on the same address.
+    allow_reuse_address = os.name != "nt"
     daemon_threads = True
 
     def server_bind(self):

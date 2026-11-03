@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,8 +19,18 @@ class Check:
     fix: str = ""
 
 
+MAC_LIGHTROOM_EXECUTABLE = "/Adobe Lightroom Classic.app/Contents/MacOS/"  # macOS 上的进程名未实测（待验证）
+
+
+def _lightroom_process_label() -> str:
+    return "Adobe Lightroom Classic" if sys.platform == "darwin" else "Lightroom.exe"
+
+
 def _lightroom_running() -> bool | None:
     try:
+        if sys.platform == "darwin":
+            out = subprocess.run(["ps", "-axo", "comm="], capture_output=True, text=True, timeout=10).stdout
+            return MAC_LIGHTROOM_EXECUTABLE in out
         out = subprocess.run(
             ["tasklist", "/FI", "IMAGENAME eq Lightroom.exe", "/NH"], capture_output=True, text=True, timeout=10
         ).stdout
@@ -50,7 +61,7 @@ def run_checks(bridge: Bridge | None, busy_message: str | None = None, wait_plug
             Check(
                 "Lightroom 是否在运行",
                 running,
-                "Lightroom.exe 正在运行" if running else "没有找到 Lightroom.exe",
+                f"{_lightroom_process_label()} 正在运行" if running else f"没有找到 {_lightroom_process_label()}",
                 "" if running else "请先打开 Lightroom Classic",
             )
         )
