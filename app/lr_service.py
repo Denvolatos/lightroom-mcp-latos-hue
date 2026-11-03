@@ -233,6 +233,15 @@ class LrService:
             raise bridge_mod.PluginNotConnected("无法建立与 Lightroom 的连接。")
         return self._edits.import_photo(path)
 
+    def export_photo(self, folder: str, fmt: str, long_edge: int, quality: int, metadata: str, bit_depth: int,
+                     photo: str = "selected") -> dict:
+        """导出一张照片（server 的 EditService.export_photo_for_app，只给软件用；不受只读开关拦截）。
+        异常原样抛出，由 export_service 翻成中文；超时时服务端返回 status=uncertain。"""
+        if not self.start() or self._edits is None:
+            _, bridge_mod = _import_server()
+            raise bridge_mod.PluginNotConnected("无法建立与 Lightroom 的连接。")
+        return self._edits.export_photo_for_app(folder, fmt, long_edge, quality, metadata, bit_depth, photo)
+
     # ---- 撤销 ------------------------------------------------------
     def _run(self, fn) -> dict:
         """统一把异常翻成 {"ok", "conflict", "message"}。"""

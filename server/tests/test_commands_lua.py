@@ -121,9 +121,14 @@ local modules = {
     return { doExportOnCurrentTask = function()
       local s = args.exportSettings
       FAKE.last_export = s
-      if not FAKE.export_fails then FAKE.files[s.LR_export_destinationPathPrefix .. "\\" .. s.LR_tokenCustomString .. ".jpg"] = true end
+      local ext = (s.LR_format == "TIFF") and "tif" or "jpg"
+      if not FAKE.export_fails then FAKE.files[s.LR_export_destinationPathPrefix .. "\\" .. s.LR_tokenCustomString .. "." .. ext] = true end
     end }
   end,
+  LrExportSettings = { extensionForFormat = function(f)
+    local map = { JPEG = "jpg", TIFF = "tif" }
+    return assert(map[f], "no fake extension for " .. tostring(f))
+  end },
   LrFileUtils = { exists = function(path)
                     if FAKE.readonly and path:find("readonly", 1, true) then return "file" end
                     if FAKE.folders[path] then return "directory" end
@@ -587,6 +592,82 @@ def test_export_reports_a_missing_file(lr):
     reply = lr.run("export_photo", photo="selected", folder=enc(OUT))
     assert not reply["ok"] and "没有生成导出文件" in reply["error"]
 
+
+# ---- TIFF export (v0.15, desktop app only; the MCP tool never sends "format") ---------------------------------------------
+def test_export_default_format_is_still_jpeg(lr):
+    lr.make_folder(OUT)
+    data = lr.run("export_photo", photo="selected", folder=enc(OUT))["data"]
+    assert data["format"] == "jpeg" and data["extension"] == "jpg" and data["quality"] == 90 and "bit_depth" not in data
+    assert lr.export_setting("LR_format") == "JPEG" and lr.export_setting("LR_export_bitDepth") is None
+    assert lr.export_setting("LR_tiff_compressionMethod") is None
+    data = lr.run("export_photo", photo="selected", folder=enc(OUT), format="jpeg", bit_depth="8")["data"]
+    assert data["file"].endswith("_2.jpg") and "bit_depth" not in data   # bit_depth means nothing for JPEG
+
+
+def test_export_tiff_defaults_to_16_bit_srgb_lossless(lr):
+    lr.make_folder(OUT)
+    reply = lr.run("export_photo", photo="selected", folder=enc(OUT), format="tiff")
+    data = reply["data"]
+    assert reply["ok"] and data["file"] == "one_LrMCP_full.tif" and data["extension"] == "tif" and data["format"] == "tiff"
+    assert data["path"] == OUT + "\\one_LrMCP_full.tif" and data["bit_depth"] == 16 and data["bytes"] == 12345
+    assert data["width"] == 6000 and data["height"] == 4000 and data["metadata"] == "minimal"
+    assert "quality" not in data
+    assert lr.export_setting("LR_format") == "TIFF" and lr.export_setting("LR_export_bitDepth") == 16
+    assert lr.export_setting("LR_export_colorSpace") == "sRGB"
+    assert lr.export_setting("LR_tiff_compressionMethod") == "compressionMethod_ZIP"
+    assert lr.export_setting("LR_jpeg_quality") is None and lr.export_setting("LR_extensionCase") == "lowercase"
+
+
+def test_export_tiff_8_bit_size_and_name(lr):
+    lr.make_folder(OUT)
+    data = lr.run("export_photo", photo="selected", folder=enc(OUT), format="tiff", bit_depth="8", long_edge="1024", metadata="all")["data"]
+    assert data["file"] == "one_LrMCP_1024px.tif" and data["bit_depth"] == 8 and data["width"] == 1024 and data["height"] == 683
+    assert lr.export_setting("LR_export_bitDepth") == 8 and lr.export_setting("LR_size_maxWidth") == 1024
+    assert lr.export_setting("LR_minimizeEmbeddedMetadata") is False
+
+
+def test_export_tiff_ignores_quality(lr):
+    lr.make_folder(OUT)
+    data = lr.run("export_photo", photo="selected", folder=enc(OUT), format="tiff", quality="5")["data"]
+    assert "quality" not in data and lr.export_setting("LR_jpeg_quality") is None
+
+
+def test_export_rejects_unknown_formats_and_bit_depths(lr):
+    lr.make_folder(OUT)
+    for params in (dict(format="png"), dict(format="TIFF"), dict(format="jpg"), dict(format="psd"), dict(format="tiff", bit_depth="12"),
+                   dict(format="tiff", bit_depth="abc"), dict(format="tiff", bit_depth="0")):
+        reply = lr.run("export_photo", photo="selected", folder=enc(OUT), **params)
+        assert not reply["ok"], params
+    assert lr.export_setting("LR_format") is None   # nothing was exported by the refused calls
+
+
+def test_export_tiff_never_overwrites(lr):
+    lr.make_folder(OUT)
+    lr.make_file(OUT + "\\one_LrMCP_full.tif")
+    data = lr.run("export_photo", photo="selected", folder=enc(OUT), format="tiff")["data"]
+    assert data["file"] == "one_LrMCP_full_2.tif"
+    assert lr.run("export_photo", photo="selected", folder=enc(OUT), format="tiff")["data"]["file"] == "one_LrMCP_full_3.tif"
+    # a JPEG of the same photo is a different file and does not count as a collision
+    assert lr.run("export_photo", photo="selected", folder=enc(OUT))["data"]["file"] == "one_LrMCP_full.jpg"
+
+
+def test_export_tiff_keeps_every_folder_check(lr):
+    for path in ("\\\\server\\share\\x", "//server/share", "relative\\dir", "D:\\a\\..\\b", "C:\\Windows\\Temp",
+                 "C:\\Program Files\\X", "C:\\Users\\me\\AppData\\Roaming", "C:\\Users\\me\\.ssh", "C:\\Users\\me\\LrMcp\\previews",
+                 "D:\\a\x07b", "D:\\" + "x" * 500):
+        lr.make_folder(path)
+        assert not lr.run("export_photo", photo="selected", folder=enc(path), format="tiff")["ok"], path
+    reply = lr.run("export_photo", photo="selected", folder=enc("D:\\missing"), format="tiff")
+    assert not reply["ok"] and "不存在" in reply["error"]
+    assert not lr.run("export_photo", photo="selected", format="tiff")["ok"]   # no destination at all
+    assert lr.export_setting("LR_format") is None
+
+
+def test_export_tiff_reports_a_missing_file(lr):
+    lr.make_folder(OUT)
+    lr.set_flag("export_fails", True)
+    reply = lr.run("export_photo", photo="selected", folder=enc(OUT), format="tiff")
+    assert not reply["ok"] and "没有生成导出文件" in reply["error"]
 
 
 # ---- import (v0.15, desktop app only) -----------------------------------------------------------------------------------

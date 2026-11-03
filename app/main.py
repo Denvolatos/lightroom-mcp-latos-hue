@@ -19,6 +19,7 @@ from lr_service import LrService  # noqa: E402
 from providers import available_providers, create_provider, is_selectable  # noqa: E402
 import settings as appsettings  # noqa: E402
 from import_service import ImportService  # noqa: E402
+from export_service import ExportService  # noqa: E402
 from preview import PreviewManager, PreviewServer, PreviewStore  # noqa: E402
 from ports import STATE_DIR  # noqa: E402
 
@@ -58,6 +59,7 @@ class Api:
         self._preview.set_edge(self._settings.data["preview_edge"])
         self._backend = Backend(self._lr, self._session, self._tracker, self._emit, state_file=None, previews=self._preview)
         self._import = ImportService(self._settings, self._lr, self._emit)
+        self._export = ExportService(self._settings, self._lr, self._emit)
 
     def _start_background(self) -> None:
         """窗口一出现就预热：Bridge、常驻 claude（含 lightroom_mcp 与确认服务）同时启动，之后每条消息零启动开销。"""
@@ -319,6 +321,40 @@ class Api:
         except (OSError, AttributeError) as e:
             return {"ok": False, "message": f"无法打开文件夹：{e}"}
         return {"ok": True, "message": ""}
+
+    # ---- 导出 ------------------------------------------------------
+    def export_dialog_state(self) -> dict:
+        """打开导出对话框：当前选中的照片、导出文件夹、上次的选项、能否导出。"""
+        return self._export.dialog_state()
+
+    def choose_export_folder(self) -> dict:
+        """弹出系统文件夹对话框选择导出位置。路径只来自这次点击，由后端记住；页面不能传入路径。"""
+        if self._window is None:
+            return {"ok": False, "message": ""}
+        kind = getattr(getattr(webview, "FileDialog", None), "FOLDER", None) or webview.FOLDER_DIALOG
+        cur = self._export.folder or self._settings.data.get("export_last_folder", "")
+        init = cur if cur and os.path.isdir(cur) else ""
+        try:
+            res = self._window.create_file_dialog(kind, directory=init)
+        except Exception:
+            res = None
+        if not res:
+            return {"ok": False, "message": "", "cancelled": True}
+        return self._export.set_folder(str(res[0]))
+
+    def export_current_photo(self, options: dict) -> dict:
+        """导出当前选中的照片。只用后端记住的文件夹；options 里任何路径字段都被忽略。结果经 export_done 事件给出。"""
+        return self._export.export(options)
+
+    def export_state(self) -> dict:
+        return self._export.state()
+
+    def export_close(self) -> dict:
+        return self._export.close()
+
+    def reveal_last_export(self) -> dict:
+        """在资源管理器中显示本次导出的结果文件（路径来自后端记录）。"""
+        return self._export.reveal_last()
 
     def preview_state(self) -> dict:
         """页面刚加载时取最近一次预览内容（之后靠 onClaudeEvent 的 preview 事件更新）。"""

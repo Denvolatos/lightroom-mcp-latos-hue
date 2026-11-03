@@ -20,6 +20,11 @@ Versions: a new feature raises the middle number, a small fix the last one. The 
   heif png` (case does not matter). A photo that is already in the catalog is not added twice (the reply says `already`).
 - Nothing is moved, copied or deleted, and no develop or metadata preset is applied. The server side
   (`EditService.import_photo`) is refused by the read-only switch; a timeout is reported as "uncertain, check in Lightroom".
+- TIFF export for the desktop app only: the plug-in command `export_photo` takes an optional `format` (`jpeg`, the default and
+  unchanged, or `tiff`) and `bit_depth` (`8` or `16`, default 16). TIFF is sRGB with lossless ZIP compression, the file ends in
+  `.tif`, `quality` does not apply, and every folder check and the never-overwrite rule are the same as for JPEG. Any other
+  `format` is refused. The server side is `EditService.export_photo_for_app`, which is **not an MCP tool**: `lr_export` keeps its
+  parameters and stays JPEG-only, so an AI assistant cannot ask for TIFF (the tool list is still 22 tools).
 - After updating, reload the plug-in once in Lightroom (the new command lives in the plug-in).
 
 ## 0.14.0 — reconnect fix
