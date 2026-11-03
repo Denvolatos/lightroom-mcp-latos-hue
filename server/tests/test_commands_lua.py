@@ -99,8 +99,11 @@ function catalog:getFolderByPath(p) return FAKE.libfolders[p] end
 function catalog:setActiveSources(sources)
   FAKE.sources = sources
   if FAKE.sources_fail then return false end
-  FAKE.view = {}
-  for _, f in ipairs(sources) do for _, ph in ipairs(f.own) do FAKE.view[ph:getRawMetadata("uuid")] = true end end
+  local function apply()
+    FAKE.view = {}
+    for _, f in ipairs(sources) do for _, ph in ipairs(f.own) do FAKE.view[ph:getRawMetadata("uuid")] = true end end
+  end
+  if FAKE.view_delay then FAKE.pending[#FAKE.pending + 1] = apply else apply() end
   return true
 end
 function catalog:setSelectedPhotos(active, others)
@@ -1026,6 +1029,22 @@ def test_select_show_folder_switches_the_view_first(lib):
     data = lib.run("select_photos", ids=U1, show_folder=enc(ROOT))["data"]
     assert data["folder_shown"] is True and data["selected"] == [U1] and data["all_selected"] is True
     assert len(lib.fake("sources")) == 1
+
+
+def test_select_show_folder_waits_until_lightroom_has_switched_the_view(lib):
+    """Real Lightroom 15.2: right after setActiveSources the photos are not in the view yet and the first setSelectedPhotos
+    selects nothing; the plug-in must wait and try again."""
+    lib.set_view([U4])
+    lib.set_flag("view_delay", True)
+    data = lib.run("select_photos", ids=U1, show_folder=enc(ROOT))["data"]
+    assert data["selected"] == [U1] and data["all_selected"] is True and data["folder_shown"] is True
+    assert lib.fake("select_calls") >= 1
+
+
+def test_select_without_folder_switch_tries_only_once(lib):
+    lib.set_view([U4])
+    data = lib.run("select_photos", ids=U1)["data"]
+    assert data["all_selected"] is False and lib.fake("select_calls") == 1
 
 
 def test_select_photo_outside_the_view_is_reported_honestly(lib):
