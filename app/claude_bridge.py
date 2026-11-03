@@ -65,12 +65,12 @@ def find_claude() -> str | None:
 
 
 def lightroom_server_config() -> dict:
-    """lightroom_mcp 服务怎么启动：优先用打包好的 lrmcp.exe，其次用仓库源码。"""
+    """lightroom_mcp 服务怎么启动：开发时优先用仓库源码（最新、全部工具），没有源码才用打包好的 lrmcp.exe。"""
+    if (REPO / "server" / "lightroom_mcp").exists():
+        return {"type": "stdio", "command": sys.executable, "args": ["-m", "lightroom_mcp"],
+                "env": {"PYTHONPATH": str(REPO / "server")}}
     exe = REPO / "build" / "dist" / "lrmcp" / "lrmcp.exe"
-    if exe.exists():
-        return {"type": "stdio", "command": str(exe), "args": []}
-    return {"type": "stdio", "command": sys.executable, "args": ["-m", "lightroom_mcp"],
-            "env": {"PYTHONPATH": str(REPO / "server")}}
+    return {"type": "stdio", "command": str(exe), "args": []}
 
 
 def write_mcp_config(directory: Path | None = None) -> Path:
