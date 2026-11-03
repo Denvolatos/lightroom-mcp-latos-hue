@@ -1,7 +1,7 @@
 """把修图助手接到本机已登录的 Claude Code 命令行（claude -p）。
 
 本模块不依赖界面：负责 ①拼出“干净”的命令 ②解析 stream-json 事件 ③把错误翻成小白能懂的中文。
-当前阶段只读：只放行查看类工具，写入类工具一律拒绝。
+查看类工具直接放行；调整/还原类工具按“逐项确认”开关决定直接放行或逐项确认；其余写入类工具隐藏。
 """
 from __future__ import annotations
 
@@ -28,12 +28,20 @@ READONLY_TOOLS = [
 ]
 ALLOWED_TOOLS = [f"mcp__{SERVER_NAME}__{t}" for t in READONLY_TOOLS]
 
-# 写入/导出/删除类工具：不仅不放行，还直接从模型的工具清单里藏掉（实测让每轮少约 5500 token，也更安全）
+# 写入/导出/删除类工具（以 server 的标注为准）。本阶段只开放 ENABLED_WRITE_TOOLS，其余直接从模型的工具清单里藏掉
+# （实测让每轮少约 5500 token，也更安全）。
 WRITE_TOOLS = [
     "lr_set_develop", "lr_set_metadata", "lr_apply_preset", "lr_batch_set_develop", "lr_export",
     "lr_save_version", "lr_apply_version", "lr_delete_version", "lr_restore", "lr_restore_original",
 ]
-DISALLOWED_TOOLS = [f"mcp__{SERVER_NAME}__{t}" for t in WRITE_TOOLS]
+ENABLED_WRITE_TOOLS = ["lr_set_develop", "lr_restore", "lr_restore_original"]
+BLOCKED_WRITE_TOOLS = [t for t in WRITE_TOOLS if t not in ENABLED_WRITE_TOOLS]
+ENABLED_WRITE_FULL = [f"mcp__{SERVER_NAME}__{t}" for t in ENABLED_WRITE_TOOLS]
+DISALLOWED_TOOLS = [f"mcp__{SERVER_NAME}__{t}" for t in BLOCKED_WRITE_TOOLS]
+
+# 逐项确认：由 claude 的 --permission-prompt-tool 把每次写入请求转给这个小服务，再转给窗口
+PERM_SERVER_NAME = "lrapp_confirm"
+PERM_TOOL = f"mcp__{PERM_SERVER_NAME}__approve"
 
 SYSTEM_PROMPT = (
     "你是 Lightroom 修图助手。回复使用正式、克制的书面语气：不闲聊，不使用感叹句、语气词和口语化表达，不使用“你/我”式对话口吻。"
@@ -56,6 +64,9 @@ TOOL_LABELS = {
     "lr_plan_from_edit": "正在整理调整方案",
     "lr_list_versions": "正在读取已保存的版本",
     "lr_compare": "正在对比版本",
+    "lr_set_develop": "正在调整参数",
+    "lr_restore": "正在还原调整",
+    "lr_restore_original": "正在还原到原始状态",
     "lr_list_edits": "正在读取调整记录",
     "lr_doctor": "正在检查运行状态",
 }
@@ -75,17 +86,29 @@ def lightroom_server_config() -> dict:
     return {"type": "stdio", "command": str(exe), "args": []}
 
 
-def write_mcp_config(directory: Path | None = None) -> Path:
-    """写一份只含 lightroom_mcp 的临时配置文件（不含任何密钥）。"""
+def permission_server_config() -> dict:
+    """确认服务的启动方式。端口与口令不写进文件，而是用环境变量占位，由窗口进程启动 claude 时传入。"""
+    return {"type": "stdio", "command": sys.executable,
+            "args": [str(Path(__file__).resolve().parent / "permission_server.py")],
+            "env": {"LRAPP_PORT": "${LRAPP_PORT}", "LRAPP_TOKEN": "${LRAPP_TOKEN}"}}
+
+
+def write_mcp_config(directory: Path | None = None, confirm: bool = True) -> Path:
+    """写一份只含 lightroom_mcp（逐项确认开启时再加确认服务）的临时配置文件（不含任何密钥）。"""
     directory = directory or Path(tempfile.gettempdir())
     path = directory / "lrmcp_app_mcp.json"
-    path.write_text(json.dumps({"mcpServers": {SERVER_NAME: lightroom_server_config()}}, ensure_ascii=False),
-                    encoding="utf-8")
+    servers = {SERVER_NAME: lightroom_server_config()}
+    if confirm:
+        servers[PERM_SERVER_NAME] = permission_server_config()
+    path.write_text(json.dumps({"mcpServers": servers}, ensure_ascii=False), encoding="utf-8")
     return path
 
 
 def build_command(prompt: str, mcp_config: Path, session_id: str | None = None,
-                  claude_path: str = "claude") -> list[str]:
+                  claude_path: str = "claude", confirm: bool = True) -> list[str]:
+    """confirm=True（逐项确认开）：写入类工具不在放行清单里，每次写入由 --permission-prompt-tool 交给窗口确认；
+    窗口不可达、超时、被拒绝一律不执行。confirm=False：写入类工具直接放行。"""
+    allowed = ALLOWED_TOOLS + ([] if confirm else ENABLED_WRITE_FULL)
     cmd = [
         claude_path, "-p", prompt,
         "--output-format", "stream-json", "--verbose", "--include-partial-messages",
@@ -95,10 +118,14 @@ def build_command(prompt: str, mcp_config: Path, session_id: str | None = None,
         "--disable-slash-commands",
         "--tools", "",
         "--system-prompt", SYSTEM_PROMPT,
-        "--allowedTools", *ALLOWED_TOOLS,
+        "--allowedTools", *allowed,
         "--disallowedTools", *DISALLOWED_TOOLS,
-        "--permission-mode", "dontAsk",
     ]
+    if confirm:
+        # default 模式下，未放行的工具会触发权限询问，交给确认服务；dontAsk 模式会直接拒绝、不会询问
+        cmd += ["--permission-mode", "default", "--permission-prompt-tool", PERM_TOOL]
+    else:
+        cmd += ["--permission-mode", "dontAsk"]
     if session_id:
         cmd += ["--resume", session_id]
     return cmd
@@ -126,7 +153,8 @@ MSG_TIMEOUT = f"等待超过 {TIMEOUT_SECONDS} 秒仍无结果，已停止。请
 def parse_line(line: str, state: dict | None = None) -> list[dict]:
     """把一行 stream-json 变成 0~n 个界面事件。state 用来记录本轮是否已流式输出过文字。
 
-    事件：{"type":"session","id"} {"type":"text","text"} {"type":"tool","name","label"}
+    事件：{"type":"session","id"} {"type":"text","text"} {"type":"tool","name","label","id","input"}
+         {"type":"tool_result","id","text","is_error"}
          {"type":"done","tokens","cost","text","is_error"} {"type":"error","message"}
     """
     state = state if state is not None else {}
@@ -150,12 +178,22 @@ def parse_line(line: str, state: dict | None = None) -> list[dict]:
         for block in obj.get("message", {}).get("content", []) or []:
             if block.get("type") == "tool_use":
                 name = str(block.get("name", "")).split("__")[-1]
-                out.append({"type": "tool", "name": name, "label": TOOL_LABELS.get(name, "正在处理")})
+                out.append({"type": "tool", "name": name, "id": block.get("id"), "input": block.get("input") or {},
+                            "label": TOOL_LABELS.get(name, "正在处理")})
             elif block.get("type") == "text" and not state.get("streamed"):
                 out.append({"type": "text", "text": block.get("text", "")})
         state["streamed"] = False   # 下一条助手消息重新判断
         if obj.get("error"):
             out.append({"type": "error", "message": friendly_error(str(obj.get("error")))})
+    elif t == "user":
+        content = obj.get("message", {}).get("content", [])
+        for block in content if isinstance(content, list) else []:
+            if block.get("type") == "tool_result":
+                c = block.get("content")
+                if isinstance(c, list):
+                    c = "".join(x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text")
+                out.append({"type": "tool_result", "id": block.get("tool_use_id"), "text": str(c or ""),
+                            "is_error": bool(block.get("is_error"))})
     elif t == "result":
         u = obj.get("usage", {}) or {}
         tokens = sum(int(u.get(k, 0) or 0) for k in
@@ -192,14 +230,14 @@ class ClaudeSession:
             except OSError:
                 pass
 
-    def send(self, prompt: str, emit) -> None:
+    def send(self, prompt: str, emit, confirm: bool = True, extra_env: dict | None = None) -> None:
         claude = find_claude()
         if not claude:
             emit({"type": "error", "message": MSG_NO_CLAUDE})
             emit({"type": "done", "tokens": 0, "cost": None, "text": "", "is_error": True})
             return
         self.workdir.mkdir(parents=True, exist_ok=True)
-        cmd = build_command(prompt, write_mcp_config(), self.session_id, claude)
+        cmd = build_command(prompt, write_mcp_config(confirm=confirm), self.session_id, claude, confirm)
         self._stopped = False
         state: dict = {}
         stderr_text = ""
@@ -207,7 +245,7 @@ class ClaudeSession:
         try:
             self._proc = subprocess.Popen(
                 cmd, cwd=str(self.workdir), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+                stderr=subprocess.PIPE, text=True, env={**os.environ, **(extra_env or {})}, encoding="utf-8", errors="replace",
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except OSError:
             emit({"type": "error", "message": MSG_NO_CLAUDE})
