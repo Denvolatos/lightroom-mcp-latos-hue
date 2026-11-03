@@ -129,7 +129,7 @@
   .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left .2s; }
   .switch.on { background: var(--ok); } .switch.on::after { left: 18px; }
   /* ---------- export dialog ---------- */
-  .mask { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; }
+  .mask { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; }
   .mask.show { display: flex; }
   .dialog { width: 460px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
   .dialog h3 { margin: 0 0 12px; }
@@ -137,6 +137,25 @@
   .field select, .field input { background: var(--bg); color: var(--text); border: 1px solid var(--line);
     border-radius: 6px; padding: 5px 8px; font: inherit; }
   .dialog .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  /* ---------- settings dialog ---------- */
+  .dialog.wide { width: 580px; max-width: calc(100vw - 40px); max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
+  .dialog.wide .body { overflow: auto; margin: 0 -6px; padding: 0 6px; }
+  .sgroup { border-top: 1px solid var(--line); padding: 12px 0 4px; }
+  .sgroup:first-child { border-top: none; padding-top: 0; }
+  .sgroup h4 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
+  .srow { display: grid; grid-template-columns: 120px 1fr; gap: 8px; align-items: center; margin: 8px 0; }
+  .srow > label, .srow > .lab { color: var(--text); }
+  .srow input[type=text], .srow select { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 8px; font: inherit; }
+  .srow .inline { display: flex; gap: 8px; align-items: center; }
+  .srow .inline input { flex: 1; min-width: 0; user-select: text; }
+  .sub { grid-column: 2; color: var(--muted); font-size: 12px; margin-top: -4px; }
+  .sub.bad, .ferr { color: var(--bad); } .sub.ok { color: var(--ok); }
+  .ferr { grid-column: 2; font-size: 12px; margin-top: -4px; }
+  .kv { display: grid; grid-template-columns: 120px 1fr; gap: 4px 8px; margin: 4px 0 8px; font-size: 13px; }
+  .kv span:nth-child(odd) { color: var(--muted); } .kv span:nth-child(even) { user-select: text; word-break: break-all; }
+  .sfoot { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+  .sfoot .msg-line { flex: 1; font-size: 12px; } .sfoot .msg-line.ok { color: var(--ok); } .sfoot .msg-line.bad { color: var(--bad); }
   ::-webkit-scrollbar { width: 8px; height: 8px; } ::-webkit-scrollbar-thumb { background: #3a3f46; border-radius: 4px; }
 </style>
 </head>
@@ -149,6 +168,7 @@
   <button class="btn" onclick="undo()">撤销</button>
   <button class="btn" id="newchat" onclick="newChat()" style="display:none">新对话</button>
   <span class="spacer"></span>
+  <button class="btn" id="setbtn" style="display:none" onclick="openSettings()">设置</button>
   <span class="status"><span class="dot" id="lrdot"></span><span id="lrstat">Lightroom 已连接（示例）</span></span>
   <span class="hint" id="lrhint"></span>
   <span class="status" id="toastbox"></span>
@@ -212,6 +232,47 @@
     <div class="field"><span>大小</span><select><option>原始尺寸</option><option>长边 4096 像素</option><option>长边 2048 像素</option></select></div>
     <div class="field"><span>质量</span><input type="range" min="40" max="100" value="92"></div>
     <div class="row"><button class="btn" onclick="closeExport()">取消</button><button class="btn primary" onclick="doExport()">导出</button></div>
+  </div>
+</div>
+
+<div class="mask" id="smask">
+  <div class="dialog wide" role="dialog" aria-label="设置">
+    <h3>设置</h3>
+    <div class="body">
+      <div class="sgroup">
+        <h4>常规</h4>
+        <div class="srow"><span class="lab">软件文件夹</span>
+          <span class="inline"><input type="text" id="s_folder" readonly><button class="btn small" id="s_pick">选择文件夹</button></span>
+          <span class="sub">用于存放导入的照片及相关文件（导入功能后续提供）。</span>
+          <span class="ferr" id="e_folder"></span></div>
+      </div>
+      <div class="sgroup">
+        <h4>AI 来源</h4>
+        <div class="srow"><label for="s_provider">使用的来源</label><select id="s_provider"></select>
+          <span class="sub" id="s_pstate"></span><span class="sub" id="s_pnote">切换来源后，下一次“新对话”生效。</span>
+          <span class="ferr" id="e_provider"></span></div>
+      </div>
+      <div class="sgroup">
+        <h4>对话</h4>
+        <div class="srow"><span class="lab">逐项确认默认值</span>
+          <span class="inline"><button class="switch on" id="s_confirm" aria-label="逐项确认默认值"></button><span id="s_confirm_t">开</span></span>
+          <span class="sub">新对话开始时使用该默认值；对话中仍可随时切换。</span></div>
+        <div class="srow"><label for="s_edge">预览默认清晰度</label><select id="s_edge"></select>
+          <span class="ferr" id="e_edge"></span></div>
+      </div>
+      <div class="sgroup">
+        <h4>关于</h4>
+        <div class="kv">
+          <span>软件版本</span><span id="a_app"></span>
+          <span>Lightroom 版本</span><span id="a_lr"></span>
+          <span>插件版本</span><span id="a_plugin"></span>
+          <span>数据位置</span><span id="a_data"></span>
+          <span>项目主页</span><span id="a_url"></span>
+        </div>
+      </div>
+    </div>
+    <div class="sfoot"><span class="msg-line" id="s_msg"></span>
+      <button class="btn" id="s_cancel">取消</button><button class="btn primary" id="s_save">保存</button></div>
   </div>
 </div>
 
@@ -352,7 +413,8 @@ function runPlan(i=0){
   no.onclick=()=>{ m.querySelector('.row').remove(); m.append('已拒绝'); runPlan(i+1); };
 }
 const REAL = () => !!(window.pywebview && window.pywebview.api && window.pywebview.api.send);
-let cur = null, busy = false;   // cur = 正在流式显示的那条 AI 消息
+let cur = null, busy = false;
+let confirmDefault = true;   // 设置里的“逐项确认默认值”，新对话开始时套用   // cur = 正在流式显示的那条 AI 消息
 let photoName = null;           // 真实模式：Lightroom 当前选中的照片
 const DOTCLR = {connected:'var(--ok)', connecting:'var(--warn)', disconnected:'var(--bad)'};
 function showStatus(s){ $('#lrstat').textContent = s.text; $('#lrdot').style.background = DOTCLR[s.state]||'var(--bad)';
@@ -362,7 +424,7 @@ async function newChat(){
   if (!REAL() || busy) return;
   if (!await askDialog('新对话', '将清空当前对话与「本次调整」表格并重置助手会话。照片上已应用的调整不会被撤销，仍可用「还原到原始状态」还原。是否继续？', '新对话')) return;
   await window.pywebview.api.reset();
-  $('#msgs').innerHTML=''; rows=[]; cur=null; say('请选择照片并输入期望的修图效果。'); renderParams(); renderStage(); toast('已开始新对话');
+  $('#msgs').innerHTML=''; rows=[]; cur=null; setAsk(confirmDefault); say('请选择照片并输入期望的修图效果。'); renderParams(); renderStage(); toast('已开始新对话');
 }
 function note(t){ const n=document.createElement('div'); n.className='note'; n.textContent=t; $('#msgs').appendChild(n); n.scrollIntoView(); return n; }
 function fmtCost(c){ return (c==null) ? '' : '，估算费用 $'+Number(c).toFixed(3); }
@@ -406,8 +468,9 @@ function send(){ const v=$('#inp').value.trim(); if(!v || busy) return; $('#inp'
   setTimeout(()=>{ say('已收到需求，正在分析照片并制定调整方案。（演示回复）'); setTimeout(()=>runPlan(0),500); },400); }
 $('#stop').onclick=()=>{ if(REAL()) window.pywebview.api.stop(); };
 $('#send').onclick=send; $('#inp').onkeydown=e=>{ if(e.key==='Enter') send(); };
-$('#sw').onclick=()=>{ ask=!ask; $('#sw').classList.toggle('on',ask);
-  $('#swlabel').textContent= ask?'逐项确认：开（每项调整需先确认）':'逐项确认：关（自动执行）'; };
+function setAsk(v){ ask=!!v; $('#sw').classList.toggle('on',ask);
+  $('#swlabel').textContent= ask?'逐项确认：开（每项调整需先确认）':'逐项确认：关（自动执行）'; }
+$('#sw').onclick=()=>setAsk(!ask);
 
 /* 弹窗：返回 Promise<boolean> */
 function askDialog(title, text, okLabel){ return new Promise(res=>{
@@ -445,10 +508,76 @@ function closeExport(){ $('#mask').classList.remove('show'); }
 function doExport(){ closeExport(); toast('导出功能开发中（所选格式：'+$('#exfmt').value+'）'); }
 $('#mask').onclick=e=>{ if(e.target.id==='mask') closeExport(); };
 
+
+/* ---- settings dialog ---- */
+let SET = null, setConfirm = true;
+function setConfirmUI(v){ setConfirm=!!v; $('#s_confirm').classList.toggle('on', setConfirm); $('#s_confirm_t').textContent = setConfirm ? '开' : '关'; }
+$('#s_confirm').onclick=()=>setConfirmUI(!setConfirm);
+function showProviderState(){
+  const p = SET.providers.find(x=>x.id===$('#s_provider').value) || SET.providers[0];
+  const st = $('#s_pstate'); st.className = 'sub ' + (p.selectable ? (p.available ? 'ok' : 'bad') : '');
+  st.textContent = p.selectable ? p.reason + (p.next_step ? ' ' + p.next_step : '') : p.reason;
+  $('#s_pnote').style.display = (p.selectable && p.id !== SET.current_provider) ? '' : 'none';
+}
+$('#s_provider').onchange=showProviderState;
+function fillSettings(r){
+  SET = r; const s = r.settings;
+  $('#s_folder').value = s.base_folder;
+  const sel = $('#s_provider'); sel.innerHTML='';
+  r.providers.forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.textContent=p.name + (p.selectable?'':'（后续提供）'); o.disabled=!p.selectable; sel.appendChild(o); });
+  sel.value = s.provider;
+  const ed = $('#s_edge'); ed.innerHTML=''; r.edges.forEach(e=>{ const o=document.createElement('option'); o.value=e; o.textContent='长边 '+e+' px'; ed.appendChild(o); }); ed.value = s.preview_edge;
+  setConfirmUI(s.confirm_default); showProviderState();
+  const a = r.about;
+  $('#a_app').textContent = a.app_version; $('#a_lr').textContent = a.lightroom_version || '未连接，无法读取';
+  $('#a_plugin').textContent = a.plugin_version || '未连接，无法读取'; $('#a_data').textContent = a.data_dir; $('#a_url').textContent = a.project_url;
+}
+function clearSettingsErrors(){ ['folder','provider','edge'].forEach(k=>{ $('#e_'+k).textContent=''; }); $('#s_msg').textContent=''; $('#s_msg').className='msg-line'; }
+async function openSettings(){
+  if (!REAL()) return;
+  clearSettingsErrors(); $('#smask').classList.add('show');
+  $('#s_msg').textContent = '正在读取设置…';
+  try { fillSettings(await window.pywebview.api.get_settings(true)); $('#s_msg').textContent=''; }
+  catch(e){ $('#s_msg').textContent='无法读取设置，请重试。'; $('#s_msg').className='msg-line bad'; }
+}
+function closeSettings(){ $('#smask').classList.remove('show'); }
+$('#s_cancel').onclick=closeSettings;
+$('#smask').onclick=e=>{ if(e.target.id==='smask') closeSettings(); };
+$('#s_pick').onclick=async()=>{
+  const r = await window.pywebview.api.choose_folder($('#s_folder').value);
+  if (!r.ok) return;
+  $('#s_folder').value = r.path; const v = await window.pywebview.api.check_folder(r.path);
+  $('#e_folder').textContent = v.ok ? (v.exists ? '' : '该文件夹尚不存在，保存时将询问是否创建。') : v.message;
+  $('#e_folder').style.color = v.ok ? 'var(--muted)' : '';
+};
+const FIELD_KEYS = {base_folder:'folder', provider:'provider', preview_edge:'edge'};
+async function saveSettings(createMissing=false){
+  clearSettingsErrors();
+  const changes = {base_folder: $('#s_folder').value, provider: $('#s_provider').value,
+                   confirm_default: setConfirm, preview_edge: parseInt($('#s_edge').value,10)};
+  const r = await window.pywebview.api.save_settings(changes, createMissing);
+  if (r.ok){
+    SET.settings = r.settings; confirmDefault = r.settings.confirm_default;
+    $('#edge').value = String(r.settings.preview_edge);
+    closeSettings(); toast('设置已保存'); return;
+  }
+  if (r.needs_create){
+    if (await askDialog('创建文件夹', '文件夹不存在：\n' + $('#s_folder').value + '\n是否创建？', '创建')) return saveSettings(true);
+    $('#e_folder').textContent = '文件夹尚未创建，设置未保存。'; return;
+  }
+  let shown = false;
+  Object.entries(r.errors||{}).forEach(([k,m])=>{ const el = $('#e_'+(FIELD_KEYS[k]||'')); if (el){ el.textContent=m; el.style.color=''; shown=true; } });
+  const m = $('#s_msg'); m.className='msg-line bad';
+  m.textContent = (r.errors && r.errors._) ? r.errors._ : (shown ? '设置未保存，请修正标红项。' : '设置未保存。');
+}
+$('#s_save').onclick=()=>saveSettings(false);
+
 /* 真实模式：隐藏演示标记，显示 Lightroom 连接状态 */
 if (location.hash !== '#demo') window.addEventListener('pywebviewready', ()=>{
   $('#demobadge').style.display='none';
-  $('#newchat').style.display='';
+  $('#newchat').style.display=''; $('#setbtn').style.display='';
+  window.pywebview.api.get_settings(false).then(r=>{ confirmDefault=r.settings.confirm_default; setAsk(confirmDefault);
+    $('#edge').value=String(r.settings.preview_edge); }).catch(()=>{});
   const poll=()=>window.pywebview.api.status().then(s=>{ showStatus(s); if (s.photo && s.photo.name && s.photo.name!==photoName){ photoName=s.photo.name; renderStage(); } }).catch(()=>{});
   window.pywebview.api.preview_state().then(r=>{ pv=r; renderStage(); }).catch(()=>{});
   poll(); setInterval(poll, 3000); renderParams(); renderStage(); });
