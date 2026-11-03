@@ -75,10 +75,11 @@
     background: rgba(0,0,0,.55); font-size: 12px; }
   .frame .note { position: absolute; left: 10px; bottom: 10px; right: 10px; font-size: 12px; color: #dfe3e8;
     text-shadow: 0 1px 2px #000; }
-  .scene { background-color: #4a5a46; background:
+  .scene { background:
     radial-gradient(circle at 70% 22%, #f6d9a8 0 6%, transparent 7%),
     linear-gradient(180deg, #6f93b8 0%, #9db8cf 38%, #c9d3d6 52%, transparent 52%),
     linear-gradient(165deg, transparent 0 52%, #e9eef2 52% 60%, #8a95a0 60% 72%, #3d4a3a 72% 100%);
+    background-color: #c9d3d6;
   }
   .scene.after { filter: contrast(1.18) saturate(1.35) brightness(1.04); }
   .scene.v2 { filter: contrast(1.05) saturate(1.1) brightness(1.1) hue-rotate(-6deg); }
@@ -286,6 +287,12 @@ $('#mask').onclick=e=>{ if(e.target.id==='mask') closeExport(); };
 
 function renderAll(){ renderLeft(); renderFiles(); renderStage(); renderParams(); }
 renderAll();
+/* 截图用：地址后加 #demo 会自动演示一轮 */
+if (location.hash === '#demo') {
+  say('天空通透一点，整体更震撼', 'me');
+  say('好的，我先看一下这张照片，然后分几步改。');
+  runPlan(0);
+}
 </script>
 </body>
 </html>
