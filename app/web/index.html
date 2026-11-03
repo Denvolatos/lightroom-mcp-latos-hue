@@ -247,8 +247,15 @@ $('#ltabs').onclick = e => { const t=e.target.closest('.tab'); if(!t) return;
   document.querySelectorAll('#ltabs .tab').forEach(x=>x.classList.toggle('on',x===t)); ltab=t.dataset.t; renderLeft(); };
 
 /* ---- files ---- */
+function renderFilesReal(){   // 真实模式：不显示示例文件，只列出 Lightroom 当前选中的照片
+  const box=$('#files'), p=pv&&pv.photo, ok=pv&&pv.state==='ok', key=(p&&p.name||'')+'|'+(ok?pv.current.url:'');
+  if (box.dataset.k===key) return; box.dataset.k=key;
+  box.innerHTML = (p&&p.name) ? `<div class="list-item" style="background:var(--panel2);border-color:var(--accent)">${ok?`<img class="thumb" style="object-fit:cover" src="${esc(pv.current.url)}" alt="">`:'<div class="thumb" style="background:var(--bg)"></div>'}<span class="name">${esc(p.name)}</span></div>` : '<div class="empty">Lightroom 中未选中照片</div>';
+  box.insertAdjacentHTML('beforeend','<div class="empty">文件列表：功能开发中。当前仅显示 Lightroom 中选中的照片。</div>');
+}
 function renderFiles(){
-  const box=$('#files'); box.innerHTML=''; let last='';
+  if (REAL()) return renderFilesReal();
+  const box=$('#files'); box.innerHTML=''; box.dataset.k=''; let last='';
   PHOTOS.forEach((p,i)=>{
     if(p.f!==last){ last=p.f; box.insertAdjacentHTML('beforeend',`<div class="folder">📁 ${p.f}</div>`); }
     const d=document.createElement('div'); d.className='list-item'; if(i===sel) d.style.background='var(--panel2)', d.style.borderColor='var(--accent)';
@@ -281,6 +288,7 @@ function renderStage(){
     else { s.innerHTML=frameHTML('fi',PH_INITIAL,PH_INITIAL_TIP)+frameHTML('fc','当前'); s.ondblclick=toggleZoom; }
   }
   $('#pvctl').style.display = real ? 'flex' : 'none';
+  if (real) renderFilesReal();
   if (kind==='demo'){ $('#cur').textContent='界面演示 · 示例画面，非真实照片';
     s.children[1].querySelector('.scene').classList.toggle('after', !!nApplied());
     s.children[1].querySelector('.note').textContent = nApplied()?'已调整 '+nApplied()+' 项':'暂无调整'; $('#infobar').innerHTML=''; return; }
