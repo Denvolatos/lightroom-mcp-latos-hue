@@ -245,6 +245,25 @@ def validate_curve(key: str, value: object) -> list[float]:
     return [float(n) for n in flat]
 
 
+def validate_curve_shape(key: str, value: object) -> list[float]:
+    """Like validate_curve but WITHOUT the "how far from the diagonal" limit: for putting a stored curve back (versions, presets)."""
+    flat: list[float] = []
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            if isinstance(item, (list, tuple)):
+                flat.extend(item)
+            else:
+                flat.append(item)
+    if not flat or len(flat) % 2 or len(flat) > 2 * MAX_CURVE_POINTS:
+        raise EditError(f"{key} 必须是 2 到 {MAX_CURVE_POINTS} 个点的列表。")
+    if any(isinstance(n, bool) or not isinstance(n, (int, float)) or not math.isfinite(n) or not 0 <= n <= 255 for n in flat):
+        raise EditError(f"{key} 里的坐标必须是 0 到 255 的数字。")
+    xs, ys = flat[0::2], flat[1::2]
+    if xs[0] != 0 or xs[-1] != 255 or any(b <= a for a, b in zip(xs, xs[1:])) or any(b < a for a, b in zip(ys, ys[1:])):
+        raise EditError(f"{key} 的点必须从 x=0 到 x=255、x 递增、y 不回退。")
+    return [float(n) for n in flat]
+
+
 def validate_changes(changes: object) -> dict[str, object]:
     """Check keys, types and ranges. The per-call step limit is enforced by the plug-in (it knows the current value)."""
     if not isinstance(changes, dict) or not changes:
@@ -971,6 +990,72 @@ class EditService:
             "verified": record["verified"], "settings_changed": len(changed), "changes": rows[:MAX_PRESET_ROWS_IN_REPLY],
             "curves_changed": [k for k in changed if isinstance(changed[k], (list, dict))],
             "undo": f"lr_restore(edit_id=\"{record['edit_id']}\") 回到切换之前的样子。",
+        }
+
+    def apply_settings(self, values: dict, reason: str = "", photo: str = "selected", label: str = "") -> dict:
+        """Desktop app only (NOT an MCP tool): write a set of whitelisted settings to ONE photo as ONE change that lr_restore can undo.
+
+        Used by the app's "my presets": the user clicked a confirmation list, so this is the permission. Like apply_version it is
+        not limited by the per-call step; unlike it, nothing is read from a version file. Keys outside LIMITS / CURVE_KEYS /
+        WhiteBalance are refused, numbers must be finite and inside their range. Keys the photo does not have are skipped.
+        """
+        self.check_writable()
+        if not isinstance(values, dict) or not values:
+            raise EditError("没有要写入的参数。")
+        clean: dict = {}
+        for key, value in values.items():
+            if key in CURVE_KEYS:
+                clean[key] = validate_curve_shape(key, value)
+            elif key == "WhiteBalance":
+                if value not in WB_LABELS:
+                    raise EditError(f"WhiteBalance 的取值无效：{value!r}。")
+                clean[key] = value
+            elif key in LIMITS:
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                    raise EditError(f"{key} 的值必须是有限的数字。")
+                low, high, _ = LIMITS[key]
+                if value < low or value > high:
+                    raise EditError(f"{key} 的取值范围是 {low:g} 到 {high:g}，给的是 {value:g}。")
+                clean[key] = float(value)
+            else:
+                raise EditError(f"不允许修改“{key}”。")
+        photo_id, photo_name = self.photo_id_of(photo)
+        snap = self.call("snapshot", {"photo": photo_id}, timeout=60)
+        current = snap.get("settings", {})
+        target = {k: v for k, v in clean.items() if k in current}
+        changed = {k: v for k, v in target.items() if not self._same(current.get(k), v)}
+        skipped = sorted(k for k in clean if k not in current)
+        if not changed:
+            return {"photo": photo_name, "photo_id": photo_id, "settings_changed": 0, "skipped": skipped,
+                    "note": "这张照片现在已经是这个样子，没有做任何改动。"}
+        record = {
+            "edit_id": self.store.new_id(), "kind": "set", "status": "pending", "generic": True,
+            "created": time.strftime("%Y-%m-%d %H:%M:%S"), "created_ns": _now_ns(),
+            "photo_id": photo_id, "photo_name": photo_name, "reason": str(reason)[:500] or str(label)[:200],
+            "requested": {"settings": str(label)[:100] or "settings"}, "before": {},
+            "snapshot": current,  # the whole state is on disk BEFORE anything is written
+        }
+        self.store.save(record)
+        try:
+            data = self._write_generic(photo_id, record["edit_id"], changed)
+        except BridgeTimeout as e:
+            record.update(status="uncertain", error=str(e))
+            self.store.save(record)
+            raise
+        except Exception as e:
+            record.update(status="failed", error=str(e))
+            record.pop("snapshot", None)
+            self.store.save(record)
+            raise
+        record.update(status="applied", before={k: current[k] for k in changed}, after=dict(changed), changed_keys=sorted(changed),
+                      new_keys=[], verified=bool(data.get("verified")))
+        record.pop("snapshot", None)
+        self.store.save(record)
+        rows = [{"parameter": k, "before": current[k], "after": changed[k]} for k in sorted(changed)]
+        return {
+            "edit_id": record["edit_id"], "photo": photo_name, "photo_id": photo_id, "verified": record["verified"],
+            "settings_changed": len(changed), "changes": rows, "skipped": skipped,
+            "undo": f"lr_restore(edit_id=\"{record['edit_id']}\") 回到写入之前的样子。",
         }
 
     # ---- import (desktop app only; deliberately NOT an MCP tool, the AI cannot call it) ----------------
