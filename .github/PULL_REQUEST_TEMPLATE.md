@@ -6,6 +6,7 @@
 - [ ] No Adobe SDK files or copied Adobe sample code / 没有 Adobe SDK 文件或示例代码
 - [ ] No personal paths, e-mail addresses, tokens or photos / 没有个人路径、邮箱、口令、照片
 - [ ] Anything that writes to photos has a whitelist, range checks, a backup and tests / 写入类功能有白名单、范围检查、备份和测试
+- [ ] I agree that my contribution is licensed under the AGPL-3.0 / 我同意我的贡献按 AGPL-3.0 授权
 
 ## Verification report / 验证报告
 - Environment / 环境（OS, Lightroom Classic, plug-in version; test catalog / 测试目录）：
