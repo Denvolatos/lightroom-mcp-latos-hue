@@ -128,8 +128,7 @@ class Api:
             self._preview.set_edge(self._settings.data["preview_edge"])
             self._backend = Backend(self._lr, self._session, self._tracker, self._emit,
                                     state_file=None, previews=self._preview)
-            self._import.lr = self._lr
-            self._export.lr = self._lr
+            self._rebind_lr_services()
             threading.Thread(target=self._lr.start, daemon=True).start()
             self._preview.server.start()
             self._preview.start()
@@ -139,6 +138,14 @@ class Api:
         if self._persistent:
             self._provider.start(self._provider_env())
         return True
+
+    def _rebind_lr_services(self) -> None:
+        """换了 LrService / 预览服务（Claude 常驻会话与 Codex 每轮启动之间切换）后，让所有持有它们的功能指向新的对象，
+        否则图库、AI 挑片、预设/经验、导入、导出会继续使用已停止的旧通道。"""
+        for svc in (self._import, self._export, self._photolib, self._pick, self._apply, self._lib):
+            svc.lr = self._lr
+        self._pick.server = self._preview.server
+        self._pick.store = self._preview.server.store
 
     def _shutdown(self) -> None:
         self._backend.stop()
