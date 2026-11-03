@@ -23,6 +23,7 @@ SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayName=Lightroom MCP (LrMCP)
 InfoAfterFile=after.txt
+LicenseFile=..\LICENSE
 
 [Files]
 ; the server (PyInstaller folder build, includes Python)
