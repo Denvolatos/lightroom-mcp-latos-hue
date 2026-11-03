@@ -616,3 +616,38 @@ photo_id 逐字取自第 ③ 项；按从好到坏排列；score 1–10；stars 
 5. 虚拟滚动（只生成可见行的 DOM），支持上万张；服务端支持按子文件夹分页取，减少一次性数据量。
 6. 尚未加入的照片用 Pillow 读磁盘上的 JPEG 生成缩略图；RAW 如有内嵌预览也可读。
 7. 如果缩略图 `too_large` 在真机上仍出现，请 server/插件把缩小重试做成更激进的两档（例如 128、64）。
+
+
+## 第十二阶段：Codex 来源（外部贡献者 PR #4，合并并对齐，实验性）
+
+### 做了什么
+- Galio1991 的草稿 PR #4（分支 `feature/codex-provider`，4 个提交）按项目所有者的决定由我们自己合并：`git fetch origin pull/4/head:pr4`，再 `git merge --no-ff pr4` 进本地 `app`，**他的提交与署名原样保留**（合并提交之前的 4 个提交作者仍是 Galio1991）。合并过程只读他的代码、只跑本仓库测试（含他的假 CLI 测试），没有运行 Codex、没有联网（本机未安装 Codex）。
+- **冲突：无。** 他的分支里已有一个"合并最新 app"的提交，自动合并 `app/main.py` 成功，其余文件（`providers/__init__.py`、`codex_provider.py` 取代 `codex_stub.py`、`codex_proxy.py`、测试、`docs/AI来源接口.md`）没有与 0.11.0 的新功能重叠。合并后立即全量测试：632 个通过、1 个跳过（618 + 他的 14），没有回退。
+- 他的实现要点（审查结论）：`CodexProvider` 每轮启动一次 `codex exec --json`（提示词走标准输入），用 `thread.started` 的 id 经 `exec resume` 续聊；`codex_proxy.py` 是 stdio MCP 代理，只列出 `READONLY_TOOLS + ENABLED_WRITE_TOOLS`，三类写入先 `POST /ask`（确认端点即我们的 `ConfirmHub`），没有端口/口令、被拒绝、超时、异常一律按拒绝；Codex 以 `read-only` 沙箱、关闭 shell/apps/view_image 等、`--ignore-user-config`、`web_search` 关闭；代理启动 Lightroom 子进程前移除 `LRAPP_*`。
+
+### 集成核对结果（要求逐条核实，不是照单收下）
+1. **挑片期间写入禁用在 Codex 路径上成立。** 实现本来就与来源无关：`ConfirmHub.deny_all` 在 `request()` 开头判断，`Api._pick_acquire` 置位、`_pick_release` 清除；Codex 代理的 `/ask` 走同一个 `ConfirmHub`，所以同样被拒。没有依赖 Claude 的 permission-prompt 字段。新增测试：挑片中经代理请求 `lr_set_develop`、`lr_restore`、`lr_restore_original` 全部返回拒绝且不弹卡片；"逐项确认"关闭（`auto_allow`）时挑片期间也拒绝；挑片结束后恢复正常确认。
+2. **预设/经验/收藏/挑片对来源的依赖。** 这些功能都经 `Api._pick_send` / `AIProvider.send` 发请求，"让 AI 参考"的资料块是拼在用户消息前的文字，"记成经验"和挑片只解析来源返回的文字，都不依赖 `claude_bridge` 的会话函数；因此**不需要在 Codex 下禁用任何功能**。唯一的 Claude 特有细节是超时判断：挑片与"记成经验"用 `col.error == cb.MSG_TIMEOUT` 识别超时，而 Codex 原来的超时提示是另一句话——已改成复用同一常量。**但发现并修复一处真实缺陷：** 切换来源时（Claude 常驻会话 ↔ Codex 每轮启动）`Api._apply_provider_choice` 会新建 `LrService` 和预览管理器，原来只更新了导入与导出，**图库、AI 挑片（含其预览服务）、批量应用、预设/经验**仍指向已停止的旧通道，切到 Codex 后这些功能会失效。现新增 `Api._rebind_lr_services()` 统一重绑。
+3. **来源切换与"逐项确认"。** 新对话时来源按设置切换，旧来源 `close()`：Claude 关闭常驻进程，Codex 结束正在运行的 CLI 并标记停止；来回切换两次的测试确认互不残留，并且回到 Claude 时以确认端口和新口令启动常驻会话。"新对话"在 Codex 下清空线程 id。"逐项确认"开关在 `Api.send` 里设置 `hub.auto_allow`，对 Codex 代理同样生效（关：自动放行三类写入、不弹卡片；开：弹卡片；白名单之外的工具永不放行）。端口与口令经 `extra_env` 进入 CLI 进程（用假 CLI 打印环境变量验证）。
+4. **隐私与实验性。** 设置里选中 Codex 时显示隐私说明与实验性提示；下拉项为"Codex 命令行（实验性，未经真机验证）"；`AIProvider` 新增 `experimental`、`experimental_notice`、`privacy_notice` 三个类属性，注册表条目带 `experimental` 等字段；默认来源仍是 Claude，测试证明检测到 `codex` 不会改设置。
+
+### 代码改动（按提交分类）
+- 集成修复：`app/main.py` 新增 `_rebind_lr_services()`。
+- 实验性标记：`providers/base.py`、`providers/__init__.py`、`providers/codex_provider.py`（类属性；超时提示改用 `claude_bridge.MSG_TIMEOUT`）、`web/index.html`（下拉标注、提示行）、`tests/ui_settings_check.py`（新增 `codex` 场景）、`docs/codex_settings.png`、`settings.py`（版本 0.12.0）、两处版本断言。
+- 测试：`tests/test_codex_integration.py`（13 个）。
+
+### 测试
+- `python -m pytest app/tests -q`：**645 个通过、1 个跳过**（合并前 618；他的 14 个：`test_codex_safety.py`、契约测试里的 Codex、状态与注册表等；新增 13 个）。真实模型调用 0 次，未碰 Lightroom，未开窗口。
+- 界面：无头 Edge + 假 `pywebview.api`（`ui_settings_check.py`，`?s=codex`）截图 `app/docs/codex_settings.png`。
+- 偶发：全量跑时 `test_confirm.py::test_wrong_or_expired_token_rejected` 出现过一次 `ConnectionAbortedError`（Windows 套接字，口令错误时 `ConfirmHub` 返回 401 而没有读完请求体）；单跑 3 次、全量其余次数均通过，与本阶段改动无关（未改 `confirm_hub.py`），**已知偶发，待处理**。
+
+### 未验证 / 未解决
+- 需要真实 Codex 与 Lightroom：`lr_get_preview` 图片能否被 Codex 读取（`supports_images=True` 是他的声明，未验证；若不能，AI 挑片在 Codex 下会得不到画面）；写入确认的完整流程；撤销与还原；环境变量 `LRAPP_PORT` / `LRAPP_TOKEN` 经 `env_vars` 到代理子进程，以及代理子进程是否拿到启动 Lightroom 服务所需的系统环境变量（Codex 对 MCP 子进程的默认环境较精简，可能缺 `SystemRoot` 等，待验证）；运行时黑窗；错误细分；与实际 Codex 版本参数的兼容性（`--ignore-rules`、`--strict-config`、`--disable ...` 等）。
+- Codex 单轮超时 180 秒（沿用 Claude 的值）；挑片整体超时由挑片自己的计时器控制。每轮重启 CLI 的启动开销未测。
+- Codex 下"本次调整"表与确认卡片依赖 `tool` / `tool_result` 事件的 `id`；Codex 代理调用的 `tool_use_id` 为空，卡片与工具调用无法按 id 对应（界面不依赖，待真机观察）。
+
+### 建议的下一步
+1. 请 Galio1991 在真实 Codex 与测试照片上按 `docs/AI来源接口.md` 第 7、9 节清单做真机验收并附验证报告；验收前设置里保持"实验性"标记。
+2. 验收通过后：去掉实验性标记或改为"测试版"，把第 9 节未勾选项逐项勾上。
+3. 若 `lr_get_preview` 图片 Codex 读不了：Codex 下禁用 AI 挑片并给出"当前 AI 来源暂不支持此功能"，或改走文件路径方式（需评估隐私）。
+4. 处理 `ConfirmHub` 401 响应未读请求体导致的偶发连接中止。

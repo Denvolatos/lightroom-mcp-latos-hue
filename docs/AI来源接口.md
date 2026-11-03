@@ -32,6 +32,7 @@
 | `app/providers/codex_provider.py` | Codex CLI 的 JSONL、续聊、中断与状态适配 |
 | `app/codex_proxy.py` | 仅暴露允许的 Lightroom 工具，写入前强制询问确认端点 |
 | `app/tests/test_provider_contract.py` | 契约测试，可直接复用 |
+| `app/tests/test_codex_safety.py`、`app/tests/test_codex_integration.py` | Codex 的安全边界（代理、确认）与集成核对（挑片期间拒绝写入、"逐项确认"开关、来源切换、环境变量传递） |
 
 ## 2. 事件格式
 
@@ -89,6 +90,7 @@
 | `id` | 稳定的英文标识（小写字母/数字/下划线），写入设置文件，如 `codex` |
 | `display_name` | 界面显示名（中文） |
 | `supports_images` | 能否看图（`lr_get_preview` 返回的预览图）。不能看图的来源要在文档里说明如何降级 |
+| `experimental` / `experimental_notice` / `privacy_notice` | 可选类属性（0.12.0 新增，以代码为准）。`experimental = True` 时设置下拉里标注"（实验性，未经真机验证）"并在下方显示 `experimental_notice`；`privacy_notice` 非空时在设置里显示（如照片预览会发送到哪里）。这些字段随注册表 `available_providers()` 返回 |
 | `status()` | 返回 `make_status(available, state, reason, next_step)`：`available` 是否可用；`state` 取 `ready` / `not_installed` / `not_logged_in` / `unavailable` / `unknown`；`reason`、`next_step` 为中文（不可用时 `next_step` 不得为空）。**不得为检测而发起真实模型调用**，应在约 10 秒内返回；建议缓存几十秒 |
 | `start(env)` | 预热（可选的优化），返回是否成功。`env` 含确认端点的端口与一次性口令（第 5 节），需原样传给子进程 |
 | `send(text, on_event, **options)` | 发送一条用户消息，流式回调事件，见第 2 节 |
@@ -215,3 +217,11 @@ Codex 的 MCP 配置通过 `env_vars` 转发确认端点的环境变量名，令
 - [x] `turn.completed.usage` 提供 token 计数；费用填 `null`
 - [ ] 未登录、额度、网络目前合并为中文通用错误，细分原因待验证
 - [ ] 使用 `CREATE_NO_WINDOW`；GUI 实机观察待验证
+
+## 10. 软件侧如何对待来源（0.12.0，以代码为准）
+
+- **挑片期间禁止写入与来源无关**：`ConfirmHub.deny_all` 在确认端点最先判断，AI 挑片进行中，任何来源（包括经 Codex 代理）请求 `lr_set_develop` / `lr_restore` / `lr_restore_original` 一律被拒且不弹卡片；"逐项确认"关闭（`auto_allow`）也不例外。
+- **"逐项确认"开关**：由 `ConfirmHub.auto_allow` 实现，来源始终走 `/ask`，不用改进程参数。
+- **每轮启动 vs 常驻**：Claude 默认常驻会话（`start(env)` 传入端口与口令，会话期间有效）；Codex 每轮启动 CLI，软件经 `send(..., confirm=, extra_env=)` 传入本轮的端口与一次性口令，轮结束作废。两种来源切换时，软件会重建 Lightroom 通道并让图库、挑片、预设/经验、导入、导出重新绑定，旧来源被 `close()`。
+- **超时**：来源的单轮超时应发 `error`，`message` 取 `claude_bridge.MSG_TIMEOUT`，AI 挑片与"记成经验"据此识别超时。
+- **实验性来源**：Codex 当前标为实验性（由外部贡献者接入，尚未在真实 Codex 与 Lightroom 上完成验收），验收通过前保持该标记。第 9 节未勾选项即未验证清单。
