@@ -78,7 +78,7 @@ def main() -> None:
     print("当前照片:", api.status().get("photo"), flush=True)
     try:
         if mode in ("connect", "all"):
-            sess = api._session
+            sess = api._provider.session
             old_pid = sess._proc.pid
             t1 = time.monotonic()
             subprocess.run(["taskkill", "/T", "/F", "/PID", str(old_pid)], capture_output=True)
@@ -91,7 +91,7 @@ def main() -> None:
             print("强制结束后自动恢复到已连接(秒):", res["auto_recover_s"], "| 恢复动作:", api._backend.events, flush=True)
         if mode in ("read", "all"):
             done, wall = ask(api, win, "读取当前照片的曝光和高光值，只回答两个数字。", True)
-            t = api._session.last_timing
+            t = api._provider.session.last_timing
             res["read_turn"] = {"wall_s": wall, **t, "tokens": done and done.get("tokens")}
             print("只读轮:", json.dumps(t, ensure_ascii=False), flush=True)
         if mode in ("write",):
@@ -107,7 +107,7 @@ def main() -> None:
             print("测前:", before, flush=True)
             try:
                 done, wall = ask(api, win, "将曝光提高 0.1。", True, approve=True)
-                res["write_turn"] = {"wall_s": wall, **(api._session.last_timing or {})}
+                res["write_turn"] = {"wall_s": wall, **(api._provider.session.last_timing or {})}
                 rows = [r for r in api._tracker.snapshot()]
                 print("表格:", [(r["label"], r["before"], r["after"], r["status"]) for r in rows], flush=True)
                 res["rows"] = [(r["label"], r["before"], r["after"], r["status"]) for r in rows]
@@ -124,7 +124,7 @@ def main() -> None:
         if mode in ("all", "connect"):
             api.reset()
             time.sleep(1)
-            res["after_reset"] = {"alive": api._session.alive, "session_id": api._session.session_id,
+            res["after_reset"] = {"alive": api._provider.session.alive, "session_id": api._provider.session.session_id,
                                   "rows": len(api._backend.rows())}
             print("新对话后:", res["after_reset"], flush=True)
     finally:

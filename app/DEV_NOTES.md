@@ -235,3 +235,39 @@
 
 ## 六、建议下一步
 1. 用户开窗口试一轮（换照片、AI 调整、撤销、还原、切换清晰度）；2. 左栏文件列表与预设接真数据；3. 需要“真原片”时，在 server/plugin 增加“按原始设置渲染预览”；4. 版本功能开放后启用“多版本”标签。
+
+## 第六阶段：统一的 AI 来源接口 + 设置入口
+
+### 做了什么
+- **A. AI 来源接口**：新增 `app/providers/`：`base.py`（`AIProvider` 抽象类、事件字段表 `EVENT_FIELDS`、`validate_event()`、`make_status()`）、`__init__.py`（注册表 `available_providers()` / `create_provider()` / `is_selectable()`）、`claude_provider.py`（对 `PersistentSession`/`ClaudeSession` 的薄封装，逻辑未重写）、`codex_stub.py`（给贡献者的骨架，方法抛 `NotImplementedError`，TODO 列核对点，注册表里仍不可用）。`codex`、`api` 为占位条目（不可选）。
+- `main.py` 改为经注册表取当前来源（`Api._provider`；`_session` 保留为同一对象的旧名，`Backend`/`LrService` 不改）。设置里选了别的来源，在下一次"新对话"时才切换（`_apply_provider_choice`，只有 claude 实现，此路径由单元测试用假来源覆盖）。
+- **接口说明文档** `docs/AI来源接口.md`（中文为主，开头英文摘要）：结构图、事件格式、方法清单、Lightroom 工具与 MCP 配置、逐项确认（`/ask` 端点协议）、安全要求、自测、验证报告写法、Codex 未验证清单。
+- **契约测试** `app/tests/test_provider_contract.py`：`ProviderContract` 通用测试集 + `FakeProvider` 演示；`ClaudeProvider` 用假 claude 进程也跑同一组。`test_providers.py`：注册表、状态检测、占位条目、骨架。
+- **B. 设置**：`app/settings.py`（`~/LrMcp/app_settings.json`，原子写入、schema 版本、逐字段校验回退默认值、未知字段保留、不存任何口令/密钥；`restrict_to_current_user` 在 app/ 内按 server 同样做法实现）；`Api.get_settings/save_settings/check_folder/choose_folder`；界面：顶栏"设置"按钮 + 对话框（常规/AI 来源/对话/关于）。截图自查脚本 `app/tests/ui_settings_check.py`，截图 `app/docs/settings_*.png`（均为假数据）。
+
+### 设计取舍
+- **事件格式沿用现有**（`claude_bridge.parse_line` 实际产生的 session/text/tool/tool_result/error/stopped/done），没有另设一套；`confirm`/`confirm_done` 等是软件自己的事件，来源不发。唯一新增约束：每次 `send()` 有且仅有一个 `done` 且是最后一个事件（现有实现本来就满足，现在写成契约并有测试）。
+- **Claude 登录检测**：`claude --help` 核对后用 `claude auth status --json`（本地检测，不调用模型），只取 `loggedIn` 字段，不读取/保存/显示账号信息；`claude --version` 不单独用（`find_claude` 找得到即视为已安装）。检测失败/超时 10 秒 → "登录状态无法判断"，仍允许使用，发送失败时再提示。结果缓存 30 秒；启动时取设置不做检测（`get_settings(False)`），只有打开设置对话框才检测。
+- 软件文件夹校验：必须本机绝对路径（拒绝 UNC、盘符根、相对路径）、不能在 Windows/Program Files/ProgramData 内、必须可写（用临时文件探测）；不存在且位置合法则返回 `needs_create`，界面询问后用 `create_missing=true` 再保存。**本步只保存和显示，导入功能下一阶段使用。**
+- 预览清晰度只接受现有四档（768/1024/1536/2048）；保存后立即作用于 `PreviewManager.set_edge`，并更新中栏下拉框。逐项确认默认值：保存后记入页面变量，下一次"新对话"套用；启动时也套用。
+- 设置保存为"整体校验、整体保存"：任一字段不合法，整份都不保存。
+- 顺手修复：遮罩层 `.mask` 加 `z-index`，否则中栏占位文字会透过对话框显示。
+
+### 测试与实测
+- `python -m pytest app/tests -q`：**168 个通过**（原 104 + 契约/注册表 24 + 设置 40）。
+- 界面：无头 Edge + 假 `pywebview.api` 截图 7 个场景（顶栏、设置各分区、未登录、未安装、校验错误、创建文件夹确认、保存成功），未打开 GUI 窗口。
+- **真实调用共 2 次，无回归**（`live_app_check.py read/write`，经 `Api` → `ClaudeProvider` → 常驻会话）：只读问题正常完成（预热到已连接约 3–4 秒；一轮 10.1 秒，含 lr_status、lr_get_develop）；调整类在测试目录（`E:\ceshi1\ceshi1.lrcat`，已核对含 ceshi）上把曝光 +0.1：确认卡片弹出、同意后表格记录"曝光 0 → 0.1 已应用"，撤销后六项数值与测前完全一致。
+- 注意：当前选中的照片是 `DSC08206.ARW`（不是 DSC08238.ARW），其色温为 5450，与任务里给的还原值 5550 不同；本次以"测前/测后相等"为准，结果相等（曝光 0、高光 0、阴影 0、对比度 0、色温 5450、色调 13）。
+- `live_app_check.py` 里 `api._session` 改为 `api._provider.session`（来源封装后 `_proc`/`last_timing` 在内层会话上）；connect 模式（强杀进程恢复）本次未重跑。
+
+### 未解决 / 待验证
+- Codex 接入的全部问题（输出格式、MCP 配置、逐项确认机制、中断、图片、用量等）均未验证，清单见文档第 9 节。
+- 真机尚未验证：设置对话框在真实 pywebview 窗口里的"选择文件夹"系统对话框（本步不打开 GUI，只验证了接口和界面逻辑）；`get_settings` 里 Lightroom 版本经 `status` 命令读取（单元测试覆盖未连接情形，已连接情形待真机看一次）。
+- 退出后 `~/LrMcp/servers/` 仍有 1 个公告文件（58770.txt），与本次改动无关的可能：属于另一个 claude 会话的 lightroom_mcp 服务（待核对，未处理）。
+- 提交拆分偏差：`main.py` 经注册表取来源的改动与设置接口在同一个提交里（"设置后端"），因为两者在同一文件且互相依赖。
+- 软件版本号 `0.1.0` 是占位（`settings.APP_VERSION`），正式版本策略待定。
+
+### 建议的下一步
+1. 用户在真窗口里点一遍设置（选择文件夹、切换逐项确认默认值后新对话、预览清晰度）。
+2. 导入功能读取 `base_folder`（第七阶段）。
+3. 找愿意做 Codex 的贡献者，按文档第 9 节清单验证；或先做"代理 MCP 方案"的原型，验证"没有权限回调的命令行也能强制逐项确认"。
