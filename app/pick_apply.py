@@ -190,5 +190,5 @@ class ApplyService:
     def close(self) -> dict:
         with self._lock:
             if self.stage in ("done", "confirm"):
-                self.stage, self.items = "idle", []
+                self.stage, self.items, self.results, self.summary = "idle", [], [], None
         return {"ok": True}
