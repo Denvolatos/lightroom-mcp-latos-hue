@@ -17,6 +17,7 @@ TIMEOUT_SECONDS = 120
 MSG_DENIED = "用户在界面中拒绝了该项调整，未执行。"
 MSG_TIMEOUT = f"确认超过 {TIMEOUT_SECONDS} 秒未响应，已视为拒绝，未执行。"
 MSG_CANCELLED = "本轮已被停止，该项调整未执行。"
+AUTO_TOOLS = ("lr_set_develop", "lr_restore", "lr_restore_original")   # “逐项确认”关闭时自动放行的工具
 
 
 def _num(v) -> str:
@@ -54,6 +55,7 @@ class ConfirmHub:
         self.timeout = timeout
         self.current_values = current_values      # callable(keys) -> dict，可为 None
         self.port = 0
+        self.auto_allow = False                   # True（逐项确认关）：上述工具不弹卡片，直接放行
         self._token: str | None = None
         self._pending: dict[str, dict] = {}
         self._lock = threading.Lock()
@@ -115,9 +117,18 @@ class ConfirmHub:
         self._token = None
         self.cancel_all(MSG_CANCELLED)
 
+    def begin_session(self) -> str:
+        """常驻会话：口令在整个会话期间有效（随进程重建而更换），每轮结束只清理未应答的确认。"""
+        return self.begin_turn()
+
+    def finish_turn(self) -> None:
+        self.cancel_all(MSG_CANCELLED)
+
     # ---- 请求与应答 ------------------------------------------------
     def request(self, tool_name: str, tool_input: dict, tool_use_id: str = "") -> dict:
         """阻塞到用户应答、超时或被取消。返回 {"allow", "message"}。"""
+        if self.auto_allow and tool_name.split("__")[-1] in AUTO_TOOLS:
+            return {"allow": True, "message": ""}
         cur = {}
         if self.current_values and tool_name.split("__")[-1] == "lr_set_develop":
             try:

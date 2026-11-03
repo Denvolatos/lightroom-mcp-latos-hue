@@ -79,11 +79,15 @@ def find_claude() -> str | None:
     return shutil.which("claude")
 
 
-def lightroom_server_config() -> dict:
-    """lightroom_mcp 服务怎么启动：开发时优先用仓库源码（最新、全部工具），没有源码才用打包好的 lrmcp.exe。"""
+def lightroom_server_config(state_file: Path | None = None) -> dict:
+    """lightroom_mcp 服务怎么启动：开发时优先用仓库源码（最新、全部工具），没有源码才用打包好的 lrmcp.exe。
+    源码方式经 app/lr_launcher.py 启动：端口按“最久未使用”优先，并把“插件是否已连上”写进状态文件（见 lr_launcher.py）。"""
     if (REPO / "server" / "lightroom_mcp").exists():
-        return {"type": "stdio", "command": sys.executable, "args": ["-m", "lightroom_mcp"],
-                "env": {"PYTHONPATH": str(REPO / "server")}}
+        env = {"PYTHONPATH": str(REPO / "server")}
+        if state_file is not None:
+            env["LRAPP_BRIDGE_STATE"] = str(state_file)
+        return {"type": "stdio", "command": sys.executable,
+                "args": [str(Path(__file__).resolve().parent / "lr_launcher.py")], "env": env}
     exe = REPO / "build" / "dist" / "lrmcp" / "lrmcp.exe"
     return {"type": "stdio", "command": str(exe), "args": []}
 
@@ -95,24 +99,28 @@ def permission_server_config() -> dict:
             "env": {"LRAPP_PORT": "${LRAPP_PORT}", "LRAPP_TOKEN": "${LRAPP_TOKEN}"}}
 
 
-def write_mcp_config(directory: Path | None = None, confirm: bool = True) -> Path:
+def write_mcp_config(directory: Path | None = None, confirm: bool = True, state_file: Path | None = None) -> Path:
     """写一份只含 lightroom_mcp（逐项确认开启时再加确认服务）的临时配置文件（不含任何密钥）。"""
     directory = directory or Path(tempfile.gettempdir())
     path = directory / "lrmcp_app_mcp.json"
-    servers = {SERVER_NAME: lightroom_server_config()}
+    servers = {SERVER_NAME: lightroom_server_config(state_file)}
     if confirm:
         servers[PERM_SERVER_NAME] = permission_server_config()
     path.write_text(json.dumps({"mcpServers": servers}, ensure_ascii=False), encoding="utf-8")
     return path
 
 
-def build_command(prompt: str, mcp_config: Path, session_id: str | None = None,
-                  claude_path: str = "claude", confirm: bool = True) -> list[str]:
+def build_command(prompt: str | None, mcp_config: Path, session_id: str | None = None,
+                  claude_path: str = "claude", confirm: bool = True, persistent: bool = False) -> list[str]:
     """confirm=True（逐项确认开）：写入类工具不在放行清单里，每次写入由 --permission-prompt-tool 交给窗口确认；
-    窗口不可达、超时、被拒绝一律不执行。confirm=False：写入类工具直接放行。"""
+    窗口不可达、超时、被拒绝一律不执行。confirm=False：写入类工具直接放行。
+    persistent=True（常驻会话）：不带提示词，改为从标准输入逐行读入 stream-json 消息；此时必须 confirm=True，
+    “逐项确认关”由窗口的确认服务自动放行实现（见 confirm_hub.auto_allow），进程参数在整个会话期间不变。"""
+    if persistent:
+        confirm = True
     allowed = ALLOWED_TOOLS + ([] if confirm else ENABLED_WRITE_FULL)
     cmd = [
-        claude_path, "-p", prompt,
+        claude_path, "-p", *([prompt] if not persistent else ["--input-format", "stream-json"]),
         "--output-format", "stream-json", "--verbose", "--include-partial-messages",
         "--strict-mcp-config", "--mcp-config", str(mcp_config),
         # 只读本项目的“项目/本地”设置都不要；--setting-sources "" 表示一个来源也不读
@@ -219,6 +227,18 @@ class ClaudeSession:
         self._stopped = False
         self._lock = threading.Lock()
         self.last_timing: dict | None = None       # 上一轮的计时摘要（只含时间，见 timing.py）
+        self.alive = True                          # 与 PersistentSession 同名的属性，供 Backend 通用使用
+        self.spawned_at = None
+
+    @property
+    def busy(self) -> bool:
+        return bool(self._proc is not None and self._proc.poll() is None)
+
+    def ensure_running(self) -> bool:
+        return True
+
+    def restart(self) -> bool:
+        return True
 
     def reset(self) -> None:
         self.stop()
