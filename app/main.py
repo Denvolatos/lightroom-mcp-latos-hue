@@ -34,15 +34,16 @@ class Api:
 
     def __init__(self) -> None:
         self._window = None
-        # 默认用常驻会话；设环境变量 LRAPP_PER_TURN=1 可回到“每条消息新启动一次 claude”（用于对比与排查）
-        self._persistent = os.environ.get("LRAPP_PER_TURN") != "1"
+        # Claude 使用常驻会话；Codex 每轮启动 CLI，由窗口自己的 Bridge 保持 Lightroom 连接。
+        self._preferred_persistent = os.environ.get("LRAPP_PER_TURN") != "1"
         self._busy = False
         self._lock = threading.Lock()
         self._tracker = AdjustmentTracker()
-        state_file = STATE_DIR / "claude_side.json" if self._persistent else None
         self._rpc_token = secrets.token_urlsafe(24)
         self._settings = appsettings.SettingsStore()
-        # AI 来源经注册表取得（目前只有 claude）；切换来源在下一次“新对话”时生效
+        self._persistent = self._preferred_persistent and self._settings.data["provider"] == "claude"
+        state_file = STATE_DIR / "claude_side.json" if self._persistent else None
+        # AI 来源经注册表取得；切换来源在下一次“新对话”时生效
         self._provider = create_provider(self._settings.data["provider"], state_file=state_file,
                                          persistent=self._persistent)
         self._state_file = state_file
@@ -80,12 +81,37 @@ class Api:
         want = self._settings.data["provider"]
         if want == self._provider.id or not is_selectable(want):
             return False
+        next_persistent = (self._preferred_persistent and want == "claude") if want in ("claude", "codex") else self._persistent
         old = self._provider
+        mode_changed = next_persistent != self._persistent
+        if mode_changed:
+            self._backend.stop()
+            self._preview.stop()
+            self._lr.stop()
+            self._persistent = next_persistent
+            self._state_file = STATE_DIR / "claude_side.json" if self._persistent else None
         self._provider = create_provider(want, state_file=self._state_file, persistent=self._persistent)
         self._session = self._provider
-        self._backend.session = self._provider
         old.close()
-        self._provider.start(self._provider_env())
+        if mode_changed:
+            self._lr = (LrService(state_file=self._state_file, rpc_token=self._rpc_token,
+                                  alive=lambda: self._session.alive,
+                                  restart_hook=lambda: not self._session.busy and self._session.restart())
+                        if self._persistent else LrService())
+            self._hub.current_values = self._lr.current_values
+            self._preview = PreviewManager(self._lr, PreviewServer(PreviewStore()), self._emit)
+            self._preview.set_edge(self._settings.data["preview_edge"])
+            self._backend = Backend(self._lr, self._session, self._tracker, self._emit,
+                                    state_file=None, previews=self._preview)
+            self._import.lr = self._lr
+            threading.Thread(target=self._lr.start, daemon=True).start()
+            self._preview.server.start()
+            self._preview.start()
+            self._backend.start()
+        else:
+            self._backend.session = self._provider
+        if self._persistent:
+            self._provider.start(self._provider_env())
         return True
 
     def _shutdown(self) -> None:
@@ -105,7 +131,7 @@ class Api:
             pass  # 窗口已关闭
 
     def _on_event(self, ev: dict) -> None:
-        """claude 的事件：先更新“本次调整”数据，再推给页面。"""
+        """AI 来源的事件：先更新“本次调整”数据，再推给页面。"""
         with self._lock:
             changed = self._tracker.observe(ev)
             rows = self._backend.rows() if changed else None
@@ -203,7 +229,9 @@ class Api:
     def get_settings(self, include_status: bool = True) -> dict:
         """当前设置、AI 来源列表（含状态）、关于信息。include_status=False（启动时）不做登录检测，只取设置值。"""
         cur = self._provider.status() if include_status else {"available": True, "state": "unknown", "reason": "", "next_step": ""}
-        return {"settings": dict(self._settings.data), "providers": available_providers(cur),
+        return {"settings": dict(self._settings.data),
+                "providers": available_providers(cur if self._provider.id == "claude" or not include_status else None,
+                                                 cur if self._provider.id == "codex" or not include_status else None),
                 "current_provider": self._provider.id, "edges": list(appsettings.EDGE_CHOICES),
                 "default_base_folder": appsettings.default_base_folder(), "about": self._about()}
 

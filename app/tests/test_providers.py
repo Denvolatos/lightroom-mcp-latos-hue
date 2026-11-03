@@ -6,7 +6,7 @@ import providers
 from providers import available_providers, create_provider, is_selectable
 from providers.base import make_status, validate_event
 from providers.claude_provider import ClaudeProvider, check_login
-from providers.codex_stub import CodexProvider
+from providers.codex_provider import CodexProvider
 
 
 class _Idle:
@@ -54,30 +54,23 @@ def test_check_login_parses_only_logged_in_flag():
     assert check_login("claude", boom) is None
 
 
-def test_registry_lists_claude_and_two_placeholders():
-    lst = available_providers(make_status(True, "ready", "已安装并已登录。", ""))
+def test_registry_lists_claude_codex_and_api_placeholder():
+    ready = make_status(True, "ready", "已安装并已登录。", "")
+    lst = available_providers(ready, ready)
     assert [x["id"] for x in lst] == ["claude", "codex", "api"]
-    assert lst[0]["available"] and lst[0]["selectable"]
-    for x in lst[1:]:
-        assert not x["available"] and not x["selectable"] and "后续提供" in x["reason"]
-    assert "欢迎贡献" in lst[1]["reason"] and "DeepSeek" in lst[2]["reason"]
+    assert all(x["available"] and x["selectable"] for x in lst[:2])
+    assert not lst[2]["available"] and not lst[2]["selectable"] and "DeepSeek" in lst[2]["reason"]
 
 
 def test_selectable_and_create():
-    assert is_selectable("claude") and not is_selectable("codex") and not is_selectable("api") and not is_selectable("x")
-    p = create_provider("codex", session=_Idle())            # 未实现的 id 回退到默认来源
-    assert p.id == "claude"
+    assert is_selectable("claude") and is_selectable("codex") and not is_selectable("api") and not is_selectable("x")
+    assert create_provider("codex").id == "codex"
 
 
-def test_codex_stub_is_unavailable_and_raises():
-    c = CodexProvider()
-    assert not c.status()["available"]
-    for fn in (lambda: c.start(), lambda: c.send("x", print), c.stop, c.reset, c.close):
-        try:
-            fn()
-        except NotImplementedError:
-            continue
-        raise AssertionError("骨架方法应抛 NotImplementedError")
+def test_codex_status_variants():
+    assert CodexProvider(find=lambda: None).status()["state"] == "not_installed"
+    assert CodexProvider(find=lambda: "codex", login_check=lambda _: False).status()["state"] == "not_logged_in"
+    assert CodexProvider(find=lambda: "codex", login_check=lambda _: True).status()["state"] == "ready"
 
 
 def test_validate_event_detects_problems():

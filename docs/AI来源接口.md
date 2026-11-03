@@ -1,8 +1,8 @@
 # AI 来源接口（给贡献者）
 
-> **English summary.** The desktop app talks to any AI backend ("provider") through one small interface, `AIProvider` (`app/providers/base.py`): `status()`, `start()`, `send(text, on_event)`, `stop()`, `reset()`, `close()`. A provider only has to turn its CLI/API output into a fixed set of JSON events (`text`, `tool`, `tool_result`, `error`, `stopped`, `done`, optional `session`). The app handles the UI, the per-adjustment confirmation cards, the "this session's changes" table and preview refresh. A provider must only use the whitelisted Lightroom tools (writes: `lr_set_develop`, `lr_restore`, `lr_restore_original`), must route every write through the app's confirmation endpoint when confirmation is on (enforced by the app, not by prompts), and must never store credentials, read user files other than the photos, or upload photos. `claude` is implemented; `codex` and `api` are placeholders. A ready-made contract test, `app/tests/test_provider_contract.py`, runs against any implementation without a real model. Everything about Codex below is **unverified ("待验证")**. Please attach a verification report to your PR (see `CONTRIBUTING.md`).
+> **English summary.** The desktop app talks to AI backends through `AIProvider` (`app/providers/base.py`). Claude and Codex CLI are implemented; API is a placeholder. Codex uses `codex exec --json`, thread resume, and a restricted MCP proxy that checks every write with the app's confirmation endpoint. The provider contract test runs without a real model. See the verification status in section 9 and attach a verification report to your PR (see `CONTRIBUTING.md`).
 
-本文说明：如何给"修图助手"桌面软件接入一个新的 AI 来源（例如 Codex 命令行），**不需要阅读软件的其他源码**。已实现的来源只有 `claude`（Claude Code 命令行）。
+本文说明：如何给"修图助手"桌面软件接入一个新的 AI 来源，**不需要阅读软件的其他源码**。已实现的来源有 `claude` 和 `codex` 命令行。
 
 ## 1. 目的与整体结构
 
@@ -29,7 +29,8 @@
 | `app/providers/base.py` | `AIProvider` 抽象类、事件字段表 `EVENT_FIELDS`、`validate_event()`、`make_status()` |
 | `app/providers/__init__.py` | 注册表 `available_providers()`、`create_provider()` |
 | `app/providers/claude_provider.py` | 已实现的参考来源（对 Claude 命令行常驻会话的封装） |
-| `app/providers/codex_stub.py` | Codex 骨架（所有方法抛 `NotImplementedError`，TODO 列出核对点） |
+| `app/providers/codex_provider.py` | Codex CLI 的 JSONL、续聊、中断与状态适配 |
+| `app/codex_proxy.py` | 仅暴露允许的 Lightroom 工具，写入前强制询问确认端点 |
 | `app/tests/test_provider_contract.py` | 契约测试，可直接复用 |
 
 ## 2. 事件格式
@@ -105,7 +106,7 @@ Lightroom 工具由 `lightroom_mcp` 这个 MCP 服务提供（stdio）。启动�
 {"type": "stdio", "command": "<python 或 lrmcp.exe 的路径>", "args": ["<启动脚本>"], "env": {"PYTHONPATH": "<server 目录>"}}
 ```
 
-把它放进 MCP 客户端的配置即可（Claude 用的是 `{"mcpServers": {"lightroom_mcp": <上面的配置>}}`，见 `claude_bridge.write_mcp_config()`）。Codex 的 MCP 配置写法**待验证**。注意：
+把它放进 MCP 客户端的配置即可（Claude 用的是 `{"mcpServers": {"lightroom_mcp": <上面的配置>}}`，见 `claude_bridge.write_mcp_config()`）。Codex 使用 `codex exec -c mcp_servers.lightroom_mcp.*` 配置本轮代理服务。注意：
 
 - 只开放白名单工具。只读：`claude_bridge.READONLY_TOOLS`；写入类**目前仅** `lr_set_develop`（调整）、`lr_restore`（撤销）、`lr_restore_original`（还原）。其余写入/导出/删除类工具（`claude_bridge.BLOCKED_WRITE_TOOLS`）一律不开放，并且最好直接从模型可见的工具清单里隐藏（实测可省约 5500 token，也更安全）。
 - 系统提示词可参考 `claude_bridge.SYSTEM_PROMPT`（正式、克制的书面语气；仅在用户明确要求时修改；每项调整写明依据）。提示词只是行为引导，**不能代替安全措施**。
@@ -195,18 +196,20 @@ class TestMyProvider(ProviderContract):
 
 维护者根据报告评估可信度；写入类功能（含确认流程）仍会被逐行审查。
 
-## 9. Codex：当前未验证的清单（待验证）
+## 9. Codex：验证清单
 
-以下全部**尚未验证**，接入时请逐项核对并在验证报告里记录结果：
+使用前需安装并登录 Codex CLI（`codex login`）。默认读取 Codex 自己的登录目录；若用户迁移过该目录，可在启动软件前设置 `LRAPP_CODEX_HOME`。软件不复制或保存登录凭据。Codex 预览图会发送给用户选择的 Codex 服务。
 
-- [ ] `codex exec` 是否有逐行 JSON 的输出模式，字段名是什么，如何映射到 `text` / `tool` / `tool_result` / `done`
-- [ ] 如何多轮续接（是否有 resume 之类的机制），还是需要自己拼接上下文
-- [ ] 如何配置 MCP 服务（`lightroom_mcp` 的启动配置写在哪里、能否只对本次运行生效而不改动用户的全局配置）
-- [ ] 是否有"权限询问回调"之类的机制可用于逐项确认；若没有，是否改用第 5 节的代理 MCP 方案
-- [ ] 如何隐藏/禁用非白名单工具与全部内置工具（读写文件、执行命令等），并确认模型清单里确实看不到
-- [ ] 如何中断当前一轮并保留会话
+以下是当前实现的验证范围；未勾选项目仍需实机验证：
+
+- [x] `codex exec --json` 输出逐行 JSON；适配 `thread.started`、`item.*`、`turn.completed` 和失败事件
+- [x] `codex exec resume <thread_id>` 续聊；假进程契约测试覆盖两轮和中断后续聊
+- [x] 命令行 `-c mcp_servers.lightroom_mcp.*` 只配置本轮，并用 `--ignore-user-config`
+- [x] 代理 MCP 对三种写入先询问 `/ask`；没有有效端点或明确同意时拒绝
+- [x] 代理 MCP 只列出允许的 Lightroom 工具；Codex 配置关闭 shell、应用与图片查看内置工具，并使用只读沙箱
+- [x] 结束本轮进程并保留 thread id；契约测试覆盖继续对话
 - [ ] 能否接收 `lr_get_preview` 返回的图片（决定 `supports_images`）
-- [ ] 是否有不发起模型调用的本地登录状态检测命令
-- [ ] 用量（tokens / 费用）能否取得；取不到时填 0 / `null`
-- [ ] 错误类型（未登录、额度、网络）的识别与中文映射
-- [ ] 在 Windows 下启动子进程是否会弹出黑色窗口（Claude 实现使用 `CREATE_NO_WINDOW`）
+- [x] `codex login status` 只做本地状态检测
+- [x] `turn.completed.usage` 提供 token 计数；费用填 `null`
+- [ ] 未登录、额度、网络目前合并为中文通用错误，细分原因待验证
+- [ ] 使用 `CREATE_NO_WINDOW`；GUI 实机观察待验证

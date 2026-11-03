@@ -16,6 +16,8 @@ import pytest
 import claude_bridge as cb
 import persistent_session as ps
 from providers import ClaudeProvider
+from providers.codex_provider import CodexProvider
+import providers.codex_provider as cp
 from providers.base import AIProvider, READY, UNAVAILABLE, make_status, validate_event
 
 FAKE_CLAUDE = str(Path(__file__).with_name("fake_claude.py"))
@@ -201,3 +203,18 @@ class TestClaudeProvider(ProviderContract):
 
     def context_size(self, p):
         return 1 if p.session.session_id else 0
+
+
+class TestCodexProvider(ProviderContract):
+    """Codex JSONL adapter follows the same event and lifecycle contract."""
+
+    def make(self, tmp_path, monkeypatch):
+        fake = str(Path(__file__).with_name("fake_codex.py"))
+        monkeypatch.setattr(cp, "build_command", lambda path, thread, workdir, prompt:
+                            [sys.executable, fake, prompt])
+        p = CodexProvider(workdir=tmp_path, find=lambda: sys.executable, login_check=lambda path: True)
+        assert p.start()
+        return p
+
+    def context_size(self, p):
+        return 1 if p.thread_id else 0
