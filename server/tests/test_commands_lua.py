@@ -86,9 +86,33 @@ local folder = { getName = function() return "Test folder" end, getDevelopPreset
 local catalog = {}
 function catalog:getPath() return "C:\\test\\test.lrcat" end
 function catalog:createKeyword(name) return newKeyword(name) end
-function catalog:getTargetPhoto() return photo end
-function catalog:getTargetPhotos() return { photo } end
-function catalog:findPhotoByUuid(id) if id == FAKE.uuid then return photo end end
+function catalog:getTargetPhoto()
+  if FAKE.selected ~= nil then return FAKE.selected[1] end
+  return photo
+end
+function catalog:getTargetPhotos()
+  if FAKE.selected ~= nil then return FAKE.selected end
+  return { photo }
+end
+function catalog:findPhotoByUuid(id) if id == FAKE.uuid then return photo end return FAKE.libphotos[id] end
+function catalog:getFolderByPath(p) return FAKE.libfolders[p] end
+function catalog:setActiveSources(sources)
+  FAKE.sources = sources
+  if FAKE.sources_fail then return false end
+  FAKE.view = {}
+  for _, f in ipairs(sources) do for _, ph in ipairs(f.own) do FAKE.view[ph:getRawMetadata("uuid")] = true end end
+  return true
+end
+function catalog:setSelectedPhotos(active, others)
+  FAKE.select_calls = FAKE.select_calls + 1
+  if FAKE.select_fails then error("select failed") end
+  FAKE.selected = {}
+  local all = { active }
+  for _, o in ipairs(others) do all[#all + 1] = o end
+  for _, ph in ipairs(all) do
+    if FAKE.view == nil or FAKE.view[ph:getRawMetadata("uuid")] then FAKE.selected[#FAKE.selected + 1] = ph end
+  end
+end
 function catalog:findPhotoByPath(p) return FAKE.in_catalog[p] end
 function catalog:addPhoto(p, ...)
   if select("#", ...) > 0 then error("addPhoto must get the path only") end
@@ -115,8 +139,15 @@ end
 local modules = {
   LrApplication = { activeCatalog = function() return catalog end, developPresetFolders = function() return { folder } end,
                     versionTable = function() return { major = 15, minor = 2, revision = 0, build_version = "x" } end },
-  LrDate = { currentTime = function() return 0 end },
-  LrTasks = { pcall = pcall },
+  LrDate = { currentTime = function() return FAKE.clock end },
+  LrStringUtils = { encodeBase64 = function(d) return "B64:" .. #d .. ":" .. d:byte(1) .. "," .. d:byte(2) end },
+  LrTasks = { pcall = pcall,
+              sleep = function(sec)
+                FAKE.clock = FAKE.clock + sec
+                local pending = FAKE.pending
+                FAKE.pending = {}
+                for _, fn in ipairs(pending) do fn() end
+              end },
   LrExportSession = function(args)
     return { doExportOnCurrentTask = function()
       local s = args.exportSettings
@@ -181,7 +212,79 @@ function ALREADY_IN_CATALOG(path)
     getFormattedMetadata = function() return nil end } })
 end
 function SET_LABEL(v) FAKE.meta.label = v end
+
+-- library fakes: photos in catalog folders, thumbnails, selection
+local function JPEG(n, w, h)   -- a minimal JPEG-looking string of n bytes with a SOF0 marker for w x h
+  local head = "\255\216\255\192\0\17\8" .. string.char(math.floor(h / 256), h % 256, math.floor(w / 256), w % 256)
+    .. "\3\1\34\0\2\17\1\3\17\1"
+  return head .. string.rep("x", math.max(0, n - #head))
+end
+function ADD_LIB_PHOTO(uuid, path, o)
+  o = o or {}
+  local ph = {}
+  function ph:getRawMetadata(key)
+    if key == "uuid" then return uuid end
+    if key == "path" then return path end
+    if key == "fileFormat" then return o.format or "JPG" end
+    if key == "rating" then return o.rating end
+    if key == "pickStatus" then return o.pick or 0 end
+    if key == "dateTimeOriginalISO8601" then return o.captured or "2026-11-01T10:00:00" end
+    if key == "dimensions" then return { width = o.w or 600, height = o.h or 400 } end
+    if key == "isVirtualCopy" then return o.vc or false end
+    return nil
+  end
+  function ph:getFormattedMetadata() return nil end
+  function ph:requestJpegThumbnail(w, h, cb)
+    FAKE.thumb_calls[#FAKE.thumb_calls + 1] = { uuid = uuid, w = w, h = h }
+    local plan = FAKE.thumb_plan[uuid]
+    if plan == nil then plan = JPEG(2000, 64, 43) end
+    if type(plan) == "function" then plan = plan(w, h) end
+    if plan == "never" then return {} end
+    local function fire()
+      if type(plan) == "table" then cb(nil, plan.err) else cb(plan) end
+    end
+    if FAKE.thumb_async then FAKE.pending[#FAKE.pending + 1] = fire else fire() end
+    return {}
+  end
+  FAKE.libphotos[uuid] = ph
+  return ph
+end
+function ADD_LIB_FOLDER(path, uuids, children)   -- uuids: photos directly in the folder; children: other folder paths
+  local f = { own = {} }
+  for _, u in ipairs(uuids) do f.own[#f.own + 1] = FAKE.libphotos[u] end
+  function f:getPhotos(includeChildren)
+    FAKE.getphotos_arg = includeChildren
+    local out = {}
+    for _, ph in ipairs(self.own) do out[#out + 1] = ph end
+    if includeChildren then
+      for _, c in ipairs(children or {}) do
+        for _, ph in ipairs(FAKE.libfolders[c]:getPhotos(true)) do out[#out + 1] = ph end
+      end
+    end
+    return out
+  end
+  FAKE.libfolders[path] = f
+  return f
+end
+function THUMB_PLAN(uuid, kind, n, w, h)
+  if kind == "jpeg" then FAKE.thumb_plan[uuid] = JPEG(n, w or 64, h or 43)
+  elseif kind == "never" then FAKE.thumb_plan[uuid] = "never"
+  elseif kind == "error" then FAKE.thumb_plan[uuid] = { err = n }
+  elseif kind == "big_then_small" then FAKE.thumb_plan[uuid] = function(rw, rh) if rw > 200 then return JPEG(200000, 300, 200) end return JPEG(50000, 100, 66) end
+  end
+end
+function THUMB_CALLS() return #FAKE.thumb_calls end
+function THUMB_CALL(i) local c = FAKE.thumb_calls[i] return c.uuid .. ":" .. c.w .. "x" .. c.h end
+function SELECTED_UUIDS()
+  local out = {}
+  for _, ph in ipairs(FAKE.selected or {}) do out[#out + 1] = ph:getRawMetadata("uuid") end
+  return table.concat(out, ",")
+end
+function SET_VIEW(uuids) FAKE.view = {} for _, u in ipairs(uuids) do FAKE.view[u] = true end end
 function RESET()
+  FAKE.clock, FAKE.pending, FAKE.libphotos, FAKE.libfolders = 0, {}, {}, {}
+  FAKE.thumb_plan, FAKE.thumb_calls, FAKE.thumb_async, FAKE.selected, FAKE.view = {}, {}, false, nil, nil
+  FAKE.sources, FAKE.sources_fail, FAKE.select_fails, FAKE.select_calls = nil, false, false, 0
   FAKE.files, FAKE.folders, FAKE.last_export, FAKE.export_fails = {}, {}, nil, false
   FAKE.in_catalog, FAKE.add_fails, FAKE.in_gate = {}, false, false
   FAKE.meta = { rating = nil, pick = 0, label = "", title = "", caption = "", keywords = { newKeyword("Torino") } }
@@ -222,6 +325,30 @@ def lr():
 
         def make_folder(self, path):
             g.MAKE_FOLDER(path)
+
+        def lib_photo(self, uuid, path, **o):
+            g.ADD_LIB_PHOTO(uuid, path, runtime.table_from(o))
+
+        def lib_folder(self, path, uuids, children=()):
+            g.ADD_LIB_FOLDER(path, runtime.table_from(list(uuids)), runtime.table_from(list(children)))
+
+        def thumb_plan(self, uuid, kind, n=None, w=None, h=None):
+            g.THUMB_PLAN(uuid, kind, n, w, h)
+
+        def thumb_calls(self):
+            return g.THUMB_CALLS()
+
+        def thumb_call(self, i):
+            return g.THUMB_CALL(i)
+
+        def selected(self):
+            return g.SELECTED_UUIDS()
+
+        def set_view(self, uuids):
+            g.SET_VIEW(runtime.table_from(list(uuids)))
+
+        def fake(self, key):
+            return g.FAKE[key]
 
         def make_file(self, path):
             g.MAKE_FILE(path)
@@ -745,3 +872,185 @@ def test_commands_lua_never_uses_a_bare_pcall():
     source = (Path(__file__).resolve().parents[2] / "plugin" / "lrmcp.lrdevplugin" / "Commands.lua").read_text(encoding="utf-8")
     bare = [n for n, line in enumerate(source.splitlines(), 1) if re.search(r"(?<![.\w])pcall\s*\(", line)]
     assert not bare, f"bare pcall in Commands.lua at lines {bare}; use LrTasks.pcall"
+
+
+# ---- library browsing for the desktop app (v0.15): list_folder_photos, get_thumbnails, select_photos ----------------------
+ROOT = "D:\\ceshi\\app_library_test"
+U1, U2, U3, U4 = "UUID-0001", "UUID-0002", "UUID-0003", "UUID-0004"
+
+
+@pytest.fixture
+def lib(lr):
+    lr.lib_photo(U1, ROOT + "\\b.JPG", rating=3, pick=1)
+    lr.lib_photo(U2, ROOT + "\\a.ARW", format="RAW", pick=-1, vc=True)
+    lr.lib_photo(U3, ROOT + "\\sub\\deep\\c.jpg")
+    lr.lib_photo(U4, "D:\\other\\z.jpg")
+    lr.lib_folder(ROOT + "\\sub\\deep", [U3])
+    lr.lib_folder(ROOT + "\\sub", [], [ROOT + "\\sub\\deep"])
+    lr.lib_folder(ROOT, [U1, U2], [ROOT + "\\sub"])
+    return lr
+
+
+def test_list_folder_photos_sorted_with_fields_and_subfolders(lib):
+    data = lib.run("list_folder_photos", path=enc(ROOT))["data"]
+    assert data["in_catalog"] is True and data["total"] == 3
+    names = [p["name"] for p in data["photos"]]
+    assert names == ["a.ARW", "b.JPG", "c.jpg"]          # sorted by path: a, b, then the sub folder's c
+    a, b, c = data["photos"]
+    assert a["id"] == U2 and a["flag"] == "reject" and a["is_virtual_copy"] is True and a["format"] == "RAW"
+    assert b["flag"] == "pick" and b["rating"] == 3 and b["subfolder"] == "" and b["captured"] == "2026-11-01T10:00:00"
+    assert (b["width"], b["height"]) == (600, 400) and b["path"] == ROOT + "\\b.JPG"
+    assert c["subfolder"] == "sub/deep" and c["flag"] == "none" and c["is_virtual_copy"] is False
+
+
+def test_list_folder_photos_recursive_flag_and_paging(lib):
+    flat = lib.run("list_folder_photos", path=enc(ROOT), recursive=0)["data"]
+    assert flat["total"] == 2 and lib.fake("getphotos_arg") is False
+    assert lib.run("list_folder_photos", path=enc(ROOT))["data"]["total"] == 3 and lib.fake("getphotos_arg") is True
+    page = lib.run("list_folder_photos", path=enc(ROOT), offset=1, limit=1)["data"]
+    assert page["total"] == 3 and [p["name"] for p in page["photos"]] == ["b.JPG"]
+    past = lib.run("list_folder_photos", path=enc(ROOT), offset=5)["data"]
+    assert past["total"] == 3 and past["photos"] == []
+
+
+def test_list_folder_photos_trailing_slash(lib):
+    data = lib.run("list_folder_photos", path=enc(ROOT + "\\"))["data"]
+    assert data["in_catalog"] and data["photos"][2]["subfolder"] == "sub/deep"
+
+
+def test_list_folder_photos_folder_not_in_catalog_is_not_an_error(lib):
+    data = lib.run("list_folder_photos", path=enc("D:\\nowhere"))
+    assert data["ok"] and data["data"]["in_catalog"] is False and data["data"]["total"] == 0 and data["data"]["photos"] == []
+
+
+BAD_FOLDERS = [
+    "\\\\server\\share\\x", "//server/share/x", "relative\\x", "/etc", "D:x",
+    "D:\\a\\..\\b", "D:/a/../a", "C:\\Windows", "C:\\Program Files\\X", "C:\\ProgramData\\x",
+    "C:\\Users\\me\\AppData\\Local", "C:\\Users\\me\\.ssh", "C:\\Users\\me\\LrMcp\\previews",
+    "D:\\a\x07b", "D:\\" + "x" * 500, "",
+]
+
+
+@pytest.mark.parametrize("path", BAD_FOLDERS)
+def test_library_commands_refuse_bad_folders(lib, path):
+    assert not lib.run("list_folder_photos", path=enc(path))["ok"], path
+    assert not lib.run("select_photos", ids=U1, show_folder=enc(path))["ok"] or path == ""   # empty show_folder = not given
+    assert lib.fake("sources") is None
+    if path != "":
+        assert lib.fake("select_calls") == 0
+
+
+@pytest.mark.parametrize("extra", [{"limit": 0}, {"limit": 501}, {"offset": -1}])
+def test_list_folder_photos_refuses_bad_paging(lib, extra):
+    assert not lib.run("list_folder_photos", path=enc(ROOT), **extra)["ok"]
+
+
+def test_thumbnails_normal(lib):
+    data = lib.run("get_thumbnails", ids=f"{U1},{U2}", size=128)["data"]
+    assert data["size"] == 128
+    t1, t2 = data["thumbnails"]
+    assert t1["id"] == U1 and t1["ok"] is True and t1["bytes"] == 2000 and (t1["width"], t1["height"]) == (64, 43)
+    assert t1["jpeg_base64"].startswith("B64:2000:")
+    assert t2["ok"] and lib.thumb_call(1) == f"{U1}:128x128"
+    assert lib.writes() == 0
+    assert lib.run("get_thumbnails", ids=U1)["data"]["size"] == 256
+
+
+def test_thumbnail_waits_for_an_asynchronous_callback(lib):
+    lib.set_flag("thumb_async", True)
+    t = lib.run("get_thumbnails", ids=U1)["data"]["thumbnails"][0]
+    assert t["ok"] is True and t["bytes"] == 2000
+
+
+def test_thumbnail_timeout_does_not_hang_and_others_still_come(lib):
+    lib.thumb_plan(U1, "never")
+    data = lib.run("get_thumbnails", ids=f"{U1},{U2}")["data"]["thumbnails"]
+    assert data[0] == {"id": U1, "ok": False, "error": "timeout"}
+    assert data[1]["ok"] is True
+    assert 8 <= lib.fake("clock") < 9    # one 8 second wait, not forever
+
+
+def test_thumbnail_unknown_id_and_lightroom_error(lib):
+    lib.thumb_plan(U2, "error", "preview failed")
+    data = lib.run("get_thumbnails", ids=f"NOPE-1,{U2}")["data"]["thumbnails"]
+    assert data[0] == {"id": "NOPE-1", "ok": False, "error": "not_found"}
+    assert data[1]["ok"] is False and data[1]["error"] == "preview failed"
+
+
+def test_thumbnail_too_large_is_retried_smaller_once(lib):
+    lib.thumb_plan(U1, "big_then_small")
+    t = lib.run("get_thumbnails", ids=U1, size=256)["data"]["thumbnails"][0]
+    assert t["ok"] is True and t["bytes"] == 50000 and lib.thumb_calls() == 2
+    assert lib.thumb_call(2) == f"{U1}:153x153"
+    lib.thumb_plan(U2, "jpeg", 200000)
+    t = lib.run("get_thumbnails", ids=U2, size=256)["data"]["thumbnails"][0]
+    assert t == {"id": U2, "ok": False, "error": "too_large"}
+
+
+@pytest.mark.parametrize("extra", [{"size": 63}, {"size": 513}, {"size": "big"}, {"ids": ""}, {"ids": "a b"}, {"ids": "a;b"},
+                                   {"ids": ",".join(f"ID-{i}" for i in range(25))}, {"ids": "x" * 65}])
+def test_thumbnails_refuse_bad_parameters(lib, extra):
+    params = {"ids": U1, **extra}
+    assert not lib.run("get_thumbnails", **params)["ok"]
+    assert lib.thumb_calls() == 0
+
+
+def test_thumbnails_accept_24_ids(lib):
+    ids = ",".join(f"ID-{i}" for i in range(24))
+    assert len(lib.run("get_thumbnails", ids=ids)["data"]["thumbnails"]) == 24
+
+
+def test_select_one_and_many_and_read_back(lib):
+    data = lib.run("select_photos", ids=U1)["data"]
+    assert data["selected"] == [U1] and data["missing"] == [] and data["all_selected"] is True
+    data = lib.run("select_photos", ids=f"{U1},{U2},{U3}", active=U3)["data"]
+    assert sorted(data["selected"]) == sorted([U1, U2, U3]) and data["selected"][0] == U3
+    assert lib.selected().split(",")[0] == U3
+    assert lib.writes() == 0 and lib.fake("sources") is None     # no folder switch unless asked
+
+
+def test_select_default_active_is_the_first_found(lib):
+    data = lib.run("select_photos", ids=f"MISSING-1,{U2},{U1}")["data"]
+    assert data["selected"][0] == U2 and data["missing"] == ["MISSING-1"] and data["all_selected"] is True
+
+
+def test_select_missing_ids_are_reported_and_all_missing_is_an_error(lib):
+    data = lib.run("select_photos", ids=f"{U1},GONE-1", active="GONE-2")["data"]
+    assert data["selected"] == [U1] and sorted(data["missing"]) == ["GONE-1", "GONE-2"]
+    reply = lib.run("select_photos", ids="GONE-1,GONE-2")
+    assert not reply["ok"] and "找不到" in reply["error"]
+
+
+def test_select_show_folder_switches_the_view_first(lib):
+    lib.set_view([U4])     # Lightroom currently shows another folder
+    data = lib.run("select_photos", ids=U1, show_folder=enc(ROOT))["data"]
+    assert data["folder_shown"] is True and data["selected"] == [U1] and data["all_selected"] is True
+    assert len(lib.fake("sources")) == 1
+
+
+def test_select_photo_outside_the_view_is_reported_honestly(lib):
+    lib.set_view([U4])
+    data = lib.run("select_photos", ids=f"{U1},{U4}")["data"]
+    assert data["selected"] == [U4] and data["not_selected"] == [U1] and data["all_selected"] is False
+    assert "show_folder" in data["reason"]
+
+
+def test_select_show_folder_not_in_catalog_or_refused_by_lightroom(lib):
+    data = lib.run("select_photos", ids=U1, show_folder=enc("D:\\nowhere"))["data"]
+    assert data["folder_shown"] is False and "不在目录" in data["reason"] and data["selected"] == [U1]
+    lib.set_flag("sources_fail", True)
+    data = lib.run("select_photos", ids=U1, show_folder=enc(ROOT))["data"]
+    assert data["folder_shown"] is False and "没有切换" in data["reason"]
+
+
+def test_select_reports_lightrooms_refusal(lib):
+    lib.set_flag("select_fails", True)
+    data = lib.run("select_photos", ids=U1)["data"]
+    assert data["all_selected"] is False and "拒绝" in data["reason"]
+
+
+@pytest.mark.parametrize("extra", [{"ids": ""}, {"ids": "a b"}, {"ids": ",".join(f"ID-{i}" for i in range(51))},
+                                   {"ids": U1, "active": "bad id!"}, {"ids": U1, "active": "x" * 65}])
+def test_select_refuses_bad_parameters(lib, extra):
+    assert not lib.run("select_photos", **extra)["ok"]
+    assert lib.fake("select_calls") == 0

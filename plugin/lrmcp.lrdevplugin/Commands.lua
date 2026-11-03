@@ -7,6 +7,7 @@ local LrExportSession = import "LrExportSession"
 local LrExportSettings = import "LrExportSettings"
 local LrFileUtils = import "LrFileUtils"
 local LrPathUtils = import "LrPathUtils"
+local LrStringUtils = import "LrStringUtils"
 local LrTasks = import "LrTasks"
 
 local Json = require "Json.lua"
@@ -1124,6 +1125,323 @@ function M.import_photo(params)
 	return { already = false, imported = true, id = photo:getRawMetadata("uuid"), name = name, photo = describe(photo) }
 end
 
+-- ---------------------------------------------------------------------------------------------------------------------
+-- Library browsing for the desktop app (v0.15): list_folder_photos, get_thumbnails, select_photos. They exist so the app can show
+-- the photos of a folder and let the user pick there, instead of in Lightroom. Desktop app only, NOT MCP tools (the AI cannot call
+-- them). list_folder_photos and get_thumbnails only read; select_photos changes Lightroom's selection (and, if asked, the folder
+-- shown), never a photo or the catalog. Paths and ids come from a request and are checked here. None of them is wrapped in the
+-- write gate: nothing is written. Waiting for a thumbnail uses LrTasks.sleep (and LrTasks.pcall), never a bare pcall.
+-- ---------------------------------------------------------------------------------------------------------------------
+local LIST_DEFAULT, LIST_MAX = 200, 500
+local THUMB_MAX_IDS, THUMB_MIN, THUMB_MAX, THUMB_DEFAULT = 24, 64, 512, 256
+local THUMB_MAX_BYTES = 150 * 1024
+local THUMB_TIMEOUT = 8 -- seconds per photo
+local SELECT_MAX_IDS = 50
+
+local function urlDecode(text)
+	return (text:gsub("%%(%x%x)", function(h)
+		return string.char(tonumber(h, 16))
+	end))
+end
+
+-- a folder of the catalog: local drive path, no network path, no "..", not under BLOCKED_FOLDERS. It need not exist on disk
+-- (a folder can be offline) and is not created; whether it is in the catalog is found out with getFolderByPath.
+local function checkLibraryFolder(path)
+	if path == "" or #path > 400 or path:find("%c") then
+		fail("文件夹路径不合法（为空、太长或含控制字符）。")
+	end
+	if path:sub(1, 2) == "\\\\" or path:sub(1, 2) == "//" then
+		fail("不允许使用网络路径。请用本机磁盘上的文件夹。")
+	end
+	if not path:match("^%a:[\\/]") then
+		fail("文件夹路径必须是本机的完整路径，比如 D:\\照片 。")
+	end
+	local norm = (path:gsub("\\", "/")):lower()
+	norm = norm:gsub("//+", "/")
+	for part in norm:gmatch("[^/]+") do
+		if part == ".." then
+			fail("路径里不能有 .. 。")
+		end
+	end
+	for _, bad in ipairs(BLOCKED_FOLDERS) do
+		if (norm .. "/"):find(bad, 1, true) then
+			fail("这个位置不允许浏览（系统目录，或本工具自己的数据目录）：" .. path)
+		end
+	end
+end
+
+local function folderPathArg(raw)
+	if raw == nil or raw == "" then
+		fail("请给出文件夹路径。")
+	end
+	local path = urlDecode(raw)
+	checkLibraryFolder(path)
+	if #path > 3 then
+		path = path:gsub("[\\/]+$", "")
+	end
+	return path
+end
+
+local function parseIds(raw, maxCount, what)
+	if raw == nil or raw == "" then
+		fail("请给出照片 id（" .. what .. "）。")
+	end
+	local ids, seen = {}, {}
+	for id in urlDecode(raw):gmatch("[^,]+") do
+		if #id > 64 or not id:match("^[%w%-]+$") then
+			fail("照片 id 不合法：只能是字母、数字和连字符。")
+		end
+		if not seen[id] then
+			seen[id] = true
+			ids[#ids + 1] = id
+		end
+	end
+	if #ids == 0 then
+		fail("请给出照片 id（" .. what .. "）。")
+	end
+	if #ids > maxCount then
+		fail(string.format("一次最多 %d 张照片。", maxCount))
+	end
+	return ids
+end
+
+function M.list_folder_photos(params)
+	local path = folderPathArg(params.path)
+	local recursive = params.recursive ~= "0"
+	local offset = math.floor(tonumber(params.offset) or 0)
+	local limit = math.floor(tonumber(params.limit) or LIST_DEFAULT)
+	if offset ~= offset or offset < 0 then
+		fail("offset 不能是负数。")
+	end
+	if limit ~= limit or limit < 1 or limit > LIST_MAX then
+		fail(string.format("limit 要在 1 到 %d 之间。", LIST_MAX))
+	end
+	local catalog = LrApplication.activeCatalog()
+	local folder = catalog:getFolderByPath(path)
+	if not folder then
+		return { in_catalog = false, total = 0, offset = offset, folder = path, photos = Json.array({}) }
+	end
+	local entries = {}
+	for _, photo in ipairs(folder:getPhotos(recursive) or {}) do
+		local p = photo:getRawMetadata("path") or ""
+		entries[#entries + 1] = { photo = photo, path = p, key = p:gsub("\\", "/"):lower(), uuid = photo:getRawMetadata("uuid") or "" }
+	end
+	table.sort(entries, function(a, b)
+		if a.key ~= b.key then
+			return a.key < b.key
+		end
+		return a.uuid < b.uuid
+	end)
+	local root = (path:gsub("\\", "/")):lower():gsub("/+$", "")
+	local out = {}
+	for i = offset + 1, math.min(#entries, offset + limit) do
+		local e = entries[i]
+		local photo = e.photo
+		local dims = photo:getRawMetadata("dimensions") or {}
+		local pick = photo:getRawMetadata("pickStatus")
+		local dir = (e.path:gsub("\\", "/")):match("^(.*)/[^/]*$") or ""
+		local subfolder = ""
+		if dir:lower():sub(1, #root) == root then
+			subfolder = dir:sub(#root + 2)
+		end
+		out[#out + 1] = {
+			id = e.uuid,
+			name = LrPathUtils.leafName(e.path),
+			path = e.path,
+			subfolder = subfolder,
+			format = photo:getRawMetadata("fileFormat"),
+			rating = photo:getRawMetadata("rating"),
+			flag = (pick == 1 and "pick") or (pick == -1 and "reject") or "none",
+			captured = photo:getRawMetadata("dateTimeOriginalISO8601"),
+			width = dims.width,
+			height = dims.height,
+			is_virtual_copy = photo:getRawMetadata("isVirtualCopy") and true or false,
+		}
+	end
+	return { in_catalog = true, total = #entries, offset = offset, folder = path, recursive = recursive, photos = Json.array(out) }
+end
+
+-- width and height from the JPEG's start-of-frame marker (nil when it cannot be read)
+local function jpegSize(data)
+	local pos, n = 3, #data
+	while pos + 8 <= n do
+		if data:byte(pos) ~= 0xFF then
+			return nil
+		end
+		local m = data:byte(pos + 1)
+		if m == 0xFF then
+			pos = pos + 1
+		elseif m == 0x01 or (m >= 0xD0 and m <= 0xD9) then
+			pos = pos + 2
+		else
+			if m >= 0xC0 and m <= 0xCF and m ~= 0xC4 and m ~= 0xC8 and m ~= 0xCC then
+				return data:byte(pos + 7) * 256 + data:byte(pos + 8), data:byte(pos + 5) * 256 + data:byte(pos + 6)
+			end
+			pos = pos + 2 + data:byte(pos + 2) * 256 + data:byte(pos + 3)
+		end
+	end
+	return nil
+end
+
+-- ask for one thumbnail and wait (this task sleeps, Lightroom keeps running) at most THUMB_TIMEOUT seconds. Returns data or nil, error.
+local function fetchThumbnail(photo, size)
+	local done, data, err = false, nil, nil
+	local ok, request = LrTasks.pcall(function()
+		return photo:requestJpegThumbnail(size, size, function(d, e)
+			done, data, err = true, d, e
+		end)
+	end)
+	if not ok then
+		return nil, tostring(type(request) == "table" and request.lrmcp or request)
+	end
+	local deadline = LrDate.currentTime() + THUMB_TIMEOUT
+	while not done and LrDate.currentTime() < deadline do
+		LrTasks.sleep(0.05)
+	end
+	local keep = request -- the request object must stay referenced until the callback has run
+	if not done then
+		return nil, "timeout"
+	end
+	if type(data) ~= "string" or data == "" then
+		return nil, tostring(err or "no_data")
+	end
+	return data
+end
+
+function M.get_thumbnails(params)
+	local ids = parseIds(params.ids, THUMB_MAX_IDS, "ids")
+	local size = THUMB_DEFAULT
+	if params.size ~= nil and params.size ~= "" then
+		size = tonumber(params.size)
+		if not size or size ~= size or size < THUMB_MIN or size > THUMB_MAX then
+			fail(string.format("size 要在 %d 到 %d 之间。", THUMB_MIN, THUMB_MAX))
+		end
+		size = math.floor(size)
+	end
+	local catalog = LrApplication.activeCatalog()
+	local out = {}
+	for _, id in ipairs(ids) do
+		local photo = catalog:findPhotoByUuid(id)
+		if not photo then
+			out[#out + 1] = { id = id, ok = false, error = "not_found" }
+		else
+			local data, err = fetchThumbnail(photo, size)
+			if data and #data > THUMB_MAX_BYTES then
+				data, err = fetchThumbnail(photo, math.max(THUMB_MIN, math.floor(size * 0.6)))
+				if data and #data > THUMB_MAX_BYTES then
+					data, err = nil, "too_large"
+				end
+			end
+			if data then
+				local w, h = jpegSize(data)
+				out[#out + 1] = { id = id, ok = true, jpeg_base64 = LrStringUtils.encodeBase64(data), width = w, height = h, bytes = #data }
+			else
+				out[#out + 1] = { id = id, ok = false, error = err }
+			end
+		end
+	end
+	return { size = size, thumbnails = Json.array(out) }
+end
+
+local function selectedIds(catalog)
+	-- getTargetPhotos() returns the whole filmstrip when nothing is selected, so look at getTargetPhoto() first
+	local ids = {}
+	if not catalog:getTargetPhoto() then
+		return ids
+	end
+	for _, p in ipairs(catalog:getTargetPhotos() or {}) do
+		ids[#ids + 1] = p:getRawMetadata("uuid")
+	end
+	return ids
+end
+
+function M.select_photos(params)
+	local ids = parseIds(params.ids, SELECT_MAX_IDS, "ids")
+	local activeId = params.active
+	if activeId ~= nil and activeId ~= "" then
+		activeId = urlDecode(activeId)
+		if #activeId > 64 or not activeId:match("^[%w%-]+$") then
+			fail("active 不合法：只能是照片 id。")
+		end
+	else
+		activeId = nil
+	end
+	local folderPath
+	if params.show_folder ~= nil and params.show_folder ~= "" then
+		folderPath = folderPathArg(params.show_folder)
+	end
+	local catalog = LrApplication.activeCatalog()
+	local found, missing, byId = {}, {}, {}
+	for _, id in ipairs(ids) do
+		local photo = catalog:findPhotoByUuid(id)
+		if photo then
+			found[#found + 1] = photo
+			byId[id] = photo
+		else
+			missing[#missing + 1] = id
+		end
+	end
+	if #found == 0 then
+		fail("在当前目录里找不到这些照片：id 无效，或 Lightroom 现在打开的是另一个目录。")
+	end
+	local active = activeId and byId[activeId] or found[1]
+	if activeId and not byId[activeId] then
+		missing[#missing + 1] = activeId
+	end
+	local others = {}
+	for _, p in ipairs(found) do
+		if p ~= active then
+			others[#others + 1] = p
+		end
+	end
+
+	local folderShown, folderNote = nil, nil
+	if folderPath then
+		local folder = catalog:getFolderByPath(folderPath)
+		if not folder then
+			folderShown, folderNote = false, "这个文件夹不在目录里，没有切换文件夹。"
+		else
+			local ok, res = LrTasks.pcall(function()
+				return catalog:setActiveSources({ folder })
+			end)
+			folderShown = ok and res == true
+			if not folderShown then
+				folderNote = "Lightroom 没有切换到这个文件夹。"
+			end
+		end
+	end
+
+	local ok, err = LrTasks.pcall(function()
+		catalog:setSelectedPhotos(active, others)
+	end)
+	local selected = selectedIds(catalog)
+	local got = {}
+	for _, id in ipairs(selected) do
+		got[id] = true
+	end
+	local notSelected = {}
+	for _, p in ipairs(found) do
+		local id = p:getRawMetadata("uuid")
+		if not got[id] then
+			notSelected[#notSelected + 1] = id
+		end
+	end
+	local reason
+	if not ok then
+		reason = "Lightroom 拒绝了选中操作：" .. tostring(type(err) == "table" and err.lrmcp or err)
+	elseif #notSelected > 0 then
+		reason = "有照片没有被选中：它们可能不在 Lightroom 当前显示的文件夹或集合里。可以带上 show_folder 让 Lightroom 先切到照片所在的文件夹。"
+	end
+	return {
+		selected = Json.array(selected),
+		missing = Json.array(missing),
+		not_selected = Json.array(notSelected),
+		all_selected = ok and #notSelected == 0,
+		folder_shown = folderShown,
+		reason = reason or folderNote,
+	}
+end
+
 local COMMANDS = {
 	status = M.status,
 	list_selected = M.list_selected,
@@ -1136,6 +1454,9 @@ local COMMANDS = {
 	restore_settings = M.restore_settings,
 	export_photo = M.export_photo,
 	import_photo = M.import_photo,
+	list_folder_photos = M.list_folder_photos,
+	get_thumbnails = M.get_thumbnails,
+	select_photos = M.select_photos,
 	get_metadata = M.get_metadata,
 	set_metadata = M.set_metadata,
 }
