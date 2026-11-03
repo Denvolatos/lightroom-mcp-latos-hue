@@ -22,6 +22,8 @@ from import_service import ImportService  # noqa: E402
 from export_service import ExportService  # noqa: E402
 from pick_service import PickService  # noqa: E402
 from pick_apply import ApplyService  # noqa: E402
+import library_store as libstore  # noqa: E402
+from library_service import LibraryService  # noqa: E402
 from preview import PreviewManager, PreviewServer, PreviewStore  # noqa: E402
 from ports import STATE_DIR  # noqa: E402
 
@@ -65,6 +67,13 @@ class Api:
                                  status_fn=lambda: self._provider.status(), ready_fn=lambda: self._backend.wait_ready(),
                                  acquire_fn=self._pick_acquire, release_fn=self._pick_release)
         self._apply = ApplyService(self._lr, self._pick.ranking, self._emit)
+        self._ctx_pending = True                 # 新对话的第一条消息带上"经验库"资料块（见 send / reset）
+        self._lib = LibraryService(self._lr, libstore.PresetStore(), libstore.NoteStore(), libstore.FavStore(), self._emit,
+                                   on_applied=self._lib_applied, photo_fn=lambda: self._backend.photo,
+                                   send_fn=self._pick_send, stop_fn=self._pick_stop, status_fn=lambda: self._provider.status(),
+                                   ready_fn=lambda: self._backend.wait_ready(), acquire_fn=self._pick_acquire,
+                                   release_fn=self._pick_release,
+                                   has_adjustments=lambda: any(r.get("status") == "已应用" for r in self._tracker.rows))
 
     def _start_background(self) -> None:
         """窗口一出现就预热：Bridge、常驻 claude（含 lightroom_mcp 与确认服务）同时启动，之后每条消息零启动开销。"""
@@ -122,6 +131,13 @@ class Api:
             self._emit({"type": "adjust", "rows": rows})
             self._preview.request()          # 调整/撤销/还原有变化：短防抖后刷新“当前”预览
 
+    def _lib_applied(self, edit_id: str, photo_id: str, label: str, changes: list) -> None:
+        """软件自己套用预设成功后：把改动加进"本次调整"表，并刷新预览。"""
+        with self._lock:
+            self._tracker.add_external(edit_id, photo_id, label, changes)
+        self._push_rows()
+        self._preview.request()
+
     def _push_rows(self) -> None:
         with self._lock:
             rows = self._backend.rows()
@@ -146,12 +162,13 @@ class Api:
                     self._emit({"type": "error", "message": why})
                     self._emit({"type": "done", "tokens": 0, "cost": None, "text": "", "is_error": True})
                     return
+                text_out = self._with_notes(text)
                 if self._persistent:
-                    self._provider.send(text, self._on_event)
+                    self._provider.send(text_out, self._on_event)
                 else:
                     token = self._hub.begin_turn()
                     env = {"LRAPP_PORT": str(self._hub.port), "LRAPP_TOKEN": token}
-                    self._provider.send(text, self._on_event, confirm=confirm, extra_env=env)
+                    self._provider.send(text_out, self._on_event, confirm=confirm, extra_env=env)
             except Exception as e:  # 兜底：不让后台线程悄悄死掉
                 self._emit({"type": "error", "message": f"程序发生错误：{e}"})
                 self._emit({"type": "done", "tokens": 0, "cost": None, "text": "", "is_error": True})
@@ -165,6 +182,23 @@ class Api:
         threading.Thread(target=run, daemon=True).start()
         return {"ok": True}
 
+    def _with_notes(self, text: str) -> str:
+        """新对话的第一条消息：设置里开着"让 AI 参考我的经验库"时，在前面放一段明确标为"资料而非指令"的经验块。
+        只在新对话开始时放一次；AI 的工具权限不因此改变（权限由进程参数决定，见 claude_bridge）。"""
+        if not self._ctx_pending:
+            return text
+        self._ctx_pending = False
+        if not self._settings.data.get("ai_use_notes", True):
+            return text
+        try:
+            ctx = self._lib.context_block()
+        except Exception:                        # noqa: BLE001 - 经验库出问题不影响对话
+            return text
+        if not ctx["text"]:
+            return text
+        self._emit({"type": "notes_context", "used": ctx["used"], "eligible": ctx["eligible"], "truncated": ctx["truncated"]})
+        return ctx["text"] + "\n\n用户的请求：\n" + text
+
     def stop(self) -> dict:
         self._hub.cancel_all()
         self._provider.stop()
@@ -172,6 +206,7 @@ class Api:
 
     def reset(self) -> dict:
         self._hub.cancel_all()
+        self._ctx_pending = True
         if not self._apply_provider_choice():
             self._provider.reset()
         with self._lock:
@@ -407,6 +442,138 @@ class Api:
     def selection_state(self) -> dict:
         """Lightroom 当前选中的全部照片（页面刚加载时取一次，之后靠 selection 事件更新）。"""
         return self._backend.selection_public()
+
+    # ---- 预设 / 经验 / 收藏 ----------------------------------------
+    def _file_dialog(self, save: bool, name: str = ""):
+        if self._window is None:
+            return None
+        fd = getattr(webview, "FileDialog", None)
+        kind = (getattr(fd, "SAVE", None) if save else getattr(fd, "OPEN", None)) or (webview.SAVE_DIALOG if save else webview.OPEN_DIALOG)
+        try:
+            if save:
+                res = self._window.create_file_dialog(kind, save_filename=name, file_types=("JSON 文件 (*.json)",))
+            else:
+                res = self._window.create_file_dialog(kind, allow_multiple=False, file_types=("JSON 文件 (*.json)",))
+        except Exception:
+            return None
+        if not res:
+            return None
+        return str(res if isinstance(res, str) else res[0])
+
+    def _read_picked(self, limit: int):
+        """系统文件选择窗口里用户点选的文件；超过 limit 字节不读入。返回 (字节, 错误, 是否取消)。"""
+        path = self._file_dialog(False)
+        if not path:
+            return None, "", True
+        try:
+            if os.path.getsize(path) > limit:
+                return None, f"文件超过 {limit // 1024} KB，已拒绝导入。", False
+            return Path(path).read_bytes(), "", False
+        except OSError as e:
+            return None, f"无法读取文件：{e.strerror or e}", False
+
+    def _write_picked(self, name: str, text: str) -> dict:
+        path = self._file_dialog(True, name)
+        if not path:
+            return {"ok": False, "cancelled": True, "message": ""}
+        if not path.lower().endswith(".json"):
+            path += ".json"
+        try:
+            Path(path).write_text(text, encoding="utf-8")
+        except OSError as e:
+            return {"ok": False, "message": f"导出失败：{e.strerror or e}"}
+        return {"ok": True, "path": path, "message": "已导出。"}
+
+    def lib_preset_options(self) -> dict:
+        return self._lib.save_options()
+
+    def lib_presets(self) -> dict:
+        return self._lib.preset_list()
+
+    def lib_preset_save(self, name: str, note: str, groups: list, overwrite: bool = False) -> dict:
+        return self._lib.preset_save(name, note, groups, bool(overwrite))
+
+    def lib_preset_rename(self, preset_id: str, new_name: str) -> dict:
+        return self._lib.preset_rename(preset_id, new_name)
+
+    def lib_preset_note(self, preset_id: str, note: str) -> dict:
+        return self._lib.preset_set_note(preset_id, note)
+
+    def lib_preset_delete(self, preset_id: str) -> dict:
+        return self._lib.preset_delete(preset_id)
+
+    def lib_preset_export(self, preset_id: str) -> dict:
+        t = self._lib.preset_export_text(preset_id)
+        return self._write_picked(t["name"] + ".json", t["text"]) if t["ok"] else t
+
+    def lib_preset_import(self) -> dict:
+        raw, err, cancelled = self._read_picked(libstore.MAX_IMPORT_BYTES)
+        if cancelled:
+            return {"ok": False, "cancelled": True, "message": ""}
+        if raw is None:
+            return {"ok": False, "message": err}
+        return self._lib.preset_import_bytes(raw)
+
+    def lib_preset_import_commit(self, overwrite: bool) -> dict:
+        return self._lib.preset_import_commit(bool(overwrite))
+
+    def lib_lr_presets(self, query: str = "") -> dict:
+        return self._lib.lr_presets(query)
+
+    def lib_apply_prepare(self, kind: str, ref: str, strength: int = 100) -> dict:
+        return self._lib.apply_prepare(kind, ref, strength)
+
+    def lib_apply_confirm(self, token: str) -> dict:
+        return self._lib.apply_confirm(token)
+
+    def lib_apply_cancel(self) -> dict:
+        return self._lib.apply_cancel()
+
+    def lib_notes(self, query: str = "", tag: str = "") -> dict:
+        return self._lib.notes_state(query, tag)
+
+    def lib_note_save(self, note_id: str, fields: dict) -> dict:
+        return self._lib.note_save(note_id or None, fields)
+
+    def lib_note_delete(self, note_id: str) -> dict:
+        return self._lib.note_delete(note_id)
+
+    def lib_notes_export(self) -> dict:
+        t = self._lib.notes_export_text()
+        return self._write_picked("经验库.json", t["text"]) if t["ok"] else t
+
+    def lib_notes_import(self) -> dict:
+        raw, err, cancelled = self._read_picked(libstore.MAX_NOTES_IMPORT_BYTES)
+        if cancelled:
+            return {"ok": False, "cancelled": True, "message": ""}
+        if raw is None:
+            return {"ok": False, "message": err}
+        return self._lib.notes_import_bytes(raw)
+
+    def lib_record_available(self) -> dict:
+        return {"ok": self._lib.record_available()}
+
+    def lib_record_start(self) -> dict:
+        return self._lib.record_start()
+
+    def lib_record_stop(self) -> dict:
+        return self._lib.record_stop()
+
+    def lib_record_state(self) -> dict:
+        return self._lib.record_state()
+
+    def lib_record_close(self) -> dict:
+        return self._lib.record_close()
+
+    def lib_fav_toggle(self, kind: str, key: str, label: str = "") -> dict:
+        """收藏/取消收藏。kind="photo" 时不接受页面传来的照片 id，一律用 Lightroom 当前选中的那张。"""
+        if kind == "photo":
+            p = self._backend.photo or {}
+            return self._lib.fav_toggle("photo", p.get("id"), p.get("name") or "")
+        return self._lib.fav_toggle(kind, key, label)
+
+    def lib_favs(self) -> dict:
+        return self._lib.fav_state()
 
     def preview_state(self) -> dict:
         """页面刚加载时取最近一次预览内容（之后靠 onClaudeEvent 的 preview 事件更新）。"""

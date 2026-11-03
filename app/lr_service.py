@@ -283,6 +283,38 @@ class LrService:
         except Exception:
             return None
 
+    # ---- 预设：读取当前照片、套用（只给软件用） --------------------
+    def _need_edits(self) -> None:
+        if not self.start() or self._edits is None:
+            _, bridge_mod = _import_server()
+            raise bridge_mod.PluginNotConnected("无法建立与 Lightroom 的连接。")
+
+    def current_photo_settings(self) -> dict | None:
+        """当前选中照片的 id、文件名与全部可调参数（插件的 snapshot）：{"id","name","settings","has_local_adjustments"}；读不到返回 None。"""
+        sel = self.selected_photo()
+        if not sel or not sel.get("id"):
+            return None
+        try:
+            snap = self._bridge.call("snapshot", {"photo": sel["id"]}, timeout=60)
+        except Exception:
+            return None
+        return {"id": sel["id"], "name": sel.get("name"), "settings": snap.get("settings") or {},
+                "has_local_adjustments": bool(snap.get("has_local_adjustments"))}
+
+    def apply_settings(self, values: dict, reason: str, label: str, photo: str) -> dict:
+        """把一组白名单参数作为一次可撤销的修改写入指定照片（server 的 EditService.apply_settings）。异常原样抛出。"""
+        self._need_edits()
+        return self._edits.apply_settings(values, reason=reason, photo=photo, label=label)
+
+    def apply_lr_preset(self, preset_id: str, reason: str, photo: str) -> dict:
+        """套用 Lightroom 预设（EditService.apply_preset：改前存完整快照，带蒙版的被拒绝）。异常原样抛出。"""
+        self._need_edits()
+        return self._edits.apply_preset(preset_id, reason, photo)
+
+    def list_lr_presets(self, query: str, limit: int) -> dict:
+        self._need_edits()
+        return self._edits.list_presets(query, limit)
+
     # ---- 撤销 ------------------------------------------------------
     def _run(self, fn) -> dict:
         """统一把异常翻成 {"ok", "conflict", "message"}。"""

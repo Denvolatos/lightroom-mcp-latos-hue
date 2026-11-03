@@ -144,6 +144,14 @@ class AdjustmentTracker:
             undone.add(data["restored"])
         return self.mark_undone(undone)
 
+    def add_external(self, edit_id: str, photo: str | None, label: str, changes: list[dict]) -> None:
+        """软件自己写入的调整（套用预设）也显示在"本次调整"里，可逐条撤销。changes: [{key, before, after}]。"""
+        for c in changes:
+            key = c.get("key")
+            self.rows.append({"rid": f"lib:{edit_id}:{key}", "edit_id": edit_id, "key": key, "label": param_name(key),
+                              "before": fmt_value(c.get("before")), "after": fmt_value(c.get("after")),
+                              "reason": f"套用{label}", "photo": photo, "status": STATUS_OK})
+
     def mark_undone(self, edit_ids) -> bool:
         changed = False
         for r in self.rows:
