@@ -91,6 +91,12 @@ def main():
         found = service.list_presets("", 50)
         check("list_presets returns presets", found["total"] > 0 and found["shown"] > 0, f"{found['total']} presets")
         plain = [p for p in found["presets"] if not p["has_masks"]]
+        # some presets (e.g. the Lens Blur ones that sort first on newer Lightroom versions) change nothing through the SDK,
+        # so also look at presets found by a search term; the loop below skips the ones that change nothing
+        for term in ("黑白", "复古", "B&W", "Vintage"):
+            for p in service.list_presets(term, 50)["presets"]:
+                if not p["has_masks"] and all(p["id"] != q["id"] for q in plain):
+                    plain.append(p)
         masked = [p for p in found["presets"] if p["has_masks"]]
         check("some presets are plain and can be applied", len(plain) >= 3)
 
@@ -108,20 +114,39 @@ def main():
 
         # each of three presets: apply, look, undo, compare the WHOLE snapshot
         applied = []
-        for preset in plain[:3]:
+        effective = []
+        for preset in plain:
+            if len(applied) == 3:
+                break
             result = service.apply_preset(preset["id"], reason="acceptance")
-            applied.append(result)
             changed_something = result["settings_changed"] > 0
             check(f"preset '{preset['name']}' applied", changed_something or "没有改变" in result["note"], f"{result['settings_changed']} settings changed")
+            if not changed_something:
+                # a preset that changes nothing for this photo leaves no values to restore (restore would say "nothing to restore")
+                continue
+            applied.append(result)
+            effective.append(preset)
             restored = service.restore(result["edit_id"])
             now = bridge.call("snapshot", {"photo": photo_id})["settings"]
             diff = differences(start, now)
             check(f"restore after '{preset['name']}' brings back EVERY setting ({len(start)} keys)", restored["verified"] and not diff, str(diff)[:150])
 
+        # a black-and-white preset (the photo loses its colour keys while it is black and white, so the restore needs two steps on macOS)
+        bw = [p for p in plain if p["name"].startswith(("BW", "PB"))]
+        if bw:
+            result = service.apply_preset(bw[0]["id"], reason="acceptance black and white")
+            restored = service.restore(result["edit_id"])
+            now = bridge.call("snapshot", {"photo": photo_id})["settings"]
+            diff = differences(start, now)
+            check(f"restore after the black-and-white preset '{bw[0]['name']}' brings back EVERY setting", restored["verified"] and not diff, str(diff)[:150])
+        else:
+            print("note: no black-and-white preset found by name (BW*/PB*); that case was not exercised")
+
         # presets and slider edits mixed, then restore_original
-        r1 = service.apply_preset(plain[0]["id"], reason="acceptance mix")
+        check("at least two presets that really change this photo were found", len(effective) >= 2)
+        r1 = service.apply_preset(effective[0]["id"], reason="acceptance mix")
         r2 = service.set_develop({"Exposure2012": start.get("Exposure2012", 0) + 0.3}, reason="acceptance mix")
-        r3 = service.apply_preset(plain[1]["id"], reason="acceptance mix")
+        r3 = service.apply_preset(effective[1]["id"], reason="acceptance mix")
         preview_mid = preview_size(bridge, photo_id)
         original = service.restore_original()
         now = bridge.call("snapshot", {"photo": photo_id})["settings"]
