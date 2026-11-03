@@ -4,13 +4,13 @@
 一个 Lightroom 插件加一个小型 MCP 服务：能看到你选中的照片、读取调整参数，并把预览图和直方图数字交给 AI。
 还能对受限的调整参数做小步修改、整理目录信息，并保存旧值用于还原。
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.12.0-orange)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.13.0-orange)
 
 [English](README.en.md) · [更新日志](CHANGELOG.md) · [安全说明](SECURITY.md) · [参与贡献](CONTRIBUTING.md)
 
 > 🤖 **你是 AI 助手，用户让你看这个仓库？** 请读 [`AI_GUIDE.md`](AI_GUIDE.md)，里面有完整的安装和使用步骤。
 
-> ⚠️ **早期版本（0.12.0）**：只在 Windows 11 + Lightroom Classic 15.2 上测过。安装包已发布但尚未在干净电脑上做过安装/卸载测试（待验证）。与 Adobe 无关联。
+> ⚠️ **早期版本（0.13.0）**：只在 Windows 11 + Lightroom Classic 15.2 上测过。安装包已发布但尚未在干净电脑上做过安装/卸载测试（待验证）。与 Adobe 无关联。
 
 ## ✨ 能做什么
 
@@ -19,7 +19,7 @@
 | `lr_status` | Lightroom 是否连上、版本、当前目录、选中几张 |
 | `lr_list_selected` | 选中的照片：文件名、格式、评分、尺寸、ISO/光圈/快门/焦距/镜头/机身 |
 | `lr_get_develop` | 当前调整参数：曝光、对比度、高光、阴影、白平衡、HSL 等 |
-| `lr_get_preview` | 1024 像素预览（可选 256–2048）**加数字**：亮度、过曝/欠曝比例、冷暖偏向 |
+| `lr_get_preview` | 1024 像素预览（可选 256–2048）**加数字**：亮度、过曝/欠曝比例、冷暖偏向，以及九宫格各区域和"疑似天空的蓝色"的色相、饱和度 |
 | `lr_doctor` | 中文自检：哪里有问题、怎么处理 |
 | `lr_set_develop` | **修改**一张照片的受支持参数，有范围和单次限幅；`preview=true` 返回修改前后两张预览及统计差异 |
 | `lr_review_selected` | 一次查看最多 10 张已选照片的预览与统计，用于对比挑片；不会自动改星级或旗标 |
@@ -29,6 +29,9 @@
 | `lr_batch_set_develop` | 批量：把同样的相对改动加到多张照片（一次最多 10 张）。先预演（什么都不改，返回每张的结果和计划编号），确认后才执行；可一次还原整批 |
 | `lr_list_presets` / `lr_apply_preset` | 查找并套用不带蒙版的开发预设；套用前保存设置，`preview=true` 返回前后对比 |
 | `lr_plan_from_edit` | 从一次已验证的单张滑块修改提取相对改动，先预演到其他照片；确认后用批量工具执行 |
+| `lr_export` | **导出**一张照片成 JPEG（含已做的调整），原始尺寸或指定大小，放到**你在对话里说的位置**；绝不覆盖已有文件，不发给 AI 服务 |
+| `lr_save_version` / `lr_list_versions` / `lr_apply_version` / `lr_delete_version` | **命名版本**：把一张照片现在的样子存成有名字的版本（保存在你电脑上），随时一次回到某个版本，也能用 `lr_restore` 撤销 |
+| `lr_compare` | 把现在的样子和已存的版本并排拼成一张图，附各自的数字和差异 |
 | `lr_list_edits` | 列出 LrMCP 做过的修改（编号、时间、照片、滑块、是否已还原） |
 
 例子：选中一张照片，对 AI 说「看看我选中的这张，曝光有什么问题」。它拿到图片和 `平均亮度 77.6`、`冷暖指数 −9.9%`
@@ -102,6 +105,7 @@ Claude 桌面版暂不自动登记（配置文件位置取决于安装方式）�
 |---|---|
 | 0.1 | 只读：看照片、调整参数、预览、直方图数字、自检 |
 | 0.2–0.11.2 | 受保护的单张修改、目录信息、批量预演、预设与还原；详见上面的工具列表 |
+| 0.13 | 全尺寸导出（到你在对话里说的位置）、命名版本、并排对比、预览数字里的区域分析 |
 | 0.12 | 还原冲突保护、修图前后对比预览、多张照片挑片预览、从已验证的修改生成批量预演（来自贡献者 Galio1991 的 PR） |
 | 后续 | 预设数量滑块、批量套预设、全新 Windows 环境的安装包验收（macOS、Photoshop、Premiere 暂停；蒙版实测不可靠，暂不做） |
 

@@ -1,2 +1,2 @@
 -- Plug-in version (also written in Info.lua; Info.lua cannot require files).
-return "0.12.0"
+return "0.13.0"

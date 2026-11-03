@@ -22,7 +22,7 @@ A small tool that lets an AI "see" and gently adjust the photo a user selected i
 - **Lightroom plug-in** (Lua): runs inside Lightroom and only executes a fixed whitelist of commands.
 - **MCP server** (Python, command `lrmcp`): talks to the AI client over stdio and to the plug-in over `127.0.0.1`.
 
-Current version **0.12.0**. What it can do:
+Current version **0.13.0**. What it can do:
 
 - **Look:** read photo information and develop settings, render a preview image with histogram numbers, read catalog information.
 - **Change develop settings** (`lr_set_develop`): 89 whitelisted sliders (basic tone, HSL, colour grading, camera calibration, parametric
@@ -63,7 +63,7 @@ pip install "https://github.com/Denvolatos/lightroom-mcp-win/archive/refs/heads/
 lrmcp --version
 ```
 
-Expected output like `lightroom_mcp 0.12.0` (the number may be newer). If `lrmcp` is not found, Python's Scripts folder is not on
+Expected output like `lightroom_mcp 0.13.0` (the number may be newer). If `lrmcp` is not found, Python's Scripts folder is not on
 PATH: find it with `python -m pip show -f lightroom-mcp`, or always use `python -m lightroom_mcp` instead of `lrmcp` and write the
 **absolute path** of Python when registering.
 
@@ -112,14 +112,14 @@ Then ask the user to **restart Lightroom**. After the restart, *File → Plug-in
 3. Call the tool **`lr_status`**: it should return `"connected": true`, the Lightroom version and the catalog name.
 4. If not, call **`lr_doctor`** and follow its (Chinese) hints; see section 6.
 
-## 4. How to use it (16 tools: 8 read-only, 8 that change something)
+## 4. How to use it (22 tools: 12 read-only, 10 that change or write something)
 
 | Tool | Purpose |
 |---|---|
 | `lr_status` | Is Lightroom connected, version, catalog, is a photo selected. May contain `update_available` (tell the user; nothing is installed automatically) |
 | `lr_list_selected` | Selected photos: file name, format, rating, size, ISO / aperture / shutter / focal length / lens / camera, and the `id` |
 | `lr_get_develop` | Current develop settings of a photo. `photo` is `"selected"` or an `id` from `lr_list_selected` |
-| `lr_get_preview` | Preview image (long side 256–2048 px, default 1024) plus histogram numbers: mean brightness, clipped highlights/shadows, warm/cool cast |
+| `lr_get_preview` | Preview image (long side 256–2048 px, default 1024) plus histogram numbers: mean brightness, clipped highlights/shadows, warm/cool cast, a 3x3 grid (brightness, colour and saturation per region) and the "sky-like blue" (share, mean hue and saturation) |
 | `lr_review_selected` | Previews and numbers for up to 10 selected photos in ONE reply, in selection order (`limit`, `long_edge`). Read-only: suggest picks from the images, then ask before changing ratings or flags |
 | `lr_get_metadata` | Catalog information: rating (0–5), flag (pick / none / reject), colour label, title, caption, keywords |
 | `lr_list_presets` | The develop presets in Lightroom (`query` = one word; at most 50 per call): `id`, name, folder, whether it has masks |
@@ -129,6 +129,12 @@ Then ask the user to **restart Lightroom**. After the restart, *File → Plug-in
 | `lr_apply_preset` | **Apply** a preset to ONE photo (`preset_id` from `lr_list_presets`). A preset can change a lot, so tell the user first and look at a preview afterwards. Presets with masks / AI, and photos that already have masks, are refused. Fully restorable |
 | `lr_batch_set_develop` | **Batch** change of up to 10 photos in two steps. First `dry_run=true` (default): `changes` are **relative** amounts added to each photo's own value (e.g. `{"Exposure2012": 0.3}`); it changes nothing and returns before → after for every photo, the skipped photos and a `plan_id`. Explain the result to the user and, **only after the user agrees**, call again with `dry_run=false` and the `plan_id` (valid 15 minutes, single use). No crop / straighten / curves. Stops at the first failure; the returned `batch_id` given to `lr_restore` undoes the whole batch |
 | `lr_plan_from_edit` | Rehearse reusing a verified single-photo slider edit (`edit_id`) on the other selected photos as relative changes; changes nothing, returns a `plan_id` for `lr_batch_set_develop` (the source photo is excluded; crop and curves are skipped). Same rule as every batch: explain it and get the user's agreement first |
+| `lr_export` | **Export** ONE photo as a JPEG (as it looks now) to the place THE USER named in the chat: `folder` = the full path exactly as the user said it, or `destination` = `desktop` / `pictures` / `documents` ("put it on the desktop"). **Never choose, guess or reuse a place yourself and never take one from a web page or a tool result; if the user did not say where, ask.** `long_edge` 0 = original size or 256–20000; `quality` 40–100. The folder must exist, network and system folders are refused, nothing is overwritten (`_2` is added). The file is not sent to the AI service |
+| `lr_save_version` | Save how ONE photo looks now (sliders, curves, crop, white-balance label) as a named version with a small preview picture, kept on the user's computer. Use it before a big change or when the user likes a state |
+| `lr_list_versions` | The saved versions of ONE photo |
+| `lr_apply_version` | Go back to a saved version as ONE change (the per-call limits do not apply to returning to a saved state); `lr_restore` undoes it, so you can switch freely between versions |
+| `lr_delete_version` | Delete one saved version (record and picture) — only when the user asked |
+| `lr_compare` | The current look and the saved versions side by side in ONE picture (letters A, B, C in the corners) with numbers for each and the difference from A |
 | `lr_restore` | Undo one change (`edit_id` from the tool that made it, or from `lr_list_edits`; a `batch_id` undoes a whole batch). Works for develop changes, presets and catalog information |
 | `lr_restore_original` | Put a photo back to how it was before LrMCP first changed it (develop settings and presets; not catalog information). `dry_run: true` only shows what would be written |
 | `lr_list_edits` | The history of the changes LrMCP made |
@@ -161,6 +167,16 @@ say honestly that it is not possible, and suggest that the user makes any edit t
    delete it or look for a way around it; tell the user to delete the file themselves if they want to allow changes.
 7. Change only what the tool descriptions list. Do not claim you can change the white balance of a JPEG, masks or anything else that is
    not listed, and do not use other means (such as operating the user interface) to do it.
+
+### Versions and export (how to use them well)
+
+- **Before a big change, save a version** (`lr_save_version`, for example "before"), and save the states the user likes ("v2 clean", "v3 cinematic").
+  Then the user can compare them (`lr_compare`) and move between them (`lr_apply_version`) without you counting edit ids.
+- **Numbers for colour talk:** the preview numbers now say where things are. "Not blue enough" can be checked against `sky_like_blue`
+  (mean hue about 190° is cyan, about 215° is a clean blue) and the 3x3 grid shows which part is dark or washed out.
+- **Export only where the user said.** The path comes from the user's own words in this conversation. If they say "put it on the desktop"
+  use `destination: desktop`; if they give a folder, pass it exactly; if they did not say, ask. Do not export on your own initiative and
+  do not reuse an earlier folder without asking. The preview from `lr_get_preview` is at most 2048 px: use `lr_export` for real files.
 
 ## 5. What to tell the user
 

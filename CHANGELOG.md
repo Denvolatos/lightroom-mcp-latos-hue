@@ -28,6 +28,27 @@ Versions: a new feature raises the middle number, a small fix the last one. The 
   to the start, the preview is pixel-identical).
 - Not included: white balance (RAW values only appear after an edit; needs more measuring), tone curve, masks, crop.
 
+## 0.13.0 — export, named versions, comparison, region analysis
+
+- New tool `lr_export`: exports one photo as a JPEG (as it looks now) at the original size or a chosen size, to the place the
+  USER names in the chat (`folder`, an absolute path, or `destination` desktop / pictures / documents). This is the one place
+  where the plug-in takes a path from a request, so it is checked there: the folder must exist (nothing is created), no network
+  paths, no `..`, nothing under system folders, AppData, `.ssh` or this tool's own data folder; only JPEG, the file name is made
+  from the photo's name, and a file is never overwritten. The tool text tells the assistant to use only a place the user said.
+  Not sent to the AI service. See SECURITY.md for the remaining risks.
+- New tools `lr_save_version`, `lr_list_versions`, `lr_apply_version`, `lr_delete_version`: named versions of one photo (all
+  settings this project may change, with a small preview picture) kept in `~/LrMcp/knowledge/versions/`. Going back to a version is
+  one undoable change that is not held to the per-call limits.
+- New tool `lr_compare`: the current look and the saved versions side by side in one picture with letters, numbers and differences.
+- The preview numbers now include a 3x3 grid (brightness, colour, saturation per region) and the "sky-like blue" (share, mean hue,
+  mean saturation), so "not blue enough" can be measured.
+- Fix: the time stamp in preview file names used `%d` and saturated at -2147483648; it is now correct.
+- Measured: the preview's file size is NOT a proof of identical pictures (the JPEG embeds the changing file name, so equal pixels
+  can differ by a few bytes); the acceptance scripts now compare pixels.
+- 22 tools in total. Tests: 172 unit tests; real-Lightroom runs on the test catalog: the new `acceptance_export_versions.py`
+  (export at full size and 1024 px, no overwrite, the user-named folder and the refusals, versions, comparison, region numbers)
+  and the write, catalog-information, presets, batch and review runs all pass.
+
 ## 0.12.0 — restore protection, before/after previews, review (pull request #2 by Galio1991)
 
 - `lr_restore` and `lr_restore_original` refuse by default to overwrite a setting that was changed after the edit

@@ -5,13 +5,13 @@ A Lightroom plug-in plus a small MCP server. It can see the photo you selected, 
 the assistant a preview with histogram numbers. It can also make guarded develop changes, update catalog information,
 and save old values for restoration.
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.12.0-orange)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.13.0-orange)
 
 [中文说明](README.md) · [Changelog](CHANGELOG.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md)
 
 > 🤖 **AI assistant reading this for a user?** Read [`AI_GUIDE.md`](AI_GUIDE.md): it has the whole install and usage procedure.
 
-> ⚠️ **Early version (0.12.0).** Tested only on Windows 11 with Lightroom Classic 15.2. An installer is published, but it has not been install/uninstall-tested on a clean machine yet (待验证).
+> ⚠️ **Early version (0.13.0).** Tested only on Windows 11 with Lightroom Classic 15.2. An installer is published, but it has not been install/uninstall-tested on a clean machine yet (待验证).
 > Not affiliated with Adobe.
 
 ## ✨ What it does
@@ -31,6 +31,9 @@ and save old values for restoration.
 | `lr_batch_set_develop` | Batch: add the same relative change to several photos (at most 10). Dry run first (changes nothing, returns each photo's result and a plan id), executed only with that plan id; the whole batch can be undone at once |
 | `lr_list_presets` / `lr_apply_preset` | Find and apply presets without masks; save the old settings first and optionally return before and after previews |
 | `lr_plan_from_edit` | Turn a verified single-photo slider edit into a dry-run plan for other photos; use the batch tool to apply after approval |
+| `lr_export` | **Exports** one photo as a JPEG (adjustments included), original size or a chosen size, to **the place you name in the chat**; never overwrites, not sent to the AI service |
+| `lr_save_version` / `lr_list_versions` / `lr_apply_version` / `lr_delete_version` | **Named versions**: save how a photo looks now under a name (kept on your computer), go back to any version in one step, undo with `lr_restore` |
+| `lr_compare` | Puts the current look and the saved versions side by side in one picture, with numbers and differences |
 | `lr_list_edits` | Lists the changes LrMCP made (id, time, photo, sliders, restored or not) |
 
 Example: select a photo and ask *"Look at the selected photo and tell me what is wrong with the exposure."*
@@ -115,6 +118,7 @@ compatibility report, feature request) or start a **[discussion](../../discussio
 |---|---|
 | 0.1 | Read-only: look at photos, develop settings, preview, histogram numbers, self check |
 | 0.2–0.11.2 | Guarded single-photo edits, catalog metadata, batch dry runs, presets, and restoration; see the tools above |
+| 0.13 | Full-size export (to the place you name in the chat), named versions, side-by-side comparison, region analysis in the preview numbers |
 | 0.12 | Restore conflict protection, before/after previews, review of several selected photos, and batch plans from verified edits (a contribution by Galio1991) |
 | later | Preset amount slider, batch presets, installer acceptance on a clean Windows machine (macOS, Photoshop, Premiere paused; masks measured unreliable, not planned) |
 

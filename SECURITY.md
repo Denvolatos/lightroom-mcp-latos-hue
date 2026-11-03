@@ -5,6 +5,8 @@
 ## 这个软件能做什么、不能做什么
 
 - **目录信息的修改：** 星级、旗标、颜色标签、标题、说明、关键词（一次一张照片，限制长度，旧值先存盘，可还原；不能删除关键词本身，也不碰其他元数据）。
+- **导出（`lr_export`）：** 插件原来"从不接收请求里的路径"，导出这一条是例外：为了让你在对话里说放哪就放哪，AI 会把你说的文件夹路径传给插件。插件**不信任**它：必须是本机已存在的文件夹（不替你创建），拒绝网络路径、`..`、系统目录、AppData、`.ssh` 和本工具自己的数据目录；只写 JPEG，文件名由照片名生成，**绝不覆盖已有文件**。工具说明要求 AI 只用你亲口说的路径。**仍然存在的风险：** 如果 AI 被网页里的恶意内容诱导，它可能把照片导到你电脑上某个允许的文件夹；映射成本机盘符的网络盘（比如 Z:）插件分辨不出来。导出的文件不会发给 AI 服务；只读开关不拦导出（导出不改照片）。
+- **命名版本：** 保存在 `C:\Users\<你>\LrMcp\knowledge\versions\`（每张照片一个文件夹，最多 50 个版本），只含本项目能改的参数和一张小预览图，不联网、不上传。回到某个版本是一次普通的修改（受只读开关约束，可撤销）。
 - **多张照片的预览：** `lr_review_selected` 一次把最多 10 张选中照片的预览图发给你正在用的 AI 服务（和单张预览一样，只在本机生成，发给 AI 服务的是图片本身）；只读，不改任何东西。
 - **批量修改的限制：** 一次最多 10 张；必须先预演（预演什么都不改），再用预演返回的一次性编号执行（15 分钟有效）；只做滑块的相对改动，不做裁剪/曲线；遇到第一个失败就停止；每张照片各自存旧值，可单张或整批还原。
 - **预设的还原机制：** 套预设时，整张照片的设置先存盘；还原时插件只接受“照片当前已有、类型相同、在已知范围内”的项，永远不接受蒙版。Lightroom 自己生成的内部值（如 GrainSeed）还原不掉，不影响画面。
@@ -40,6 +42,15 @@
   It cannot edit masks, delete photos, or import/export. Develop changes have range and step limits, and old values are
   saved before a write (`C:\Users\<you>\LrMcp\edits`) for restoration. A **read-only switch** (file
   `C:\Users\<you>\LrMcp\readonly`) makes the server and plug-in refuse every change. Version 0.1 was read-only.
+- **Export (`lr_export`):** the plug-in used to take no path from a request; export is the one exception, so that a photo goes
+  where the user says in the chat: the assistant passes the folder the user named. The plug-in does **not** trust it: it must be an
+  existing local folder (nothing is created), network paths, `..`, system folders, AppData, `.ssh` and this tool's own data folder are
+  refused; only JPEG is written, the file name is made from the photo's name and **nothing is ever overwritten**. The tool text tells the
+  assistant to use only a place the user said. **Remaining risk:** an assistant tricked by malicious web content could export photos
+  into some allowed folder; a network drive mapped to a local letter (such as Z:) cannot be told apart from a local one. Exported files
+  are not sent to the AI service; the read-only switch does not block export (it changes no photo).
+- **Named versions:** kept in `C:\Users\<you>\LrMcp\knowledge\versions\` (one folder per photo, at most 50 versions): only the settings this project may change
+  plus a small preview picture; no network. Going back to a version is an ordinary change (subject to the read-only switch, undoable).
 - Other files it writes: preview JPEGs in `C:\Users\<you>\LrMcp\previews` (never added to your catalog), a token, a
   port/log file and the saved change records, all in `C:\Users\<you>\LrMcp`.
 - **Back up your catalog before using the change tools on real work.** Before restoring, the tools check for later changes
