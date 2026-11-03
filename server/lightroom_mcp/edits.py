@@ -973,6 +973,33 @@ class EditService:
             "undo": f"lr_restore(edit_id=\"{record['edit_id']}\") 回到切换之前的样子。",
         }
 
+    # ---- import (desktop app only; deliberately NOT an MCP tool, the AI cannot call it) ----------------
+    def import_photo(self, path: str) -> dict:
+        """Add one photo file already on this computer to the catalog ("add, do not move"). The plug-in re-checks the path.
+
+        Returns {"status": "imported" | "already" | "uncertain", "already": bool, "photo_id", "name", "message"}.
+        Read-only mode refuses it (ReadOnlyError); a plug-in refusal raises BridgeError; a timeout gives "uncertain".
+        """
+        self.check_writable()
+        if not isinstance(path, str) or not path.strip():
+            raise EditError("请给出要导入的照片文件路径。")
+        encoded = urllib.parse.quote(path, safe="")
+        try:
+            data = self.call("import_photo", {"path": encoded}, timeout=60)
+        except BridgeTimeout as e:
+            return {
+                "status": "uncertain", "already": False, "photo_id": None, "name": Path(path).name,
+                "message": "Lightroom 没有在时限内回复，不确定这张照片有没有被加入目录。请在 Lightroom 里确认（不要急着重试）。",
+                "error": str(e),
+            }
+        already = bool(data.get("already"))
+        name = data.get("name") or Path(path).name
+        return {
+            "status": "already" if already else "imported", "already": already,
+            "photo_id": data.get("id"), "name": name, "photo": data.get("photo"),
+            "message": f"{name} 本来就在目录里，没有重复添加。" if already else f"已把 {name} 添加到目录（没有移动、复制或删除任何文件）。",
+        }
+
     # ---- presets ---------------------------------------------------
     def list_presets(self, query: str = "", limit: int = 30) -> dict:
         words = str(query).split()
