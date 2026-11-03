@@ -169,7 +169,7 @@ class LrService:
             r = self._bridge.call("list_selected", {"limit": max(1, min(int(limit), 20))}, timeout=8)
         except Exception:
             return None
-        photos = [{"id": p.get("id"), "name": p.get("name"), "rating": p.get("rating"), "flag": p.get("flag")}
+        photos = [{"id": p.get("id"), "name": p.get("name"), "rating": p.get("rating") or 0, "flag": p.get("flag") or "none"}
                   for p in (r.get("photos") or []) if isinstance(p, dict) and p.get("id")]
         count = r.get("count")
         return {"count": count if isinstance(count, int) and not isinstance(count, bool) else len(photos),
