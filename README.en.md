@@ -112,6 +112,27 @@ Found a problem, or got it working in another AI app? **[Open an issue](../../is
 compatibility report, feature request) or start a **[discussion](../../discussions)**. The forms ask for the output of
 `lr_doctor`, which makes most problems easy to find. Please never attach photos or catalogs. No usage data is collected.
 
+## 🔮 Coming soon (an idea, not released)
+
+> This is a direction we are thinking about. **It is not released and has no date**; details may change.
+
+We would like to build a **visual photo-retouching app**: open it and do all the editing in one window, without switching between several programs.
+
+![Interface template of the retouching app (fake data, features not done)](docs/images/app-template.png)
+
+*The picture above is only an interface template: the photos and data are fake and the features are not built. The template code is on the [`app` branch](https://github.com/Denvolatos/lightroom-mcp-win/tree/app).*
+
+What we have in mind:
+
+- **Import:** pick a folder on the camera's SD card and copy it into the app's own folder; the originals on the card are not touched; sort into folders or keep it flat.
+- **Three columns:** files on the left, the big picture with before/after in the middle, the chat with the AI and "what this round changed" on the right.
+- **Picking photos:** choose a few photos and let the AI compare them; the result is shown in the app first.
+- **A "ask me step by step" switch:** let the AI just edit during the first rough pass, and have it ask before every step during fine work.
+- **Export:** like Office's "Save as": you pick the place and the format.
+- **Your own presets, favourites and the colour experience your AI learned**, kept only on your own computer.
+
+The principles stay: photos are not uploaded, every step can be undone, each person's own AI learns the colour technique, and we only build the "shell". How it connects to your AI is still being decided.
+
 ## 🗺️ Roadmap
 
 | Version | Plan |
