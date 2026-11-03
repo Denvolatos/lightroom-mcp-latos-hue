@@ -189,3 +189,22 @@ def test_bad_parameters_are_rejected(bridge):
 def test_old_plugin_instance_is_told_to_stop(bridge):
     assert request(bridge, "GET", "/poll", headers={"X-Gen": "200"})[1] == "none"
     assert request(bridge, "GET", "/poll", headers={"X-Gen": "100"})[1] == "stop"
+
+
+def test_second_server_cannot_listen_on_a_port_that_is_in_use(tmp_path):
+    """The one-port-one-server rule holds on every platform (Windows: exclusive bind; macOS: measured, not assumed)."""
+    port = free_port()
+    first = Bridge(port=port, data_dir=tmp_path)
+    first.start()
+    try:
+        second = Bridge(port=port, data_dir=tmp_path / "other")
+        with pytest.raises(BridgeBusy):
+            second.start()
+    finally:
+        first.stop()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_announcement_files_are_private_to_the_current_user(bridge, tmp_path):
+    for path in [bridge.info_file, *([bridge.token_file] if bridge.token_file.exists() else [])]:
+        assert (path.stat().st_mode & 0o777) == 0o600, path
