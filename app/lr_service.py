@@ -211,6 +211,28 @@ class LrService:
                 pass
         return out
 
+    # ---- 导入 ------------------------------------------------------
+    def readonly_error(self) -> str | None:
+        """只读开关（文件或环境变量）开着时返回原因，否则 None。判断沿用 server 的 EditService.check_writable。"""
+        edits_mod, _ = _import_server()
+        svc = self._edits
+        if svc is None:
+            from lightroom_mcp import config
+            svc = edits_mod.EditService(lambda *a, **k: {}, readonly_file=config.READONLY_FILE)
+        try:
+            svc.check_writable()
+        except edits_mod.ReadOnlyError as e:
+            return str(e)
+        return None
+
+    def import_photo(self, path: str) -> dict:
+        """把一个已在本机的照片文件加入 Lightroom 目录（server 的 EditService.import_photo；插件会再校验路径）。
+        异常原样抛出，由 importer.add_to_lightroom 翻成中文：PluginNotConnected / ReadOnlyError / BridgeError / BridgeTimeout 等。"""
+        if not self.start() or self._edits is None:
+            _, bridge_mod = _import_server()
+            raise bridge_mod.PluginNotConnected("无法建立与 Lightroom 的连接。")
+        return self._edits.import_photo(path)
+
     # ---- 撤销 ------------------------------------------------------
     def _run(self, fn) -> dict:
         """统一把异常翻成 {"ok", "conflict", "message"}。"""

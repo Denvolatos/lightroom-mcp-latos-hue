@@ -18,6 +18,7 @@ from confirm_hub import ConfirmHub  # noqa: E402
 from lr_service import LrService  # noqa: E402
 from providers import available_providers, create_provider, is_selectable  # noqa: E402
 import settings as appsettings  # noqa: E402
+from import_service import ImportService  # noqa: E402
 from preview import PreviewManager, PreviewServer, PreviewStore  # noqa: E402
 from ports import STATE_DIR  # noqa: E402
 
@@ -55,6 +56,7 @@ class Api:
         self._preview = PreviewManager(self._lr, PreviewServer(PreviewStore()), self._emit)
         self._preview.set_edge(self._settings.data["preview_edge"])
         self._backend = Backend(self._lr, self._session, self._tracker, self._emit, state_file=None, previews=self._preview)
+        self._import = ImportService(self._settings, self._lr, self._emit)
 
     def _start_background(self) -> None:
         """窗口一出现就预热：Bridge、常驻 claude（含 lightroom_mcp 与确认服务）同时启动，之后每条消息零启动开销。"""
@@ -239,6 +241,56 @@ class Api:
         if r["ok"] and "preview_edge" in changes:
             self._preview.set_edge(r["settings"]["preview_edge"])
         return r
+
+    # ---- 导入 ------------------------------------------------------
+    def choose_source_folder(self) -> dict:
+        """点“导入”：先检查（只读开关等），再弹出系统文件夹对话框，选定后在后台扫描。路径只来自这次点击，不接受页面传入的路径。"""
+        b = self._import.begin()
+        if not b["ok"]:
+            return b
+        if self._window is None:
+            return {"ok": False, "message": ""}
+        kind = getattr(getattr(webview, "FileDialog", None), "FOLDER", None) or webview.FOLDER_DIALOG
+        try:
+            res = self._window.create_file_dialog(kind)
+        except Exception:
+            res = None
+        if not res:
+            return {"ok": False, "message": "", "cancelled": True}
+        r = self._import.set_source(str(res[0]))
+        return {**r, "path": str(res[0])} if r["ok"] else r
+
+    def import_prepare(self, category: str = "") -> dict:
+        return self._import.prepare(category)
+
+    def import_start(self, category: str = "", create_base: bool = False) -> dict:
+        return self._import.start(category, bool(create_base))
+
+    def import_cancel(self) -> dict:
+        return self._import.cancel()
+
+    def import_close(self) -> dict:
+        return self._import.close()
+
+    def import_retry_lr(self) -> dict:
+        return self._import.retry_lr()
+
+    def import_state(self) -> dict:
+        return self._import.state()
+
+    def library_list(self, limit: int = 300) -> dict:
+        return self._import.library(limit)
+
+    def open_library(self) -> dict:
+        """在资源管理器中打开软件文件夹（只打开设置里的软件文件夹，不接受页面传入的路径）。"""
+        base = self._settings.data["base_folder"]
+        if not os.path.isdir(base):
+            return {"ok": False, "message": "软件文件夹尚不存在。完成一次导入后会自动创建，或在设置中更换。"}
+        try:
+            os.startfile(base)          # noqa: S606 - Windows 资源管理器
+        except (OSError, AttributeError) as e:
+            return {"ok": False, "message": f"无法打开文件夹：{e}"}
+        return {"ok": True, "message": ""}
 
     def preview_state(self) -> dict:
         """页面刚加载时取最近一次预览内容（之后靠 onClaudeEvent 的 preview 事件更新）。"""
