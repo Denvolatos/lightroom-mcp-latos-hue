@@ -59,7 +59,7 @@ async def main() -> None:
                 if name not in ALLOWED:
                     return _error("此工具未获授权，未执行。")
                 if name in WRITES and not await asyncio.to_thread(_confirm, name, arguments):
-                    return _error("调整未获确认，未执行。")
+                    return _error("未获用户确认，已视为拒绝，未执行。")
                 return await child.call_tool(name, arguments, read_timeout_seconds=130)
 
             server = Server("lightroom_mcp", on_list_tools=list_tools, on_call_tool=call_tool)
