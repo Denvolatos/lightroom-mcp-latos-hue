@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import sys
 import threading
+import time
 from pathlib import Path
+
+from ports import clean_stale_announcements, note_port_used, port_order
 
 REPO = Path(__file__).resolve().parent.parent
 CONFLICT_MARK = "又发生变化"
@@ -21,35 +24,141 @@ def _import_server():
     return edits, bridge
 
 
+class RemoteBridge:
+    """借用常驻 claude 里 lightroom_mcp 服务的插件通道（见 lr_launcher.start_rpc）：接口与 Bridge 的 call/connected 一致。
+    这样窗口进程不再单独起一个 Bridge，插件只需轮询一个新服务。"""
+
+    def __init__(self, state_file: Path, token: str, alive=lambda: True, max_age: float = 6.0):
+        self.state_file, self.token, self._alive, self.max_age = state_file, token, alive, max_age
+
+    def _state(self) -> dict:
+        import json
+        try:
+            d = json.loads(Path(self.state_file).read_text(encoding="utf-8"))
+            if time.time() - float(d.get("t", 0)) <= self.max_age:
+                return d
+        except (OSError, ValueError, TypeError):
+            pass
+        return {}
+
+    @property
+    def connected(self) -> bool:
+        return bool(self._alive() and self._state().get("connected"))
+
+    @property
+    def plugin_version(self):
+        return self._state().get("plugin_version")
+
+    def call(self, command: str, params: dict | None = None, timeout: float = 30.0) -> dict:
+        import json
+        import urllib.error
+        import urllib.request
+        _, bridge_mod = _import_server()
+        port = self._state().get("rpc_port")
+        if not port or not self._alive():
+            raise bridge_mod.PluginNotConnected("助手正在启动或重建连接，请稍后再试。")
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/call", method="POST",
+            data=json.dumps({"command": command, "params": params or {}, "timeout": timeout}).encode("utf-8"),
+            headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout + 10) as r:
+                reply = json.loads(r.read().decode("utf-8"))
+        except (urllib.error.URLError, OSError, ValueError):
+            raise bridge_mod.PluginNotConnected("无法连接助手后台，请稍后再试。")
+        if reply.get("ok"):
+            return reply.get("data", {})
+        cls = getattr(bridge_mod, str(reply.get("error_type")), None)
+        if cls is None or not (isinstance(cls, type) and issubclass(cls, Exception)):
+            cls = bridge_mod.BridgeError
+        raise cls(reply.get("message", ""))
+
+
 class LrService:
-    def __init__(self, bridge=None, edit_service=None):
+    def __init__(self, bridge=None, edit_service=None, state_file: Path | None = None, rpc_token: str | None = None,
+                 alive=lambda: True, restart_hook=None):
+        """给了 state_file 与 rpc_token：借用常驻 claude 的服务（RemoteBridge），自己不起 Bridge；否则自己起一个。"""
         self._bridge = bridge
         self._edits = edit_service
+        self._remote = (state_file, rpc_token, alive) if state_file is not None and rpc_token else None
+        self._restart_hook = restart_hook
         self._lock = threading.Lock()
         self.start_error: str | None = None
+        self.started_at: float | None = None          # time.monotonic()，最近一次（重新）启动
+        self.restart_count = 0
 
     # ---- 启动 ------------------------------------------------------
     def start(self) -> bool:
+        """启动窗口自己的 Bridge。端口按“最久未使用”优先、先清理失效公告，避免被插件旧轮询任务拖慢发现（见 ports.py）。"""
         with self._lock:
             if self._edits is not None:
                 return True
             try:
+                if self._remote is not None:
+                    edits_mod, _ = _import_server()
+                    self._bridge = RemoteBridge(*self._remote)
+                    self._edits = edits_mod.EditService(self._bridge.call)
+                    self.started_at = time.monotonic()
+                    return True
                 edits_mod, bridge_mod = _import_server()
-                b = bridge_mod.Bridge()
+                clean_stale_announcements()
+                b = bridge_mod.Bridge(ports=port_order())
                 b.start()
+                note_port_used(b.port)
                 self._bridge = b
                 self._edits = edits_mod.EditService(b.call)
+                self.started_at = time.monotonic()
+                self.start_error = None
                 return True
             except Exception as e:   # 端口占满等
                 self.start_error = str(e)
                 return False
 
     def stop(self) -> None:
-        if self._bridge is not None:
+        if self._bridge is not None and self._remote is None:
             try:
                 self._bridge.stop()
             except Exception:
                 pass
+
+    def restart(self) -> bool:
+        """换一个新端口重新登记（插件约 2 秒内重新发现）。用于长时间连不上时的自动恢复，不需要用户重载插件。"""
+        self.restart_count += 1
+        if self._remote is not None:                   # 借用模式：重建的是助手进程（换新端口）
+            if self._restart_hook:
+                self._restart_hook()
+            return True
+        with self._lock:
+            self.stop()
+            self._bridge = None
+            self._edits = None
+        return self.start()
+
+    @property
+    def plugin_version(self) -> str | None:
+        return getattr(self._bridge, "plugin_version", None) if self._bridge is not None else None
+
+    def wait_connected(self, timeout: float) -> bool:
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            if self.connected:
+                return True
+            time.sleep(0.2)
+        return self.connected
+
+    def selected_photo(self) -> dict | None:
+        """当前选中（活动）照片：{"id", "name"}；读不到返回 None。"""
+        if not self.connected:
+            return None
+        try:
+            r = self._bridge.call("list_selected", {"limit": 1}, timeout=8)
+        except Exception:
+            return None
+        pid = r.get("active_id")
+        if not pid:
+            return {"id": None, "name": None}
+        name = next((p.get("name") for p in r.get("photos") or [] if p.get("id") == pid), None)
+        return {"id": pid, "name": name}
 
     @property
     def connected(self) -> bool:

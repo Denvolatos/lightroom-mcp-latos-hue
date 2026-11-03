@@ -33,6 +33,7 @@
   .spacer { flex: 1; }
   .status { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .hint { color: var(--muted); font-size: 12px; max-width: 460px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* ---------- three columns ---------- */
   .main { flex: 1; min-height: 0; display: grid; grid-template-columns: 280px 1fr 360px; }
   .col { min-height: 0; display: flex; flex-direction: column; background: var(--panel); }
@@ -135,8 +136,10 @@
   <button class="btn" onclick="toast('导入：功能开发中')">导入</button>
   <button class="btn" onclick="openExport()">导出</button>
   <button class="btn" onclick="undo()">撤销</button>
+  <button class="btn" id="newchat" onclick="newChat()" style="display:none">新对话</button>
   <span class="spacer"></span>
   <span class="status"><span class="dot" id="lrdot"></span><span id="lrstat">Lightroom 已连接（示例）</span></span>
+  <span class="hint" id="lrhint"></span>
   <span class="status" id="toastbox"></span>
 </div>
 
@@ -240,7 +243,7 @@ function renderFiles(){
 /* ---- center ---- */
 function nApplied(){ return REAL() ? rows.filter(r=>r.status==='已应用').length : steps.length; }
 function renderStage(){
-  const s=$('#stage'); $('#cur').textContent=PHOTOS[sel].n;
+  const s=$('#stage'); $('#cur').textContent=(REAL() && photoName) ? photoName : PHOTOS[sel].n;
   s.className='stage '+mode;
   if(mode==='pair') s.innerHTML=`
     <div class="frame"><div class="pic scene"></div><span class="label">原图</span></div>
@@ -294,7 +297,17 @@ function runPlan(i=0){
 }
 const REAL = () => !!(window.pywebview && window.pywebview.api && window.pywebview.api.send);
 let cur = null, busy = false;   // cur = 正在流式显示的那条 AI 消息
-function setBusy(b){ busy=b; $('#send').disabled=b; $('#inp').disabled=b; $('#stop').style.display=b?'':'none'; }
+let photoName = null;           // 真实模式：Lightroom 当前选中的照片
+const DOTCLR = {connected:'var(--ok)', connecting:'var(--warn)', disconnected:'var(--bad)'};
+function showStatus(s){ $('#lrstat').textContent = s.text; $('#lrdot').style.background = DOTCLR[s.state]||'var(--bad)';
+  $('#lrhint').textContent = s.state==='connected' ? '' : s.hint; $('#lrhint').title = s.hint; }
+function setBusy(b){ busy=b; $('#send').disabled=b; $('#inp').disabled=b; $('#stop').style.display=b?'':'none'; $('#newchat').disabled=b; }
+async function newChat(){
+  if (!REAL() || busy) return;
+  if (!await askDialog('新对话', '将清空当前对话与「本次调整」表格并重置助手会话。照片上已应用的调整不会被撤销，仍可用「还原到原始状态」还原。是否继续？', '新对话')) return;
+  await window.pywebview.api.reset();
+  $('#msgs').innerHTML=''; rows=[]; cur=null; say('请选择照片并输入期望的修图效果。'); renderParams(); renderStage(); toast('已开始新对话');
+}
 function note(t){ const n=document.createElement('div'); n.className='note'; n.textContent=t; $('#msgs').appendChild(n); n.scrollIntoView(); return n; }
 function fmtCost(c){ return (c==null) ? '' : '，估算费用 $'+Number(c).toFixed(3); }
 /* 后端（Python）把每个事件推到这里 */
@@ -314,6 +327,9 @@ window.onClaudeEvent = function(ev){
   else if (ev.type==='tool'){ cur=null; note(ev.label); }
   else if (ev.type==='error'){ cur=null; say(ev.message,'err'); }
   else if (ev.type==='adjust'){ rows=ev.rows; renderParams(); renderStage(); }
+  else if (ev.type==='status'){ showStatus(ev); }
+  else if (ev.type==='photo'){ photoName=ev.name; renderStage(); }
+  else if (ev.type==='connecting'){ cur=null; note(ev.message); }
   else if (ev.type==='confirm'){ cur=null; showConfirm(ev); }
   else if (ev.type==='confirm_done'){ closeConfirm(ev); }
   else if (ev.type==='stopped'){ cur=null; note('已停止'); }
@@ -375,9 +391,9 @@ $('#mask').onclick=e=>{ if(e.target.id==='mask') closeExport(); };
 /* 真实模式：隐藏演示标记，显示 Lightroom 连接状态 */
 if (location.hash !== '#demo') window.addEventListener('pywebviewready', ()=>{
   $('#demobadge').style.display='none';
-  const poll=()=>window.pywebview.api.status().then(s=>{ $('#lrstat').textContent = s.connected?'Lightroom 已连接':'Lightroom 未连接';
-    $('#lrdot').style.background = s.connected?'var(--ok)':'var(--bad)'; });
-  poll(); setInterval(poll, 5000); renderParams(); renderStage(); });
+  $('#newchat').style.display='';
+  const poll=()=>window.pywebview.api.status().then(s=>{ showStatus(s); if (s.photo && s.photo.name && s.photo.name!==photoName){ photoName=s.photo.name; renderStage(); } }).catch(()=>{});
+  poll(); setInterval(poll, 3000); renderParams(); renderStage(); });
 function renderAll(){ renderLeft(); renderFiles(); renderStage(); renderParams(); }
 renderAll();
 /* 截图用：地址后加 #demo 会自动演示一轮 */

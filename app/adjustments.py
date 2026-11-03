@@ -54,6 +54,7 @@ class AdjustmentTracker:
         self.confirm_on = confirm_on
         self.edit_dir = edit_dir
         self.rows: list[dict] = []
+        self.current_photo: str | None = None   # 当前选中照片的 id（由窗口定期读取），用来给新行打标记
         self._calls: dict[str, dict] = {}     # tool_use_id -> {"name","row_ids"}
         self._text = ""                       # 上一次工具调用之后 AI 说的文字
 
@@ -83,11 +84,13 @@ class AdjustmentTracker:
         inp = ev.get("input") or {}
         reason = str(inp.get("reason") or "").strip() or self._text.strip()[:120]
         ids = []
+        target = inp.get("photo")
+        photo = self.current_photo if target in (None, "", "selected") else target
         for key, to in (inp.get("changes") or {}).items():
             rid = f"{tid}:{key}"
             ids.append(rid)
             self.rows.append({"rid": rid, "edit_id": None, "key": key, "label": param_name(key),
-                              "before": "—", "after": fmt_value(to), "reason": reason,
+                              "before": "—", "after": fmt_value(to), "reason": reason, "photo": photo,
                               "status": STATUS_PENDING if self.confirm_on else STATUS_RUNNING})
         self._calls[tid] = {"name": name, "row_ids": ids}
         return bool(ids)
@@ -126,6 +129,7 @@ class AdjustmentTracker:
             before = c.get("before", record.get("before", {}).get(r["key"]))
             after = c.get("after", record.get("after", {}).get(r["key"]))
             r["edit_id"] = data["edit_id"]
+            r["photo"] = data.get("photo_id") or record.get("photo_id") or r.get("photo")
             r["before"] = fmt_value(before)
             r["after"] = fmt_value(after if after is not None else c.get("requested"))
             r["status"] = STATUS_OK if c.get("ok", True) else STATUS_FAILED
@@ -154,5 +158,6 @@ class AdjustmentTracker:
                 r["status"], changed = STATUS_UNDONE, True
         return changed
 
-    def snapshot(self) -> list[dict]:
-        return [dict(r) for r in self.rows]
+    def snapshot(self, photo: str | None = None) -> list[dict]:
+        """photo 给定时只返回这张照片的行（照片未知的行也显示，避免漏掉进行中的调整）；换照片时表格不会混入上一张的记录。"""
+        return [dict(r) for r in self.rows if photo is None or r.get("photo") in (None, photo)]

@@ -3,6 +3,8 @@
 运行：python app/main.py
 """
 import json
+import os
+import secrets
 import sys
 import threading
 from pathlib import Path
@@ -11,9 +13,12 @@ import webview
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from adjustments import AdjustmentTracker  # noqa: E402
+from backend import Backend  # noqa: E402
 from claude_bridge import ClaudeSession  # noqa: E402
 from confirm_hub import ConfirmHub  # noqa: E402
 from lr_service import LrService  # noqa: E402
+from persistent_session import PersistentSession  # noqa: E402
+from ports import STATE_DIR  # noqa: E402
 
 WEB = Path(__file__).resolve().parent / "web" / "index.html"
 
@@ -27,16 +32,39 @@ class Api:
 
     def __init__(self) -> None:
         self._window = None
-        self._session = ClaudeSession()
+        # 默认用常驻会话；设环境变量 LRAPP_PER_TURN=1 可回到“每条消息新启动一次 claude”（用于对比与排查）
+        self._persistent = os.environ.get("LRAPP_PER_TURN") != "1"
         self._busy = False
         self._lock = threading.Lock()
         self._tracker = AdjustmentTracker()
-        self._lr = LrService()
+        state_file = STATE_DIR / "claude_side.json" if self._persistent else None
+        self._rpc_token = secrets.token_urlsafe(24)
+        self._session = PersistentSession(state_file=state_file) if self._persistent else ClaudeSession()
+        # 常驻模式：窗口不单独起 Bridge，借用助手里那个服务的通道（Lightroom 插件同时轮询 3 个以上服务会变慢，见 DEV_NOTES）
+        self._lr = (LrService(state_file=state_file, rpc_token=self._rpc_token, alive=lambda: self._session.alive,
+                              restart_hook=lambda: not self._session.busy and self._session.restart())
+                    if self._persistent else LrService())
         self._hub = ConfirmHub(self._emit, current_values=self._lr.current_values)
         self._hub.start()
+        self._backend = Backend(self._lr, self._session, self._tracker, self._emit, state_file=None)
 
     def _start_background(self) -> None:
-        threading.Thread(target=self._lr.start, daemon=True).start()
+        """窗口一出现就预热：Bridge、常驻 claude（含 lightroom_mcp 与确认服务）同时启动，之后每条消息零启动开销。"""
+        def warm() -> None:
+            self._lr.start()
+        threading.Thread(target=warm, daemon=True).start()
+        if self._persistent:
+            token = self._hub.begin_session()
+            self._session.start({"LRAPP_PORT": str(self._hub.port), "LRAPP_TOKEN": token,
+                                 "LRAPP_RPC_TOKEN": self._rpc_token})
+        self._backend.start()
+
+    def _shutdown(self) -> None:
+        self._backend.stop()
+        if self._persistent:
+            self._session.shutdown()
+        self._hub.stop()
+        self._lr.stop()
 
     def _emit(self, ev: dict) -> None:
         if self._window is None:
@@ -51,14 +79,14 @@ class Api:
         """claude 的事件：先更新“本次调整”数据，再推给页面。"""
         with self._lock:
             changed = self._tracker.observe(ev)
-            rows = self._tracker.snapshot() if changed else None
+            rows = self._backend.rows() if changed else None
         self._emit(ev)
         if rows is not None:
             self._emit({"type": "adjust", "rows": rows})
 
     def _push_rows(self) -> None:
         with self._lock:
-            rows = self._tracker.snapshot()
+            rows = self._backend.rows()
         self._emit({"type": "adjust", "rows": rows})
 
     def send(self, text: str, confirm: bool = True) -> dict:
@@ -71,16 +99,29 @@ class Api:
         confirm = bool(confirm)
         self._tracker.confirm_on = confirm
 
+        self._hub.auto_allow = not confirm          # 逐项确认关：写入类工具由确认服务自动放行（进程参数不变）
+
         def run() -> None:
-            token = self._hub.begin_turn()
-            env = {"LRAPP_PORT": str(self._hub.port), "LRAPP_TOKEN": token}
             try:
-                self._session.send(text, self._on_event, confirm=confirm, extra_env=env)
+                ok, why = self._backend.wait_ready()
+                if not ok:
+                    self._emit({"type": "error", "message": why})
+                    self._emit({"type": "done", "tokens": 0, "cost": None, "text": "", "is_error": True})
+                    return
+                if self._persistent:
+                    self._session.send(text, self._on_event)
+                else:
+                    token = self._hub.begin_turn()
+                    env = {"LRAPP_PORT": str(self._hub.port), "LRAPP_TOKEN": token}
+                    self._session.send(text, self._on_event, confirm=confirm, extra_env=env)
             except Exception as e:  # 兜底：不让后台线程悄悄死掉
                 self._emit({"type": "error", "message": f"程序发生错误：{e}"})
                 self._emit({"type": "done", "tokens": 0, "cost": None, "text": "", "is_error": True})
             finally:
-                self._hub.end_turn()
+                if self._persistent:
+                    self._hub.finish_turn()
+                else:
+                    self._hub.end_turn()
                 self._busy = False
 
         threading.Thread(target=run, daemon=True).start()
@@ -103,7 +144,10 @@ class Api:
         return {"ok": self._hub.answer(cid, bool(allow))}
 
     def status(self) -> dict:
-        return {"connected": self._lr.connected}
+        """真实连接状态（窗口 Bridge + 助手通道），顶栏据此显示“已连接/正在连接/未连接”。"""
+        st = self._backend.status()
+        st["photo"] = self._backend.photo
+        return st
 
     def undo(self, edit_id: str, force: bool = False) -> dict:
         r = self._lr.undo(edit_id, bool(force))
@@ -135,6 +179,7 @@ def main() -> None:
         background_color="#17181b",
     )
     webview.start(api._start_background)
+    api._shutdown()
 
 
 if __name__ == "__main__":
