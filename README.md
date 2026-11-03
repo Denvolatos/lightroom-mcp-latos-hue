@@ -4,13 +4,13 @@
 一个 Lightroom 插件加一个小型 MCP 服务：能看到你选中的照片、读取调整参数，并把预览图和直方图数字交给 AI。
 还能对受限的调整参数做小步修改、整理目录信息，并保存旧值用于还原。
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.11.2-orange)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.12.0-orange)
 
 [English](README.en.md) · [更新日志](CHANGELOG.md) · [安全说明](SECURITY.md) · [参与贡献](CONTRIBUTING.md)
 
 > 🤖 **你是 AI 助手，用户让你看这个仓库？** 请读 [`AI_GUIDE.md`](AI_GUIDE.md)，里面有完整的安装和使用步骤。
 
-> ⚠️ **早期版本（0.11.2）**：只在 Windows 11 + Lightroom Classic 15.2 上测过。安装包已发布但尚未在干净电脑上做过安装/卸载测试（待验证）。与 Adobe 无关联。
+> ⚠️ **早期版本（0.12.0）**：只在 Windows 11 + Lightroom Classic 15.2 上测过。安装包已发布但尚未在干净电脑上做过安装/卸载测试（待验证）。与 Adobe 无关联。
 
 ## ✨ 能做什么
 
@@ -22,13 +22,13 @@
 | `lr_get_preview` | 1024 像素预览（可选 256–2048）**加数字**：亮度、过曝/欠曝比例、冷暖偏向 |
 | `lr_doctor` | 中文自检：哪里有问题、怎么处理 |
 | `lr_set_develop` | **修改**一张照片的受支持参数，有范围和单次限幅；`preview=true` 返回修改前后两张预览及统计差异 |
-| `lr_review_selected`（开发中） | 一次查看最多 10 张已选照片的预览与统计，用于对比挑片；不会自动改星级或旗标 |
+| `lr_review_selected` | 一次查看最多 10 张已选照片的预览与统计，用于对比挑片；不会自动改星级或旗标 |
 | `lr_restore` | 把某一次修改涉及的滑块写回旧值 |
 | `lr_restore_original` | 让照片回到 LrMCP 第一次改它之前的样子（`dry_run` 只显示会做什么） |
 | `lr_get_metadata` / `lr_set_metadata` | 读取和修改目录信息：星级、旗标（留用/排除）、颜色标签、标题、说明文字、关键词；改之前旧值先存盘，可还原 |
 | `lr_batch_set_develop` | 批量：把同样的相对改动加到多张照片（一次最多 10 张）。先预演（什么都不改，返回每张的结果和计划编号），确认后才执行；可一次还原整批 |
 | `lr_list_presets` / `lr_apply_preset` | 查找并套用不带蒙版的开发预设；套用前保存设置，`preview=true` 返回前后对比 |
-| `lr_plan_from_edit`（开发中） | 从一次已验证的单张滑块修改提取相对改动，先预演到其他照片；确认后用批量工具执行 |
+| `lr_plan_from_edit` | 从一次已验证的单张滑块修改提取相对改动，先预演到其他照片；确认后用批量工具执行 |
 | `lr_list_edits` | 列出 LrMCP 做过的修改（编号、时间、照片、滑块、是否已还原） |
 
 例子：选中一张照片，对 AI 说「看看我选中的这张，曝光有什么问题」。它拿到图片和 `平均亮度 77.6`、`冷暖指数 −9.9%`
@@ -43,7 +43,7 @@
 - **只读开关**：创建文件 `C:\Users\<你>\LrMcp\readonly`，所有修改都会被服务端和插件拒绝；删掉文件就恢复。
 - 每次只改一张照片。插件会把所有规则再检查一遍，不信任服务端。
 - 修改会在 Lightroom 的「历史记录」里显示为 `LrMCP <编号>` 步骤。**在真实作品上用之前，请先备份目录（`.lrcat`），并先在测试目录上试。**
-  开发分支的还原工具会检查后续改动；发现冲突时默认拒绝覆盖，需要用户明确确认才可用 `force=true` 继续。
+  还原前会检查这些参数之后有没有被改过（包括你在 Lightroom 里手动改的）；发现冲突就默认拒绝覆盖，要你明确确认后才用 `force=true` 继续。
 
 它会创建的文件：预览图（不会加入你的目录）、口令、日志和保存下来的修改记录，都在 `C:\Users\<你>\LrMcp`。
 
@@ -101,11 +101,11 @@ Claude 桌面版暂不自动登记（配置文件位置取决于安装方式）�
 | 版本 | 计划 |
 |---|---|
 | 0.1 | 只读：看照片、调整参数、预览、直方图数字、自检 |
-| 0.2–0.11.1 | 受保护的单张修改、目录信息、批量预演、预设与还原；详见上面的工具列表 |
-| 当前开发分支 | 冲突保护、修图前后对比、多图挑片预览、从已验证修改生成批量预演 |
-| 后续 | 更多 RAW 格式与全新 Windows 环境的安装包验收；经验证后再考虑批量预设和导出 |
+| 0.2–0.11.2 | 受保护的单张修改、目录信息、批量预演、预设与还原；详见上面的工具列表 |
+| 0.12 | 还原冲突保护、修图前后对比预览、多张照片挑片预览、从已验证的修改生成批量预演（来自贡献者 Galio1991 的 PR） |
+| 后续 | 预设数量滑块、批量套预设、全新 Windows 环境的安装包验收（macOS、Photoshop、Premiere 暂停；蒙版实测不可靠，暂不做） |
 
-在 Lightroom Classic 15.0 的独立测试目录中，iPhone ProRAW DNG 的色温修改与完整还原已通过实机测试。刚导入时如读不到 `Temperature` / `Tint`，先在「修改照片」模块打开照片，再调用工具。
+贡献者反馈：在 Lightroom Classic 15.0 的独立测试目录中，iPhone ProRAW DNG 的色温修改与完整还原通过了实机测试。这是对方的验证，我们没有复现（待验证）。刚导入的 RAW 如读不到 `Temperature` / `Tint`，先在「修改照片」模块打开它再调用工具。
 
 蒙版、AI 功能取决于 Adobe SDK 能提供什么，暂不承诺。
 

@@ -28,6 +28,23 @@ Versions: a new feature raises the middle number, a small fix the last one. The 
   to the start, the preview is pixel-identical).
 - Not included: white balance (RAW values only appear after an edit; needs more measuring), tone curve, masks, crop.
 
+## 0.12.0 — restore protection, before/after previews, review (pull request #2 by Galio1991)
+
+- `lr_restore` and `lr_restore_original` refuse by default to overwrite a setting that was changed after the edit
+  (also by hand in Lightroom), for develop changes, presets, catalog information and batches. `force=true` overwrites after
+  the user has agreed; `lr_restore_original(dry_run=true)` lists the conflicts. Settings that Lightroom rewrites by itself
+  (for example the preset value `LensBlur`) are not counted as conflicts. Restoring an older edit after a newer edit touched
+  the same setting is also a conflict now: undo in reverse order.
+- `preview=true` on `lr_set_develop` and `lr_apply_preset` returns a before and an after preview and the numeric
+  differences (brightness, clipped highlights / shadows, warm-cool index).
+- New tool `lr_review_selected` (read-only): previews and numbers for up to 10 selected photos in one reply, to choose picks.
+- New tool `lr_plan_from_edit` (read-only): turns a verified single-photo slider edit into a dry-run batch plan for the other
+  selected photos (source photo excluded, crop and curves skipped); it is executed with `lr_batch_set_develop` and its plan id.
+- 16 tools in total. Tests: 151 unit tests; real-Lightroom runs on the test catalog: write, catalog information, presets, batch
+  and the new `acceptance_review.py` (multi-photo review, before/after, conflict refusal and `force`, reusing an edit) all pass.
+- The contributor also reports an iPhone ProRAW DNG white-balance edit and restore on Lightroom Classic 15.0; we have not
+  reproduced it (待验证).
+
 ## 0.11.2 — fixes from a contributor (pull request #1 by Galio1991)
 
 - A write that Lightroom applied but whose reply timed out is no longer recorded as "failed": the record is kept as

@@ -22,7 +22,7 @@ A small tool that lets an AI "see" and gently adjust the photo a user selected i
 - **Lightroom plug-in** (Lua): runs inside Lightroom and only executes a fixed whitelist of commands.
 - **MCP server** (Python, command `lrmcp`): talks to the AI client over stdio and to the plug-in over `127.0.0.1`.
 
-Current version **0.11.2**. What it can do:
+Current version **0.12.0**. What it can do:
 
 - **Look:** read photo information and develop settings, render a preview image with histogram numbers, read catalog information.
 - **Change develop settings** (`lr_set_develop`): 89 whitelisted sliders (basic tone, HSL, colour grading, camera calibration, parametric
@@ -63,7 +63,7 @@ pip install "https://github.com/Denvolatos/lightroom-mcp-win/archive/refs/heads/
 lrmcp --version
 ```
 
-Expected output like `lightroom_mcp 0.11.2` (the number may be newer). If `lrmcp` is not found, Python's Scripts folder is not on
+Expected output like `lightroom_mcp 0.12.0` (the number may be newer). If `lrmcp` is not found, Python's Scripts folder is not on
 PATH: find it with `python -m pip show -f lightroom-mcp`, or always use `python -m lightroom_mcp` instead of `lrmcp` and write the
 **absolute path** of Python when registering.
 
@@ -112,7 +112,7 @@ Then ask the user to **restart Lightroom**. After the restart, *File → Plug-in
 3. Call the tool **`lr_status`**: it should return `"connected": true`, the Lightroom version and the catalog name.
 4. If not, call **`lr_doctor`** and follow its (Chinese) hints; see section 6.
 
-## 4. How to use it (14 tools: 7 read-only, 7 that change something)
+## 4. How to use it (16 tools: 8 read-only, 8 that change something)
 
 | Tool | Purpose |
 |---|---|
@@ -120,13 +120,15 @@ Then ask the user to **restart Lightroom**. After the restart, *File → Plug-in
 | `lr_list_selected` | Selected photos: file name, format, rating, size, ISO / aperture / shutter / focal length / lens / camera, and the `id` |
 | `lr_get_develop` | Current develop settings of a photo. `photo` is `"selected"` or an `id` from `lr_list_selected` |
 | `lr_get_preview` | Preview image (long side 256–2048 px, default 1024) plus histogram numbers: mean brightness, clipped highlights/shadows, warm/cool cast |
+| `lr_review_selected` | Previews and numbers for up to 10 selected photos in ONE reply, in selection order (`limit`, `long_edge`). Read-only: suggest picks from the images, then ask before changing ratings or flags |
 | `lr_get_metadata` | Catalog information: rating (0–5), flag (pick / none / reject), colour label, title, caption, keywords |
 | `lr_list_presets` | The develop presets in Lightroom (`query` = one word; at most 50 per call): `id`, name, folder, whether it has masks |
 | `lr_doctor` | Self-check; says in Chinese what is wrong and what to do |
-| `lr_set_develop` | **Change** the settings of ONE photo: `changes` = `{name: TARGET value}`, e.g. `{"Exposure2012": 0.3, "Highlights2012": -20}`; `reason` = one sentence; `preview: true` also returns a preview. The allowed parameters, ranges and per-call limits are in the tool description |
+| `lr_set_develop` | **Change** the settings of ONE photo: `changes` = `{name: TARGET value}`, e.g. `{"Exposure2012": 0.3, "Highlights2012": -20}`; `reason` = one sentence; `preview: true` returns a before and an after preview plus numeric differences (`preview_delta`) — use it to teach what the change did. The allowed parameters, ranges and per-call limits are in the tool description |
 | `lr_set_metadata` | **Change** catalog information of ONE photo; give only what changes: `rating`, `flag`, `color_label`, `title`, `caption`, `add_keywords`, `remove_keywords`. Restorable with `lr_restore` (a keyword created by the change stays in the keyword list). Only when the user clearly asked, especially reject and clearing a title or caption |
 | `lr_apply_preset` | **Apply** a preset to ONE photo (`preset_id` from `lr_list_presets`). A preset can change a lot, so tell the user first and look at a preview afterwards. Presets with masks / AI, and photos that already have masks, are refused. Fully restorable |
 | `lr_batch_set_develop` | **Batch** change of up to 10 photos in two steps. First `dry_run=true` (default): `changes` are **relative** amounts added to each photo's own value (e.g. `{"Exposure2012": 0.3}`); it changes nothing and returns before → after for every photo, the skipped photos and a `plan_id`. Explain the result to the user and, **only after the user agrees**, call again with `dry_run=false` and the `plan_id` (valid 15 minutes, single use). No crop / straighten / curves. Stops at the first failure; the returned `batch_id` given to `lr_restore` undoes the whole batch |
+| `lr_plan_from_edit` | Rehearse reusing a verified single-photo slider edit (`edit_id`) on the other selected photos as relative changes; changes nothing, returns a `plan_id` for `lr_batch_set_develop` (the source photo is excluded; crop and curves are skipped). Same rule as every batch: explain it and get the user's agreement first |
 | `lr_restore` | Undo one change (`edit_id` from the tool that made it, or from `lr_list_edits`; a `batch_id` undoes a whole batch). Works for develop changes, presets and catalog information |
 | `lr_restore_original` | Put a photo back to how it was before LrMCP first changed it (develop settings and presets; not catalog information). `dry_run: true` only shows what would be written |
 | `lr_list_edits` | The history of the changes LrMCP made |
@@ -151,7 +153,7 @@ say honestly that it is not possible, and suggest that the user makes any edit t
    that is too big is refused: do not try to get around them, just use several steps.
 3. **Explain in plain words** what you changed, why, and what the user should see; the user may be a beginner. Quote the returned
    numbers, do not only report parameters.
-4. **Undo if the user is not happy:** `lr_restore` (one change) or `lr_restore_original` (back to the start). If the user changed the
+4. **Undo if the user is not happy:** `lr_restore` (one change) or `lr_restore_original` (back to the start). Restoring refuses by default when a setting was changed afterwards (also by hand in Lightroom): show the user the conflict and use `force=true` only after the user explicitly agrees. Undo in reverse order of the changes to avoid conflicts. If the user changed the
    same setting by hand in the meantime, warn that it will be overwritten.
 5. **The first time the user uses the change tools on their real Lightroom catalog**, remind them to back up the catalog (the `.lrcat`
    file) and suggest trying on a test catalog first.
