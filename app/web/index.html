@@ -96,7 +96,10 @@
   .msgs { flex: 1; min-height: 0; overflow: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
   .msg { padding: 6px 10px; border-radius: 10px; max-width: 92%; user-select: text; }
   .msg.me { align-self: flex-end; background: var(--accent2); }
-  .msg.ai { align-self: flex-start; background: var(--panel2); }
+  .msg.ai { align-self: flex-start; background: var(--panel2); white-space: pre-wrap; }
+  .msg.err { align-self: flex-start; background: #4a2a2a; color: #ffd9d9; }
+  .note { align-self: flex-start; font-size: 12px; color: var(--muted); padding: 0 10px; }
+  .chatbar button:disabled { opacity: .45; cursor: not-allowed; }
   .ask { align-self: stretch; border: 1px solid var(--warn); border-radius: 10px; padding: 8px 10px; background: #2a2414; }
   .ask .row { display: flex; gap: 8px; margin-top: 6px; }
   .chatbar { flex: none; display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--line); }
@@ -169,7 +172,7 @@
     <div class="chat">
       <div class="msgs" id="msgs"><div class="msg ai">你好，选一张照片，告诉我你想要的效果。</div></div>
       <div class="opts"><button class="switch" id="sw" title="打开后，AI 每改一步都先问你"></button><span id="swlabel">逐步询问：关（AI 直接改）</span></div>
-      <div class="chatbar"><input id="inp" placeholder="例如：天空通透一点，整体更震撼" autocomplete="off"><button class="btn primary" id="send">发送</button></div>
+      <div class="chatbar"><input id="inp" placeholder="例如：天空通透一点，整体更震撼" autocomplete="off"><button class="btn primary" id="send">发送</button><button class="btn" id="stop" style="display:none">停止</button></div>
     </div>
   </div>
 </div>
@@ -270,8 +273,32 @@ function runPlan(i=0){
   ok.onclick=()=>{ m.querySelector('.row').remove(); apply(s); runPlan(i+1); };
   no.onclick=()=>{ m.querySelector('.row').remove(); m.append('（已跳过）'); runPlan(i+1); };
 }
-function send(){ const v=$('#inp').value.trim(); if(!v) return; $('#inp').value=''; say(v,'me');
+const REAL = () => !!(window.pywebview && window.pywebview.api && window.pywebview.api.send);
+let cur = null, busy = false;   // cur = 正在流式显示的那条 AI 消息
+function setBusy(b){ busy=b; $('#send').disabled=b; $('#inp').disabled=b; $('#stop').style.display=b?'':'none'; }
+function note(t){ const n=document.createElement('div'); n.className='note'; n.textContent=t; $('#msgs').appendChild(n); n.scrollIntoView(); return n; }
+function fmtCost(c){ return (c==null) ? '' : '，估算 $'+Number(c).toFixed(3); }
+/* 后端（Python）把每个事件推到这里 */
+window.onClaudeEvent = function(ev){
+  if (ev.type==='text'){ if(!cur) cur=say('', 'ai'); cur.textContent+=ev.text; cur.scrollIntoView(); }
+  else if (ev.type==='tool'){ cur=null; note(ev.label); }
+  else if (ev.type==='error'){ cur=null; say(ev.message,'err'); }
+  else if (ev.type==='stopped'){ cur=null; note('已停止。'); }
+  else if (ev.type==='done'){
+    if (!cur && ev.text && !ev.is_error && !$('#msgs').lastChild.classList.contains('ai')) say(ev.text,'ai');
+    cur=null; setBusy(false);
+    if (ev.tokens) note('本轮约 '+ev.tokens.toLocaleString()+' token'+fmtCost(ev.cost)+'（估算，非账单）');
+  }
+};
+function send(){ const v=$('#inp').value.trim(); if(!v || busy) return; $('#inp').value=''; say(v,'me');
+  if (REAL()){
+    setBusy(true); cur=null; note('正在思考…');
+    window.pywebview.api.send(v).then(r=>{ if(r && !r.ok){ say(r.message,'err'); setBusy(false); } })
+      .catch(()=>{ say('没能连上后台，请重新打开程序。','err'); setBusy(false); });
+    return;
+  }
   setTimeout(()=>{ say('好的，我先看一下这张照片，然后分几步改。（这里是假回复，将来由你的 AI 回答）'); setTimeout(()=>runPlan(0),500); },400); }
+$('#stop').onclick=()=>{ if(REAL()) window.pywebview.api.stop(); };
 $('#send').onclick=send; $('#inp').onkeydown=e=>{ if(e.key==='Enter') send(); };
 $('#sw').onclick=()=>{ ask=!ask; $('#sw').classList.toggle('on',ask);
   $('#swlabel').textContent= ask?'逐步询问：开（每步先问你）':'逐步询问：关（AI 直接改）'; };
