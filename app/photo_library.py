@@ -522,7 +522,9 @@ class PhotoLibrary:
                     sel = self._read_lr_selection()
                     if sel is not None:
                         self._adopt(sel[0], sel[1])
-                    return {"ok": False, "status": "failed", "message": err_text(e), "selected": list(self.sel_ids), "active": self.active}
+                    out = {"ok": False, "status": "failed", "message": err_text(e), "selected": list(self.sel_ids), "active": self.active}
+                    self._after_select()
+                    return out
                 status = data.get("status") or ("selected" if data.get("all_selected") else "partial")
                 msg = ""
                 if status == "uncertain":
@@ -540,13 +542,17 @@ class PhotoLibrary:
                 ok = status == "selected" and set(self.sel_ids) >= set(ids)
             finally:
                 self._selecting = False
-        if self.sel_ids and self._on_selected:
-            try:
-                self._on_selected()              # 立即刷新“当前照片”（预览、本次调整等），不等 3 秒轮询
-            except Exception:                    # noqa: BLE001
-                pass
+        self._after_select()
         return {"ok": ok, "status": status, "message": msg, "selected": list(self.sel_ids), "active": self.active,
                 "not_selected": [i for i in (data.get("not_selected") or []) if isinstance(i, str)]}
+
+    def _after_select(self) -> None:
+        """有选区就立即刷新“当前照片”（预览、本次调整等），不等 3 秒轮询。"""
+        if self.sel_ids and self._on_selected:
+            try:
+                self._on_selected()
+            except Exception:                    # noqa: BLE001
+                pass
 
     def _read_lr_selection(self):
         try:
