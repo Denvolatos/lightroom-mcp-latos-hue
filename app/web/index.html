@@ -36,7 +36,7 @@
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
   .hint { color: var(--muted); font-size: 12px; max-width: 460px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* ---------- three columns ---------- */
-  .main { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px 1fr 360px; }
+  .main { flex: 1; min-height: 0; display: grid; grid-template-columns: 340px 1fr 360px; }
   .col { min-height: 0; display: flex; flex-direction: column; background: var(--panel); }
   .col.left { border-right: 1px solid var(--line); }
   .col.right { border-left: 1px solid var(--line); }
@@ -55,7 +55,7 @@
   .star.on { color: var(--warn); }
   .empty { color: var(--muted); font-size: 12px; padding: 4px 8px; }
   /* left: upper tabs area (presets / favourites / experience) 3/5, files 2/5 */
-  .left .upper { flex: 3; min-height: 0; display: flex; flex-direction: column; }
+  .left .upper { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .left .lower { flex: 2; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); }
   .section-title { padding: 8px 12px; color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 8px; flex: none; }
   .folder { padding: 4px 8px; color: var(--muted); font-size: 12px; margin-top: 6px; }
@@ -247,6 +247,50 @@
   .dialog.pk textarea { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; resize: vertical; margin-top: 4px; }
   .dialog.pk .prow label.radio input { margin-right: 4px; }
   .recbtn { text-align: left; }
+  /* ---------- 图库（左栏下方） ---------- */
+  .galhead { display: flex; align-items: center; gap: 6px; padding: 8px 10px 4px; flex: none; }
+  .galtitle { font-weight: 600; }
+  .galtools { display: flex; gap: 6px; padding: 2px 10px 6px; flex: none; }
+  .galtools input[type=text] { flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; font: inherit; font-size: 12px; user-select: text; }
+  .galtools select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; font: inherit; font-size: 12px; }
+  .galbar { flex: none; padding: 0 10px 4px; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+  .galbar .gline { display: flex; align-items: center; gap: 8px; }
+  .galbar .gline .gsel { color: var(--text); font-variant-numeric: tabular-nums; }
+  .galbar .gwarn { color: var(--warn); }
+  .galbar .gbox { border: 1px solid var(--line); background: var(--panel2); border-radius: 6px; padding: 5px 8px; }
+  .galbar .gbox .bar { margin: 6px 0 2px; }
+  .galmsg { flex: none; padding: 0 10px; font-size: 12px; color: var(--warn); }
+  .galmsg:empty { display: none; }
+  .galmsg.bad { color: var(--bad); } .galmsg { margin-bottom: 4px; }
+  .galscroll { flex: 1; min-height: 0; overflow: auto; padding: 0 10px 10px; outline: none; }
+  .galscroll .gempty { color: var(--muted); font-size: 12px; padding: 10px 2px; line-height: 1.7; }
+  .galscroll .gempty .gpath { user-select: text; word-break: break-all; margin: 6px 0; color: var(--text); opacity: .85; }
+  .ghead { display: flex; gap: 6px; align-items: center; padding: 6px 2px 4px; cursor: pointer; font-size: 12px; color: var(--muted); position: sticky; top: 0; background: var(--panel); z-index: 3; }
+  .ghead:hover { color: var(--text); }
+  .ghead .gn { color: var(--text); } .ghead .gc { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .ggrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; padding-bottom: 6px; }
+  .ggrid.hide { display: none; }
+  .cell { position: relative; border: 2px solid transparent; border-radius: 6px; padding: 0; cursor: pointer; background: var(--panel2); min-width: 0; }
+  .cell:hover { border-color: #454b53; }
+  .cell.sel { border-color: var(--accent2); background: #1d2a3d; }
+  .cell.act { border-color: #9cc7ff; box-shadow: 0 0 0 2px rgba(76,154,255,.75); }
+  .cell .timg { position: relative; aspect-ratio: 4 / 3; border-radius: 4px 4px 0 0; overflow: hidden; background: #0f1012; display: flex; align-items: center; justify-content: center; }
+  .cell .timg img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; }
+  .cell .timg.load::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 20%, rgba(255,255,255,.07) 50%, transparent 80%); background-size: 200% 100%; animation: shim 1.3s linear infinite; }
+  @keyframes shim { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  .cell .timg .ph2 { font-size: 11px; color: var(--muted); text-align: center; padding: 0 4px; line-height: 1.3; }
+  .cell .timg .retry { font-size: 11px; padding: 0 8px; margin-top: 3px; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; }
+  .cell .timg.fail { flex-direction: column; }
+  .cell .fmt { position: absolute; left: 3px; top: 3px; font-size: 10px; line-height: 14px; padding: 0 4px; border-radius: 3px; background: rgba(0,0,0,.65); color: #dfe3e8; letter-spacing: .3px; }
+  .cell .vc { position: absolute; right: 3px; top: 3px; font-size: 10px; line-height: 14px; padding: 0 4px; border-radius: 3px; background: rgba(0,0,0,.65); color: #dfe3e8; }
+  .cell .meta { position: absolute; right: 3px; bottom: 3px; display: flex; gap: 3px; align-items: center; font-size: 10px; line-height: 14px; }
+  .cell .meta .stars { background: rgba(0,0,0,.65); color: var(--warn); padding: 0 3px; border-radius: 3px; letter-spacing: -1px; }
+  .cell .meta .flag { padding: 0 4px; border-radius: 3px; background: rgba(0,0,0,.65); }
+  .cell .meta .flag.pick { color: var(--ok); } .cell .meta .flag.reject { color: var(--bad); }
+  .cell .tag { position: absolute; left: 3px; bottom: 3px; font-size: 10px; line-height: 14px; padding: 0 4px; border-radius: 3px; background: rgba(60,45,10,.9); color: var(--warn); }
+  .cell .tag.bad { background: rgba(70,20,30,.92); color: #ff8aa6; }
+  .cell .cname { font-size: 11px; padding: 2px 4px 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+  .cell.na .cname { color: var(--muted); }
   ::-webkit-scrollbar { width: 8px; height: 8px; } ::-webkit-scrollbar-thumb { background: #3a3f46; border-radius: 4px; }
 </style>
 </head>
@@ -277,16 +321,16 @@
       </div>
       <div class="pane" id="lpane"></div>
     </div>
-    <div class="lower">
-      <div class="section-title">文件 <span class="spacer"></span>
-        <button class="btn small" id="newcat" onclick="toast('新建分类：功能开发中')">新建分类</button></div>
-      <div class="pane" id="files" style="flex:none;max-height:36%"></div>
-      <div id="libwrap" style="display:none;flex:1;min-height:0;flex-direction:column;border-top:1px solid var(--line)">
-        <div class="libhead"><span id="libtitle">软件文件夹</span><span class="spacer"></span>
-          <button class="btn small" id="libref" title="重新读取软件文件夹">刷新</button>
-          <button class="btn small" id="libopen" title="在资源管理器中打开软件文件夹">打开文件夹</button></div>
-        <div class="pane" id="lib" style="flex:1"></div>
-      </div>
+    <div class="lower" id="gal">
+      <div class="galhead"><span class="galtitle" id="gal_title">图库</span><span class="spacer"></span>
+        <button class="btn small" id="gal_refresh" title="重新读取软件文件夹和 Lightroom 目录">刷新</button>
+        <button class="btn small" id="gal_open" title="在资源管理器中打开软件文件夹">打开文件夹</button></div>
+      <div class="galtools"><input type="text" id="gal_q" placeholder="搜索文件名" maxlength="60" autocomplete="off">
+        <select id="gal_sort" title="排序"><option value="name">按文件名</option><option value="time">按拍摄时间</option></select>
+        <select id="gal_filter" title="筛选"><option value="all">全部</option><option value="rated">已评星</option><option value="pick">留用</option><option value="new">尚未加入</option></select></div>
+      <div class="galbar" id="gal_bar"></div>
+      <div class="galmsg" id="gal_msg"></div>
+      <div class="galscroll" id="gal_scroll" tabindex="0"></div>
     </div>
   </div>
 
@@ -669,41 +713,9 @@ function onRecordDone(ev){
 
 
 /* ---- files ---- */
-let SEL = {count:0, photos:[], active_id:null};
-const SEL_SHOW = 24;
+let SEL = {count:0, photos:[], active_id:null};      // Lightroom 当前选中的照片（最多前 20 张）；AI 挑片按钮与预设套用用它判断是否有选中
 function selSig(){ return SEL.count+'|'+SEL.active_id+'|'+SEL.photos.map(p=>p.id).join(','); }
-function renderFilesReal(){   // 真实模式：上方显示 Lightroom 当前选中的全部照片（名字列表），下方是软件文件夹的只读目录
-  const box=$('#files'), p=pv&&pv.photo, ok=pv&&pv.state==='ok', key=(p&&p.name||'')+'|'+(ok?pv.current.url:'')+'|'+selSig()+'|'+((LB.fav&&LB.fav.photo_fav)?'F':'-');
-  $('#libwrap').style.display='flex'; $('#newcat').style.display='none';
-  updatePickBtn();
-  if (box.dataset.k===key) return; box.dataset.k=key;
-  const n = SEL.count, list = SEL.photos.slice(0, SEL_SHOW), more = n - list.length;
-  const act = `background:var(--panel2);border-color:var(--accent)`;
-  const thumb = (q)=> (ok && p && p.name===q) ? `<img class="thumb" style="object-fit:cover" src="${esc(pv.current.url)}" alt="">` : '<div class="thumb" style="background:var(--bg)"></div>';
-  let h = '<div class="folder" style="margin-top:0">当前选中'+(n?'（'+n+' 张）':'')+'</div>';
-  if (!n && !(p&&p.name)) h += '<div class="empty">Lightroom 中未选中照片</div>';
-  else if (!n) h += `<div class="list-item" style="${act}">${thumb(p.name)}<span class="name">${esc(p.name)}</span></div>`;
-  else {
-    list.forEach(q=>{
-      h += q.id===SEL.active_id ? `<div class="list-item" style="${act}">${thumb(q.name)}<span class="name">${esc(q.name||'（未命名）')}</span>${starHtml(LB.fav&&LB.fav.photo_fav, 'data-pf="1"')}</div>`
-               : `<div class="list-item" style="padding:3px 8px"><span class="name" style="font-size:13px">${esc(q.name||'（未命名）')}</span></div>`; });
-    if (more>0) h += `<div class="empty">另有 ${more} 张</div>`;
-  }
-  box.innerHTML = h;
-  box.querySelectorAll('.star[data-pf]').forEach(e=>e.onclick=async ev=>{ ev.stopPropagation(); const r = await lapi().lib_fav_toggle('photo','',''); if (!r.ok) toast(r.message||'无法收藏'); loadLib('f'); });
-}
-function renderFiles(){
-  if (REAL()) return renderFilesReal();
-  $('#libwrap').style.display='none'; $('#newcat').style.display='';
-  const box=$('#files'); box.innerHTML=''; box.dataset.k=''; let last='';
-  PHOTOS.forEach((p,i)=>{
-    if(p.f!==last){ last=p.f; box.insertAdjacentHTML('beforeend',`<div class="folder">📁 ${p.f}</div>`); }
-    const d=document.createElement('div'); d.className='list-item'; if(i===sel) d.style.background='var(--panel2)', d.style.borderColor='var(--accent)';
-    d.innerHTML=`<div class="thumb" style="background:linear-gradient(160deg,${p.c},#2b3138)"></div><span class="name">${p.n}</span><span class="star ${fav.has(i)?'on':''}">★</span>`;
-    d.querySelector('.star').onclick=e=>{e.stopPropagation(); fav.has(i)?fav.delete(i):fav.add(i); renderFiles(); if(ltab==='fav') renderLeft();};
-    d.onclick=()=>{ sel=i; steps=[]; history=[]; renderAll(); };
-    box.appendChild(d); });
-}
+function renderFiles(){ if (REAL()) { updatePickBtn(); return; } loadGallery(); }     // 真实模式的图库由 loadGallery 与图库事件驱动
 
 /* ---- center ---- */
 function nApplied(){ return REAL() ? rows.filter(r=>r.status==='已应用').length : steps.length; }
@@ -728,7 +740,7 @@ function renderStage(){
     else { s.innerHTML=frameHTML('fi',PH_INITIAL,PH_INITIAL_TIP)+frameHTML('fc','当前'); s.ondblclick=toggleZoom; }
   }
   $('#pvctl').style.display = real ? 'flex' : 'none';
-  if (real) renderFilesReal();
+  if (real) updatePickBtn();
   if (kind==='demo'){ $('#cur').textContent='界面演示 · 示例画面，非真实照片';
     s.children[1].querySelector('.scene').classList.toggle('after', !!nApplied());
     s.children[1].querySelector('.note').textContent = nApplied()?'已调整 '+nApplied()+' 项':'暂无调整'; $('#infobar').innerHTML=''; return; }
@@ -833,7 +845,8 @@ window.onClaudeEvent = function(ev){
   else if (ev.type==='stopped'){ cur=null; note('已停止'); }
   else if (ev.type && ev.type.indexOf('import_')===0){ onImportEvent(ev); }
   else if (ev.type && ev.type.indexOf('export_')===0){ onExportEvent(ev); }
-  else if (ev.type==='selection'){ SEL = {count:ev.count, photos:ev.photos||[], active_id:ev.active_id}; renderFilesReal(); }
+  else if (ev.type==='selection'){ SEL = {count:ev.count, photos:ev.photos||[], active_id:ev.active_id}; updatePickBtn(); }
+  else if (ev.type && ev.type.indexOf('library_')===0){ onLibraryEvent(ev); }
   else if (ev.type && ev.type.indexOf('pick_')===0){ onPickEvent(ev); }
   else if (ev.type==='record_done'){ onRecordDone(ev); }
   else if (ev.type==='notes_context'){ cur=null; note('已将 '+ev.used+' 条经验作为参考资料提供给 AI'+(ev.truncated?'（共 '+ev.eligible+' 条参与对话，已选取最近修改的 '+ev.used+' 条）':'')+'。'); }
@@ -1095,7 +1108,6 @@ function imResult(ev){
     ${rows?`<div class="plist"><table><thead><tr><th>文件</th><th>环节</th><th>原因</th></tr></thead><tbody>${rows}</tbody></table>${ev.problems_more?`<div class="mute">另有 ${ev.problems_more} 项未列出。</div>`:''}</div>`:''}`,
     [ev.pending_retry?{label:'重新尝试加入 Lightroom', onclick:async()=>{ const r=await window.pywebview.api.import_retry_lr(); if(!r.ok) await infoDialog('无法重新加入', r.message); else { IM.stage='retry'; IM.pstage=null; } }}:null,
      {label:'关闭', cls:'primary', onclick:async()=>{ await window.pywebview.api.import_close(); imClose(); }}].filter(Boolean));
-  loadLibrary();
 }
 function onImportEvent(ev){
   if (ev.type==='import_scan'){
@@ -1286,30 +1298,209 @@ function onPickEvent(ev){
 }
 $('#pmask').onclick=e=>{ if(e.target.id==='pmask' && (PK.stage==='form'||PK.stage==='load'||PK.stage==='error')) pkFinishClose(); };
 
-/* ---- 软件文件夹（只读目录） ---- */
-let LIB = null, libOpen = {}, libSel = null;
-async function loadLibrary(){
-  if (!REAL()) return;
-  try { LIB = await window.pywebview.api.library_list(200); } catch(e){ return; }
-  renderLibrary();
+/* ---- 图库（软件内浏览与选择照片；Lightroom 只是后台引擎）---- */
+const GAL_MAX_SEL = 50;
+const G = {st:null, byId:{}, thumbs:{}, failed:{}, sel:[], active:null, anchor:null, q:'', sort:'name', filter:'all', collapsed:{},
+  order:[], cells:new Map(), vis:new Set(), busySel:false, wantSel:null, io:null, reqTimer:null, loadTimer:null, demo:false};
+const gapi = () => window.pywebview.api;
+function gmsg(t, bad){ const m=$('#gal_msg'); m.textContent=t||''; m.classList.toggle('bad', !!bad); }
+function galDemoState(){
+  const stars=[3,0,1,0,2,0], flags=['pick','none','none','reject','none','none'];
+  return {ok:true, state:'ready', message:'', base:'示例', base_exists:true, in_catalog:true, lr_connected:true, total:PHOTOS.length, limit:2000, truncated:false,
+    not_added:0, missing:0, thumbs:{}, failed:{}, selection:{ids:[], active:null}, add:null,
+    photos:PHOTOS.map((p,i)=>({id:'demo-'+i, name:p.n, group:p.f, format:'JPG', rating:stars[i], flag:flags[i], captured:'2026-01-0'+(i+1), w:6000, h:4000, vc:false, added:true, missing:false, color:p.c}))};
 }
-function renderLibrary(){
-  const box=$('#lib'); if(!LIB){ box.innerHTML=''; return; }
-  $('#libtitle').textContent='软件文件夹'+(LIB.exists?`（${LIB.total} 张）`:'');
-  if (!LIB.exists){ box.innerHTML=`<div class="empty">软件文件夹尚不存在。完成一次导入后会自动创建。</div><div class="empty" style="user-select:text">${esc(LIB.base)}</div>`; return; }
-  if (!LIB.total){ box.innerHTML=`<div class="empty">软件文件夹中暂无照片。</div><div class="empty" style="user-select:text">${esc(LIB.base)}</div>`; return; }
+async function loadGallery(){
+  if (!REAL()){ G.demo=true; G.st=galDemoState(); afterState(); return; }
+  G.demo=false;
+  let st; try { st = await gapi().library_state(); } catch(e){ st = {ok:true, state:'error', message:'无法读取图库，请点击“刷新”重试。', photos:[], thumbs:{}, failed:{}, selection:{ids:[],active:null}, add:null, total:0}; }
+  G.st = st; G.thumbs = Object.assign({}, st.thumbs||{}); G.failed = Object.assign({}, st.failed||{});
+  if (!G.busySel){ G.sel = (st.selection&&st.selection.ids)||[]; G.active = (st.selection&&st.selection.active)||null; }
+  afterState();
+}
+function afterState(){
+  G.byId = {}; (G.st.photos||[]).forEach(p=>G.byId[p.id]=p);
+  G.sel = G.sel.filter(i=>G.byId[i]); if (!G.byId[G.active]) G.active = G.sel.length ? G.sel[G.sel.length-1] : null;
+  buildGallery();
+}
+function galVisible(){
+  const q = G.q.trim().toLowerCase(), f = G.filter;
+  return (G.st.photos||[]).filter(p=> (!q || p.name.toLowerCase().indexOf(q)>=0) &&
+    (f==='all' || (f==='rated' && (p.rating||0)>=1) || (f==='pick' && p.flag==='pick') || (f==='new' && !p.added)));
+}
+function galCmp(a,b){
+  const k = p => G.sort==='time' ? [p.captured?0:1, String(p.captured||''), p.name.toLowerCase()] : [p.name.toLowerCase()];
+  const x=k(a), y=k(b); for (let i=0;i<x.length;i++){ if (x[i]<y[i]) return -1; if (x[i]>y[i]) return 1; } return 0;
+}
+function galGroups(list){
+  const g = {}; list.forEach(p=>{ (g[p.group]=g[p.group]||[]).push(p); });
+  const root = '（未分类）';
+  return Object.keys(g).sort((a,b)=> ((a===root?0:1)-(b===root?0:1)) || a.toLowerCase().localeCompare(b.toLowerCase()))
+    .map(n=>({name:n, photos:g[n].sort(galCmp)}));
+}
+function timgState(p){
+  const url = G.thumbs[p.id], bad = G.failed[p.id];
+  if (G.demo) return {cls:'timg', style:` style="background:linear-gradient(160deg,${esc(p.color||'#667')},#2b3138)"`, inner:''};
+  if (url) return {cls:'timg', style:'', inner:`<img src="${esc(url)}" alt="" draggable="false" onerror="galImgErr(this)">`};
+  if (!p.added) return {cls:'timg na', style:'', inner:`<span class="ph2">${esc(p.format)}</span>`};
+  if (bad) return {cls:'timg fail', style:'', inner:`<span class="ph2" title="${esc(bad)}">读取失败</span><button class="retry" data-id="${esc(p.id)}">重试</button>`};
+  return {cls:'timg load', style:'', inner:''};
+}
+function cellInner(p){
+  const t = timgState(p);
+  const meta = ((p.rating||0)>0 ? `<span class="stars" title="${p.rating} 星">${'★'.repeat(Math.min(5,p.rating))}</span>` : '') +
+    (p.flag==='pick' ? '<span class="flag pick" title="留用">留用</span>' : (p.flag==='reject' ? '<span class="flag reject" title="排除">排除</span>' : ''));
+  const tag = !p.added ? '<span class="tag" title="照片在软件文件夹里，但还没有加入 Lightroom 目录">尚未加入</span>'
+    : (p.missing ? '<span class="tag bad" title="目录里有记录，但磁盘上找不到该文件">文件缺失</span>' : '');
+  return `<div class="${t.cls}"${t.style}>${t.inner}<span class="fmt">${esc(p.format)}</span>${p.vc?'<span class="vc">副本</span>':''}${tag}${meta?`<span class="meta">${meta}</span>`:''}</div><div class="cname">${esc(p.name)}</div>`;
+}
+function galImgErr(img){ const c=img.closest('.cell'); if (!c) return; const id=c.dataset.id; delete G.thumbs[id]; G.failed[id]='缩略图无法显示'; refreshCell(id); }
+function cellHtml(p){
+  return `<div class="cell${p.added?'':' na'}" data-id="${esc(p.id)}" title="${esc(p.name)}${p.captured?'　'+esc(p.captured):''}">${cellInner(p)}</div>`;
+}
+function refreshCell(id){ const el=G.cells.get(id), p=G.byId[id]; if (!el||!p) return; el.className='cell'+(p.added?'':' na'); el.innerHTML=cellInner(p); applySelClass(el,id); }
+function applySelClass(el,id){ el.classList.toggle('sel', G.sel.indexOf(id)>=0); el.classList.toggle('act', id===G.active); }
+function applySelClasses(){ G.cells.forEach((el,id)=>applySelClass(el,id)); }
+function buildGallery(){
+  const box=$('#gal_scroll'), st=G.st, top=box.scrollTop;
+  if (G.io){ G.io.disconnect(); } G.cells.clear(); G.vis.clear(); G.order=[];
+  $('#gal_title').textContent = '图库' + (st.total ? `（${st.total} 张）` : '') + (st.state==='loading' && st.total ? '　正在刷新…' : '');
   let h='';
-  LIB.groups.forEach(g=>{ const open = libOpen[g.name]!==false;
-    h+=`<div class="libgrp" data-g="${esc(g.name)}"><span>${open?'▾':'▸'}</span><span>${esc(g.name)}</span><span class="cnt">${g.count}</span></div>`;
-    if (open) g.files.forEach(f=>{ h+=`<div class="libfile${libSel&&libSel.g===g.name&&libSel.n===f.name?' on':''}" data-g="${esc(g.name)}" data-n="${esc(f.name)}" data-s="${f.size}"><span>${esc(f.name)}</span><span class="sz">${fmtSize(f.size)}</span></div>`; }); });
-  if (LIB.more>0) h+=`<div class="empty">仅显示前 ${LIB.shown} 项，另有 ${LIB.more} 项未显示。</div>`;
-  if (libSel) h+=`<div class="libinfo">${esc(libSel.n)} · ${fmtSize(libSel.s)}<br>位置：${esc(libSel.g==='（未分类）'?LIB.base:LIB.base+'\\'+libSel.g)}<br>软件暂不能在 Lightroom 中选中该照片，请在 Lightroom 中选择照片。</div>`;
-  box.innerHTML=h;
-  box.querySelectorAll('.libgrp').forEach(e=>e.onclick=()=>{ libOpen[e.dataset.g] = libOpen[e.dataset.g]===false; renderLibrary(); });
-  box.querySelectorAll('.libfile').forEach(e=>e.onclick=()=>{ libSel={g:e.dataset.g,n:e.dataset.n,s:Number(e.dataset.s)}; renderLibrary(); });
+  if (st.state==='idle' || (st.state==='loading' && !(st.photos||[]).length)){ h = `<div class="gempty"><span class="spin"></span>正在读取图库…</div>`; }
+  else if (st.state==='error'){ h = `<div class="gempty" style="color:var(--bad)">${esc(st.message||'无法读取图库。')}</div>`; }
+  else if (!st.total){
+    h = `<div class="gempty">软件文件夹中还没有照片。请点击“导入”从存储卡复制照片，或将照片放入软件文件夹后点击“加入 Lightroom”。` +
+      (st.base_exists ? '' : `<br>软件文件夹尚不存在，完成一次导入后会自动创建。`) +
+      `<div class="gpath">${esc(st.base)}</div><button class="btn small" id="gal_open2">在资源管理器中打开</button></div>`;
+  } else {
+    const list = galVisible();
+    if (!list.length) h = `<div class="gempty">没有符合条件的照片。</div>`;
+    galGroups(list).forEach(g=>{
+      const closed = !!G.collapsed[g.name];
+      h += `<div class="ghead" data-g="${esc(g.name)}"><span>${closed?'▸':'▾'}</span><span class="gn">${esc(g.name)}</span><span class="gc">${g.photos.length}</span></div>`;
+      h += `<div class="ggrid${closed?' hide':''}">` + g.photos.map(cellHtml).join('') + `</div>`;
+      if (!closed) g.photos.forEach(p=>G.order.push(p.id));
+    });
+  }
+  box.innerHTML = h; box.scrollTop = top;
+  box.querySelectorAll('.cell').forEach(el=>{ G.cells.set(el.dataset.id, el); applySelClass(el, el.dataset.id); });
+  const o2=$('#gal_open2'); if (o2) o2.onclick=openBaseFolder;
+  if (!G.demo && 'IntersectionObserver' in window){
+    G.io = new IntersectionObserver(es=>{ es.forEach(e=>{ const id=e.target.dataset.id; if (e.isIntersecting) G.vis.add(id); else G.vis.delete(id); }); scheduleThumbs(); },
+      {root:box, rootMargin:'240px'});
+    G.cells.forEach((el,id)=>{ if (!el.parentElement.classList.contains('hide')) G.io.observe(el); });
+  }
+  renderBar();
 }
-$('#libref').onclick=()=>{ libSel=null; loadLibrary(); };
-$('#libopen').onclick=async()=>{ const r=await window.pywebview.api.open_library(); if(!r.ok) toast(r.message); };
+function scheduleThumbs(){ clearTimeout(G.reqTimer); G.reqTimer=setTimeout(()=>requestThumbs(false), 80); }
+async function requestThumbs(retry){
+  if (G.demo || !REAL()) return;
+  const ids=[...G.vis].filter(i=>G.byId[i] && G.byId[i].added).slice(0,120); if (!ids.length) return;
+  let r; try { r = await gapi().library_thumbnails(ids, !!retry); } catch(e){ return; }
+  if (!r || !r.ok){ if (r && r.message) gmsg(r.message, true); return; }
+  applyThumbs(Object.entries(r.thumbs||{}).map(([id,v])=>Object.assign({id}, v)));
+}
+function applyThumbs(items){
+  items.forEach(it=>{ if (!G.byId[it.id]) return;
+    if (it.url){ if (G.thumbs[it.id]!==it.url){ G.thumbs[it.id]=it.url; delete G.failed[it.id]; refreshCell(it.id); } }
+    else if (it.error && it.error.indexOf('尚未加入')<0){ if (G.failed[it.id]!==it.error){ delete G.thumbs[it.id]; G.failed[it.id]=it.error; refreshCell(it.id); } } });
+}
+/* ---- 顶部：已选、清除、加入 Lightroom ---- */
+function renderBar(){
+  const st=G.st, bar=$('#gal_bar'); if (!st || st.state==='error' || st.state==='idle' || !(st.photos||[]).length){ bar.innerHTML=''; return; }
+  const n=G.sel.length;
+  let h = `<div class="gline"><span class="gsel">已选 ${n} 张</span><button class="btn small" id="gal_clear" ${n?'':'disabled'}>清除选择</button></div>`;
+  const add=st.add, na=st.not_added||0;
+  if (add && add.state==='running'){
+    const pct=add.n?Math.round(100*add.i/add.n):0;
+    h += `<div class="gbox"><div>正在加入 Lightroom：第 ${Math.min(add.i+1,add.n)}/${add.n} 张　${esc(add.name||'')}</div><div class="bar"><i style="width:${pct}%"></i></div><button class="btn small" id="gal_addcancel">取消</button></div>`;
+  } else if (add && add.state==='done'){
+    const c=add.counts||{}; const parts=[`已加入 ${c.added||0} 张`]; if (c.uncertain) parts.push(`需确认 ${c.uncertain} 张`); if (c.failed) parts.push(`失败 ${c.failed} 张`);
+    if (c.pending) parts.push(`尚未加入 ${c.pending} 张（Lightroom 未连接）`); if (add.cancelled) parts.push('已取消');
+    const probs=(add.problems||[]).slice(0,5).map(p=>`<div>${esc(p.name)}：${esc(p.reason)}</div>`).join('');
+    h += `<div class="gbox"><div>${esc(parts.join('　'))}</div>${probs}${(add.problems||[]).length>5?`<div>另有 ${add.problems.length-5} 项未列出。</div>`:''}<div style="margin-top:4px"><button class="btn small" id="gal_addclose">知道了</button></div></div>`;
+  } else if (na>0){
+    h += `<div class="gline"><span class="gwarn">${na} 张尚未加入 Lightroom</span><button class="btn small primary" id="gal_add">加入 Lightroom</button></div>`;
+  }
+  if (st.truncated) h += `<div class="gwarn">${esc(st.truncated_message||'仅显示前 2000 张。')}</div>`;
+  if ((st.missing||0)>0) h += `<div>${st.missing} 张照片的文件缺失（目录里有记录，磁盘上找不到）。</div>`;
+  bar.innerHTML=h;
+  const b=(id,fn)=>{ const e=$('#'+id); if (e) e.onclick=fn; };
+  b('gal_clear', clearSel); b('gal_add', addToLr); b('gal_addcancel', ()=>gapi().library_cancel_add());
+  b('gal_addclose', async()=>{ await gapi().library_close_add(); if (G.st) G.st.add=null; renderBar(); });
+}
+/* ---- 点选：单击 / Ctrl 增减 / Shift 区间 / Ctrl+A 全选；选中同步到 Lightroom，以 Lightroom 实际选区为准 ---- */
+function limitSel(ids, active){
+  if (ids.length>GAL_MAX_SEL){ gmsg(`一次最多选择 ${GAL_MAX_SEL} 张，已选择前 ${GAL_MAX_SEL} 张。`); ids=ids.slice(0,GAL_MAX_SEL); if (ids.indexOf(active)<0) active=ids[ids.length-1]; }
+  return {ids, active};
+}
+function cellClick(id, e){
+  const p=G.byId[id]; if (!p) return;
+  if (!p.added){ gmsg('该照片尚未加入 Lightroom，请先点击“加入 Lightroom”。'); return; }
+  let ids, active=id;
+  if (e.shiftKey && G.anchor && G.order.indexOf(G.anchor)>=0 && G.order.indexOf(id)>=0){
+    const a=G.order.indexOf(G.anchor), b=G.order.indexOf(id), seg=G.order.slice(Math.min(a,b), Math.max(a,b)+1).filter(i=>G.byId[i].added);
+    ids = a<=b ? seg : seg.reverse();
+  } else if (e.ctrlKey || e.metaKey){
+    const had=G.sel.indexOf(id)>=0; ids = had ? G.sel.filter(i=>i!==id) : G.sel.concat([id]);
+    G.anchor=id; if (had) active = ids.length ? ids[ids.length-1] : null;
+  } else { ids=[id]; G.anchor=id; }
+  if (!ids.length){ clearSel(); return; }
+  gmsg('');
+  const r=limitSel(ids, active); G.sel=r.ids; G.active=r.active; applySelClasses(); renderBar(); sendSel();
+}
+function selectAllShown(){
+  const ids=G.order.filter(i=>G.byId[i] && G.byId[i].added); if (!ids.length) return;
+  gmsg(''); const r=limitSel(ids, ids[0]); G.sel=r.ids; G.active=r.ids[0]; G.anchor=r.ids[0]; applySelClasses(); renderBar(); sendSel();
+}
+async function sendSel(){
+  if (G.demo || !REAL()) return;
+  if (G.busySel){ G.wantSel={ids:[...G.sel], active:G.active}; return; }
+  G.busySel=true; let want={ids:[...G.sel], active:G.active}, last=null;
+  while (want){
+    G.wantSel=null;
+    try { last = await gapi().library_select(want.ids, want.active); } catch(e){ last = {ok:false, message:'选择失败，请重试。', selected:G.sel, active:G.active}; }
+    if (G.wantSel){ want=G.wantSel; continue; }          // 等待期间又点选了：只处理最后一次
+    want=null;
+  }
+  G.busySel=false;
+  if (last){
+    G.sel=(last.selected||[]).filter(i=>G.byId[i]); G.active=last.active||(G.sel.length?G.sel[G.sel.length-1]:null);
+    if (last.message) gmsg(last.message, !last.ok); else if (!last.ok) gmsg('选择未生效。', true);
+  }
+  applySelClasses(); renderBar();
+}
+async function clearSel(){
+  G.sel=[]; G.active=null; G.anchor=null; applySelClasses(); renderBar();
+  if (G.demo || !REAL()) return;
+  try { const r=await gapi().library_clear_selection(); if (r && r.message) gmsg(r.message); } catch(e){}
+}
+async function addToLr(){
+  const r=await gapi().library_add_missing(); if (!r.ok) gmsg(r.message||'无法加入。', true); else gmsg('');
+}
+async function openBaseFolder(){ if (!REAL()) return; const r=await gapi().open_library(); if (!r.ok) toast(r.message); }
+function onLibraryEvent(ev){
+  if (ev.type==='library_changed'){ clearTimeout(G.loadTimer); G.loadTimer=setTimeout(loadGallery, 40); }
+  else if (ev.type==='library_thumbs'){ applyThumbs(ev.items||[]); }
+  else if (ev.type==='library_selection'){ if (!G.busySel){ G.sel=(ev.ids||[]).filter(i=>G.byId[i]); G.active=ev.active||null; applySelClasses(); renderBar(); } }
+  else if (ev.type==='library_meta'){ (ev.items||[]).forEach(it=>{ const p=G.byId[it.id]; if (p){ p.rating=it.rating; p.flag=it.flag; refreshCell(it.id); } }); }
+  else if (ev.type==='library_add'){ if (G.st){ G.st.add = ev; renderBar(); } }
+}
+$('#gal_scroll').addEventListener('click', e=>{
+  const rt=e.target.closest('.retry'); if (rt){ e.stopPropagation(); delete G.failed[rt.dataset.id]; refreshCell(rt.dataset.id); G.vis.add(rt.dataset.id); requestThumbs(true); return; }
+  const hd=e.target.closest('.ghead'); if (hd){ G.collapsed[hd.dataset.g]=!G.collapsed[hd.dataset.g]; buildGallery(); return; }
+  $('#gal_scroll').focus({preventScroll:true});
+  const c=e.target.closest('.cell'); if (c) cellClick(c.dataset.id, e);          // 点空白处不清除选择
+});
+$('#gal').addEventListener('keydown', e=>{
+  const tag=(document.activeElement&&document.activeElement.tagName)||'';
+  if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='a' && tag!=='INPUT' && tag!=='SELECT'){ e.preventDefault(); selectAllShown(); }
+});
+$('#gal_q').oninput=()=>{ G.q=$('#gal_q').value; if (G.st) buildGallery(); };
+$('#gal_sort').onchange=()=>{ G.sort=$('#gal_sort').value; if (G.st) buildGallery(); };
+$('#gal_filter').onchange=()=>{ G.filter=$('#gal_filter').value; if (G.st) buildGallery(); };
+$('#gal_refresh').onclick=async()=>{ if (G.demo||!REAL()) return; gmsg(''); G.st=Object.assign({}, G.st, {state:'loading'}); buildGallery(); try { await gapi().library_refresh(); } catch(e){} };
+$('#gal_open').onclick=openBaseFolder;
 
 /* ---- settings dialog ---- */
 let SET = null, setConfirm = true;
@@ -1385,8 +1576,8 @@ if (location.hash !== '#demo') window.addEventListener('pywebviewready', ()=>{
     $('#edge').value=String(r.settings.preview_edge); }).catch(()=>{});
   const poll=()=>window.pywebview.api.status().then(s=>{ showStatus(s); if (s.photo && s.photo.name && s.photo.name!==photoName){ photoName=s.photo.name; renderStage(); } }).catch(()=>{});
   window.pywebview.api.preview_state().then(r=>{ pv=r; renderStage(); }).catch(()=>{});
-  window.pywebview.api.selection_state().then(r=>{ SEL = r; renderFilesReal(); }).catch(()=>{});
-  poll(); setInterval(poll, 3000); renderParams(); renderStage(); loadLibrary(); loadLib();
+  window.pywebview.api.selection_state().then(r=>{ SEL = r; updatePickBtn(); }).catch(()=>{});
+  poll(); setInterval(poll, 3000); renderParams(); renderStage(); loadGallery(); loadLib();
   window.pywebview.api.import_state().then(st=>{   // 页面重新加载时接续导入界面
     if (st.stage==='scanning'){ IM.stage='scanning'; imScanning(0); }
     else if (st.stage==='ready'){ imConfirm(); }
