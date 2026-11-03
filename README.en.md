@@ -5,7 +5,7 @@ A Lightroom plug-in plus a small MCP server. It can see the photo you selected, 
 the assistant a preview with histogram numbers. It can also make guarded develop changes, update catalog information,
 and save old values for restoration.
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.14.0-orange)
+![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.14.0-orange)
 
 [中文说明](README.md) · [Changelog](CHANGELOG.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md)
 
@@ -163,6 +163,9 @@ This project aims to be small, careful about changes, Python-based and easy to i
 
 ## ⚖️ License and disclaimer
 
-[MIT](LICENSE). Third-party packages: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+The code of this project is licensed under the [GNU AGPL-3.0](LICENSE). In short: you may use, change and share it freely; if you
+distribute a modified version (or let others use it over a network) you must publish its source under the AGPL-3.0 as well, not
+keep it closed. The AGPL-3.0 applies from the commits of 2026-11-03 on; the releases v0.1.0 to v0.14.0 published before remain under the MIT license.
+Third-party packages: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 Adobe and Lightroom are trademarks of Adobe Inc.; this project is not affiliated with, endorsed or sponsored by Adobe.
 The Adobe Lightroom Classic SDK is not included and must not be committed.

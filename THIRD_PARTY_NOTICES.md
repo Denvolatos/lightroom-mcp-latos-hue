@@ -1,6 +1,7 @@
 # Third-party notices
 
-This project's own code is MIT-licensed (see `LICENSE`). It depends on the packages below. The list was read from
+From the commits of 2026-11-03 on, this project's own code is licensed under the GNU AGPL-3.0 (see `LICENSE`); the releases
+v0.1.0 to v0.14.0 stay MIT-licensed. It depends on the packages below. The list was read from
 each package's installed metadata (version tested: the ones shown); check the packages' own license files for the
 authoritative text. A binary release (`lrmcp.exe`, built with PyInstaller) bundles these packages and Python itself,
 so their licenses apply to that bundle.
@@ -27,6 +28,10 @@ so their licenses apply to that bundle.
 | cffi / pycparser (needed by cryptography) | 2.1.1 / 3.12 | MIT-0 / BSD-3-Clause |
 | setuptools (bundled by PyInstaller) | 84.2.1 | MIT |
 | Python itself (bundled in the binary release) | 3.12 | PSF License |
+
+**Compatibility.** Every package above is under a permissive license (MIT, MIT-CMU, MIT-0, BSD-3-Clause, Apache-2.0, PSF) that is
+generally regarded as compatible with the AGPL-3.0 (Apache-2.0 is compatible with the GPLv3 family). This is our reading, not
+legal advice (待验证 by a lawyer if it matters to you). The packages keep their own licenses.
 
 **Build tools (not shipped in the source tree).** PyInstaller (6.22.3) is licensed "GPLv2-or-later with a special
 exception which allows to use PyInstaller to build and distribute non-free programs", per its package metadata.
