@@ -25,6 +25,7 @@ from pick_apply import ApplyService  # noqa: E402
 import library_store as libstore  # noqa: E402
 from library_service import LibraryService  # noqa: E402
 from preview import PreviewManager, PreviewServer, PreviewStore  # noqa: E402
+from photo_library import PhotoLibrary, ThumbStore  # noqa: E402
 from ports import STATE_DIR  # noqa: E402
 
 WEB = Path(__file__).resolve().parent / "web" / "index.html"
@@ -62,6 +63,10 @@ class Api:
         self._preview.set_edge(self._settings.data["preview_edge"])
         self._backend = Backend(self._lr, self._session, self._tracker, self._emit, state_file=None, previews=self._preview)
         self._import = ImportService(self._settings, self._lr, self._emit)
+        # 软件内的图库（0.11.0）：缩略图走单独的本机图片服务（只服务缓存里的图、带随机口令）
+        self._photolib = PhotoLibrary(self._settings, self._lr, self._emit, PreviewServer(ThumbStore()),
+                                      on_selected=self._photolib_selected,
+                                      busy_fn=lambda: self._import.stage in ("scanning", "copying"))
         self._export = ExportService(self._settings, self._lr, self._emit)
         self._pick = PickService(self._lr, self._preview.server, self._emit, send_fn=self._pick_send, stop_fn=self._pick_stop,
                                  status_fn=lambda: self._provider.status(), ready_fn=lambda: self._backend.wait_ready(),
@@ -86,6 +91,9 @@ class Api:
                                   "LRAPP_RPC_TOKEN": self._rpc_token})
         self._preview.server.start()
         self._preview.start()
+        self._photolib.server.start()
+        self._photolib.start()
+        self._photolib.refresh()                # 软件启动时读一次图库（之后只在导入完成、加入完成、手动刷新时读）
         self._backend.start()
 
     def _provider_env(self) -> dict:
@@ -108,11 +116,31 @@ class Api:
     def _shutdown(self) -> None:
         self._backend.stop()
         self._preview.stop()
+        self._photolib.stop()
+        self._photolib.server.stop()
         self._provider.close()
         self._hub.stop()
         self._lr.stop()
 
+    def _tap(self, ev: dict) -> None:
+        """软件内部事件联动图库：Lightroom 选区变化 -> 高亮；导入完成 -> 刷新图库；AI 挑片写入 -> 刷新星级与旗标。"""
+        lib = getattr(self, "_photolib", None)
+        if lib is None:
+            return
+        t = ev.get("type")
+        if t == "selection":
+            lib.on_lr_selection(ev)
+        elif t == "import_done":
+            lib.refresh()
+        elif t == "pick_apply_done":
+            ids = [r.get("photo_id") for r in ev.get("results") or [] if isinstance(r, dict)]
+            threading.Thread(target=lib.refresh_meta, args=(ids,), daemon=True).start()
+
     def _emit(self, ev: dict) -> None:
+        try:
+            self._tap(ev)
+        except Exception:                        # noqa: BLE001 - 联动出错不影响原有事件
+            pass
         if self._window is None:
             return
         try:
@@ -130,6 +158,7 @@ class Api:
         if rows is not None:
             self._emit({"type": "adjust", "rows": rows})
             self._preview.request()          # 调整/撤销/还原有变化：短防抖后刷新“当前”预览
+            self._thumbs_stale()
 
     def _lib_applied(self, edit_id: str, photo_id: str, label: str, changes: list) -> None:
         """软件自己套用预设成功后：把改动加进"本次调整"表，并刷新预览。"""
@@ -137,6 +166,21 @@ class Api:
             self._tracker.add_external(edit_id, photo_id, label, changes)
         self._push_rows()
         self._preview.request()
+        self._thumbs_stale(photo_id)
+
+    def _thumbs_stale(self, *photo_ids) -> None:
+        """照片被调整/撤销/还原：图库里这些照片的缩略图缓存失效并重新取（涉及本次调整表里的照片和当前照片）。"""
+        ids = set(i for i in photo_ids if i)
+        ids |= {r.get("photo") for r in self._tracker.rows if r.get("photo")}
+        cur = (self._backend.photo or {}).get("id")
+        if cur:
+            ids.add(cur)
+        self._photolib.invalidate_thumbs(ids)
+
+    def _photolib_selected(self) -> None:
+        """在图库里选中照片后立即刷新“当前照片”（中栏预览、右栏本次调整等），不等 3 秒轮询。"""
+        self._backend.refresh_photo()
+        self._preview.request(0)
 
     def _push_rows(self) -> None:
         with self._lock:
@@ -230,6 +274,7 @@ class Api:
                 self._tracker.mark_undone({edit_id})
             self._push_rows()
             self._preview.request()
+            self._thumbs_stale()
         return {"ok": r["ok"], "conflict": r["conflict"], "message": r["message"]}
 
     def restore_original(self, force: bool = False) -> dict:
@@ -240,6 +285,7 @@ class Api:
                 self._tracker.mark_undone(undone)
             self._push_rows()
             self._preview.request()
+            self._thumbs_stale()
         return {"ok": r["ok"], "conflict": r["conflict"], "message": r["message"]}
 
     # ---- 设置 ------------------------------------------------------
@@ -320,6 +366,31 @@ class Api:
 
     def import_state(self) -> dict:
         return self._import.state()
+
+    # ---- 图库（0.11.0）：路径一律取设置里的软件文件夹，页面只能传当前图库里已知的照片标识 ----
+    def library_state(self) -> dict:
+        return self._photolib.state()
+
+    def library_refresh(self) -> dict:
+        return self._photolib.refresh()
+
+    def library_thumbnails(self, ids, retry: bool = False) -> dict:
+        return self._photolib.request_thumbs(ids, retry)
+
+    def library_select(self, ids, active=None) -> dict:
+        return self._photolib.select(ids, active)
+
+    def library_clear_selection(self) -> dict:
+        return self._photolib.clear_selection()
+
+    def library_add_missing(self) -> dict:
+        return self._photolib.add_missing()
+
+    def library_cancel_add(self) -> dict:
+        return self._photolib.cancel_add()
+
+    def library_close_add(self) -> dict:
+        return self._photolib.close_add()
 
     def library_list(self, limit: int = 300) -> dict:
         return self._import.library(limit)
@@ -434,7 +505,13 @@ class Api:
         return self._apply.state_public()
 
     def pick_apply_undo(self, force: bool = False) -> dict:
-        return self._apply.undo(bool(force))
+        r = self._apply.undo(bool(force))
+        try:
+            ids = [x.get("photo_id") for x in r.get("results") or [] if x.get("status") == "undone"]
+            threading.Thread(target=self._photolib.refresh_meta, args=(ids,), daemon=True).start()
+        except Exception:                        # noqa: BLE001
+            pass
+        return r
 
     def pick_apply_close(self) -> dict:
         return self._apply.close()
