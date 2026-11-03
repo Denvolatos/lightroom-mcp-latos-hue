@@ -189,3 +189,55 @@ def test_bad_parameters_are_rejected(bridge):
 def test_old_plugin_instance_is_told_to_stop(bridge):
     assert request(bridge, "GET", "/poll", headers={"X-Gen": "200"})[1] == "none"
     assert request(bridge, "GET", "/poll", headers={"X-Gen": "100"})[1] == "stop"
+
+
+# ---- 0.14: stop() wakes every waiting /poll at once ---------------------------------------------------
+def test_stop_wakes_a_hanging_poll_immediately(tmp_path):
+    b = Bridge(port=free_port(), data_dir=tmp_path, poll_hold=10, connect_wait=0)
+    b.start()
+    answers = []
+
+    def poll():
+        answers.append(request(b, "GET", "/poll", headers={"X-Gen": "1"}))
+
+    threads = [threading.Thread(target=poll) for _ in range(2)]
+    for t in threads:
+        t.start()
+    time.sleep(0.5)  # both polls are now waiting for a job
+    started = time.monotonic()
+    b.stop()
+    for t in threads:
+        t.join(5)
+    elapsed = time.monotonic() - started
+    assert elapsed < 2, f"stop() and the woken polls took {elapsed:.1f} s"
+    assert answers == [(200, "none"), (200, "none")]
+
+
+def test_stop_removes_the_announcement_before_the_port_is_free(tmp_path):
+    b = Bridge(port=free_port(), data_dir=tmp_path, poll_hold=10, connect_wait=0, legacy_port=None)
+    b.start()
+    info = b.info_file
+    assert info.exists()
+    b.stop()
+    assert not info.exists()
+    b.stop()  # a second stop is harmless
+
+
+def test_new_server_on_the_same_port_right_after_stop_gets_its_own_token(tmp_path):
+    port = free_port()
+    old = Bridge(port=port, data_dir=tmp_path, poll_hold=10, connect_wait=0)
+    old.start()
+    waiter = threading.Thread(target=lambda: request(old, "GET", "/poll", headers={"X-Gen": "1"}))
+    waiter.start()
+    time.sleep(0.3)
+    old.stop()
+    new = Bridge(port=port, data_dir=tmp_path, poll_hold=0.3, connect_wait=0)
+    new.start()
+    try:
+        waiter.join(3)
+        assert not waiter.is_alive()
+        assert new.token != old.token
+        assert f"token={new.token}" in new.info_file.read_text()
+        assert request(old, "GET", "/poll", headers={"X-Gen": "1"})[0] == 401  # the old token no longer works
+    finally:
+        new.stop()

@@ -4,13 +4,13 @@
 一个 Lightroom 插件加一个小型 MCP 服务：能看到你选中的照片、读取调整参数，并把预览图和直方图数字交给 AI。
 还能对受限的调整参数做小步修改、整理目录信息，并保存旧值用于还原。
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.13.0-orange)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.14.0-orange)
 
 [English](README.en.md) · [更新日志](CHANGELOG.md) · [安全说明](SECURITY.md) · [参与贡献](CONTRIBUTING.md)
 
 > 🤖 **你是 AI 助手，用户让你看这个仓库？** 请读 [`AI_GUIDE.md`](AI_GUIDE.md)，里面有完整的安装和使用步骤。
 
-> ⚠️ **早期版本（0.13.0）**：只在 Windows 11 + Lightroom Classic 15.2 上测过。安装包已发布但尚未在干净电脑上做过安装/卸载测试（待验证）。与 Adobe 无关联。
+> ⚠️ **早期版本（0.14.0）**：只在 Windows 11 + Lightroom Classic 15.2 上测过。安装包已发布但尚未在干净电脑上做过安装/卸载测试（待验证）。与 Adobe 无关联。
 
 ## ✨ 能做什么
 
@@ -99,12 +99,34 @@ Claude 桌面版暂不自动登记（配置文件位置取决于安装方式）�
 或到 **[讨论区](../../discussions)** 聊。表单会让你贴上 `lr_doctor` 的输出，大多数问题一看就明白。
 请不要上传照片或 Lightroom 目录。本软件不收集任何使用数据。
 
+## 🔮 即将推出（构想中）
+
+> 这是正在构想的方向，**还没有发布，也没有发布时间**，内容可能调整。
+
+我们想做一个**可视化修图软件**：打开它，修图的所有操作都在一个窗口里完成，不用在多个软件之间来回切换。
+
+![修图助手界面模板（假数据，功能未完成）](docs/images/app-template.png)
+
+*上图只是界面模板，照片和数据都是假的，功能还没做。模板代码在 [`app` 分支](https://github.com/Denvolatos/lightroom-mcp-win/tree/app)。*
+
+想做到的样子：
+
+- **导入：** 从相机 SD 卡选一个文件夹，复制一份到软件自己的文件夹，卡上的原片不动；分类或平铺随你。
+- **三栏界面：** 左边管文件，中间是大图和前后对比，右边是和 AI 的对话，以及"这一轮改了哪些参数"。
+- **AI 挑片：** 选几张照片让 AI 比较，结果先显示在软件里。
+- **"逐步询问"开关：** 初调时让 AI 直接改，细调时每一步先问你。
+- **导出：** 像 Office 的"另存为"，自己选位置和格式。
+- **你自己的预设、收藏和 AI 学到的调色经验**，只保存在你自己的电脑上。
+
+不变的原则：照片不上传，每一步都能撤销，调色的技巧由每个人自己的 AI 去学，我们只做这个"壳子"。怎么连接你的 AI，还在确定中。
+
 ## 🗺️ 路线图
 
 | 版本 | 计划 |
 |---|---|
 | 0.1 | 只读：看照片、调整参数、预览、直方图数字、自检 |
 | 0.2–0.11.2 | 受保护的单张修改、目录信息、批量预演、预设与还原；详见上面的工具列表 |
+| 0.14 | 重连修复：服务重启后插件约一两秒内重新连上，不用再重载插件（升级后需重载一次插件） |
 | 0.13 | 全尺寸导出（到你在对话里说的位置）、命名版本、并排对比、预览数字里的区域分析 |
 | 0.12 | 还原冲突保护、修图前后对比预览、多张照片挑片预览、从已验证的修改生成批量预演（来自贡献者 Galio1991 的 PR） |
 | 后续 | 预设数量滑块、批量套预设、全新 Windows 环境的安装包验收（macOS、Photoshop、Premiere 暂停；蒙版实测不可靠，暂不做） |

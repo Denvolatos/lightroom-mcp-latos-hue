@@ -3,6 +3,22 @@
 Versions: a new feature raises the middle number, a small fix the last one. The server version lives in
 `server/lightroom_mcp/__init__.py`, the plug-in version in `plugin/lrmcp.lrdevplugin/Version.lua` (and `Info.lua`).
 
+## 0.14.0 — reconnect fix
+
+- Root cause: when a server stopped and a new one took the same port straight away, the plug-in's old poller still held the
+  old token. It had to wait for the old long poll (up to 10 s) to run out, then take a 401 and sleep 2 s before it re-read
+  the announcement, so the new server was found only 8-11 s later. The server waits just 6 s for the plug-in, so the first
+  call failed with "plug-in not connected" until Lightroom's plug-in was reloaded.
+- Plug-in: the poller re-reads the port's announcement before every request and right after every failure (401/403, refused
+  connection, timeout). A new token or pid is used at once and resets the failure count and back-off; a missing file ends the
+  poller as before. The token is never logged.
+- Server: `Bridge.stop()` removes the announcement first, then wakes every waiting `/poll` (answer "none") so the old long
+  poll returns immediately, then closes the socket. `POLL_HOLD_SECONDS` is unchanged.
+- After updating, reload the plug-in once (File > Plug-in Manager > Reload) so the new poller code runs; the server side
+  takes effect with the next server start.
+- No change to any tool, whitelist, limit or protection; token authentication, Host/Origin checks and announcement file
+  permissions are as before. Prepares the ground for an upcoming desktop app that starts and stops its own server.
+
 ## 0.3.0 — several AI sessions at once
 
 - Every server takes the first free port in 58770–58789 and announces itself in `~/LrMcp/servers/<port>.txt`; the

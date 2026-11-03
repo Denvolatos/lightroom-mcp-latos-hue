@@ -127,30 +127,58 @@ local function post(base, token, id, text)
 	LrHttp.post(base .. "/result?id=" .. id, text, authHeaders(token), "POST", 20)
 end
 
+-- Reads the announcement of one port (never logs the token). Returns: "gone" when the file is missing,
+-- otherwise the token and the pid (either may be nil if the file is half-written).
+local function readAnnouncement(infoPath)
+	if infoPath then
+		if not LrFileUtils.exists(infoPath) then
+			return "gone"
+		end
+		local info = readKeyValues(infoPath)
+		return info and info.token, info and info.pid
+	end
+	if not LrFileUtils.exists(legacyTokenPath) then
+		return "gone"
+	end
+	return readLegacyToken(), nil
+end
+
 -- Polls one server until its announcement disappears or the plug-in is told to stop.
 -- infoPath == nil means the legacy server (0.2.x) that only left ~/LrMcp/token.
+-- The announcement is re-read before every request and right after every failure (401/403, refused, timeout), so a
+-- server that was restarted on the same port is found at once instead of after the old long poll has run out.
 local function pollServer(port, infoPath)
 	local base = "http://127.0.0.1:" .. port
 	local gen = tostring(LrDate.currentTime()) -- a newer plug-in instance (after a reload) has a larger gen
 	local entry = state.servers[port]
-	local token, fails = nil, 0
+	local token, pid, fails = nil, nil, 0
 	log(string.format("polling server on port %d, plug-in %s, gen=%s", port, Version, gen))
+
+	-- "gone" | "changed" (new token or pid: failure count and back-off start over) | "same"
+	local function sync()
+		local newToken, newPid = readAnnouncement(infoPath)
+		if newToken == "gone" then
+			return "gone"
+		end
+		if newToken ~= token or newPid ~= pid then
+			local hadOne = token ~= nil
+			token, pid = newToken, newPid
+			if hadOne then
+				fails = 0
+				log(string.format("announcement on port %d changed, using the new one", port))
+			end
+			return "changed"
+		end
+		return "same"
+	end
+
 	while not state.stop do
-		local announced = infoPath and LrFileUtils.exists(infoPath) or (not infoPath and LrFileUtils.exists(legacyTokenPath))
-		if not announced then
+		if sync() == "gone" then
 			break -- the server is gone
 		end
 		if not token then
-			if infoPath then
-				local info = readKeyValues(infoPath)
-				token = info and info.token
-			else
-				token = readLegacyToken()
-			end
-		end
-		if not token then
 			entry.connected = false
-			LrTasks.sleep(2)
+			LrTasks.sleep(1)
 		else
 			local headers = authHeaders(token, {
 				{ field = "X-Gen", value = gen },
@@ -178,15 +206,16 @@ local function pollServer(port, infoPath)
 						post(base, token, id, "REFUSED: dev mode is off")
 					end
 				end
-			elseif status == 401 then
-				token = nil -- the server restarted with a new token: read the announcement again
-				LrTasks.sleep(2)
 			else
+				-- 401/403 (the server restarted with a new token), refused, timeout: look at the announcement now
 				fails = fails + 1
 				entry.connected = false
 				entry.lastError = (hdrs and hdrs.error and hdrs.error.errorCode) or tostring(status)
 				refreshOverall()
-				LrTasks.sleep(math.min(5, 1 + fails))
+				local seen = sync()
+				if seen == "same" then
+					LrTasks.sleep(math.min(5, 1 + fails))
+				end -- "gone" ends the loop above, "changed" retries at once with the new token
 			end
 		end
 	end
