@@ -15,12 +15,19 @@ from pathlib import Path
 
 SCHEMA_VERSION = 1
 SETTINGS_FILE = Path.home() / "LrMcp" / "app_settings.json"
-APP_VERSION = "0.7.0"                  # 桌面软件 Latos Hue 的版本（开发中，尚未发布；首个发布版本为 1.0.0）
+APP_VERSION = "0.8.0"                  # 桌面软件 Latos Hue 的版本（开发中，尚未发布；首个发布版本为 1.0.0）
 PROJECT_URL = "https://github.com/Denvolatos/lightroom-mcp-win"
 DATA_DIR_TEXT = "~/LrMcp"
 
 EDGE_CHOICES = (768, 1024, 1536, 2048)  # 与界面里"预览清晰度"的可选档位一致
 DEFAULT_PROVIDER = "claude"
+
+# 导出对话框的默认值与取值范围（服务端 export_photo_for_app 的范围相同）
+EXPORT_FORMATS = ("jpeg", "tiff")
+EXPORT_METADATA = ("minimal", "all")
+EXPORT_BIT_DEPTHS = (8, 16)
+EXPORT_QUALITY_RANGE = (40, 100)
+EXPORT_EDGE_RANGE = (256, 20000)         # 长边像素；0 表示原始尺寸
 
 
 def default_base_folder() -> str:
@@ -29,7 +36,9 @@ def default_base_folder() -> str:
 
 def defaults() -> dict:
     return {"schema": SCHEMA_VERSION, "base_folder": default_base_folder(), "provider": DEFAULT_PROVIDER,
-            "confirm_default": True, "preview_edge": 1024}
+            "confirm_default": True, "preview_edge": 1024,
+            "export_last_folder": "", "export_format": "jpeg", "export_size": 0, "export_quality": 92,
+            "export_bit_depth": 16, "export_metadata": "minimal"}
 
 
 # ---------------------------------------------------------------- 文件夹校验
@@ -123,6 +132,43 @@ def _clean_edge(v):
     return n if n in EDGE_CHOICES else None
 
 
+def _clean_int(v, lo=None, hi=None, allowed=None, zero_ok=False):
+    """整数校验：布尔、浮点小数、字符串一律不接受（字符串数字除外不接受）；不合法返回 None。"""
+    if isinstance(v, bool) or not isinstance(v, int):
+        return None
+    if zero_ok and v == 0:
+        return 0
+    if allowed is not None:
+        return v if v in allowed else None
+    return v if lo <= v <= hi else None
+
+
+def clean_export_field(key: str, v):
+    """导出相关字段的单项校验：合法返回规范值，不合法返回 None（export_size 的合法值 0 也会返回 0，故用 is None 判断）。"""
+    if key == "export_format":
+        return v if isinstance(v, str) and v in EXPORT_FORMATS else None
+    if key == "export_metadata":
+        return v if isinstance(v, str) and v in EXPORT_METADATA else None
+    if key == "export_size":
+        return _clean_int(v, *EXPORT_EDGE_RANGE, zero_ok=True)
+    if key == "export_quality":
+        return _clean_int(v, *EXPORT_QUALITY_RANGE)
+    if key == "export_bit_depth":
+        return _clean_int(v, allowed=EXPORT_BIT_DEPTHS)
+    if key == "export_last_folder":
+        if not isinstance(v, str):
+            return None
+        v = v.strip()
+        if not v:
+            return ""
+        return os.path.abspath(v) if validate_folder(v)["ok"] else None
+    return None
+
+
+EXPORT_FIELD_LABELS = {"export_last_folder": "导出文件夹", "export_format": "导出格式", "export_size": "导出大小",
+                       "export_quality": "JPEG 质量", "export_bit_depth": "TIFF 位深", "export_metadata": "元数据"}
+
+
 def sanitize(data) -> dict:
     """把读到的内容整理成合法设置：非法/缺失字段回退默认值，未知字段保留。"""
     out = dict(data) if isinstance(data, dict) else {}
@@ -134,6 +180,9 @@ def sanitize(data) -> dict:
     out["provider"] = pv if isinstance(pv, str) and pv else d["provider"]
     out["confirm_default"] = out["confirm_default"] if isinstance(out.get("confirm_default"), bool) else d["confirm_default"]
     out["preview_edge"] = _clean_edge(out.get("preview_edge")) or d["preview_edge"]
+    for k in EXPORT_FIELD_LABELS:
+        c = clean_export_field(k, out.get(k))
+        out[k] = d[k] if c is None else c
     return out
 
 
@@ -211,6 +260,13 @@ class SettingsStore:
                 errors["preview_edge"] = "预览清晰度只能选择 " + "、".join(str(x) for x in EDGE_CHOICES) + " 之一。"
             else:
                 new["preview_edge"] = e
+        for k, label in EXPORT_FIELD_LABELS.items():
+            if k in changes:
+                c = clean_export_field(k, changes[k])
+                if c is None:
+                    errors[k] = f"{label}的取值无效。"
+                else:
+                    new[k] = c
         if errors:
             return {"ok": False, "errors": errors, "needs_create": needs_create, "settings": dict(self.data)}
         try:
