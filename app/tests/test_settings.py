@@ -1,0 +1,222 @@
+"""设置读写与校验、AI 来源选择、设置对话框用到的后端接口。"""
+import json
+
+import pytest
+
+import settings as st
+from providers import is_selectable
+
+
+@pytest.fixture
+def store(tmp_path):
+    return st.SettingsStore(tmp_path / "app_settings.json", restrict=lambda p: None)
+
+
+# ---------------------------------------------------------------- 读写
+def test_defaults_when_file_missing(store):
+    d = st.defaults()
+    assert store.data == d
+    assert d["base_folder"].endswith("Pictures\\修图助手") or d["base_folder"].endswith("Pictures/修图助手")
+    assert d["provider"] == "claude" and d["confirm_default"] is True and d["preview_edge"] == 1024
+
+
+@pytest.mark.parametrize("content", ["{坏的", "", "[1,2]", "null", '"x"'])
+def test_corrupt_file_does_not_crash(tmp_path, content):
+    p = tmp_path / "s.json"
+    p.write_text(content, encoding="utf-8")
+    assert st.SettingsStore(p, restrict=lambda x: None).data == st.defaults()
+
+
+def test_missing_and_invalid_fields_fall_back(tmp_path):
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps({"schema": 1, "confirm_default": "yes", "preview_edge": 999, "provider": 5,
+                             "base_folder": "relative/path"}), encoding="utf-8")
+    d = st.SettingsStore(p, restrict=lambda x: None).data
+    assert d == st.defaults()
+
+
+def test_unknown_fields_are_kept_and_valid_ones_loaded(tmp_path):
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps({"confirm_default": False, "preview_edge": 1536, "future_flag": {"a": 1}}), encoding="utf-8")
+    s = st.SettingsStore(p, restrict=lambda x: None)
+    assert s.data["confirm_default"] is False and s.data["preview_edge"] == 1536
+    assert s.data["future_flag"] == {"a": 1}
+    s.update({"preview_edge": 768})
+    assert json.loads(p.read_text(encoding="utf-8"))["future_flag"] == {"a": 1}      # 保存时未知字段仍在
+
+
+def test_atomic_write_roundtrip_and_restrict_called(tmp_path):
+    called = []
+    s = st.SettingsStore(tmp_path / "x" / "s.json", restrict=called.append)
+    r = s.update({"confirm_default": False, "preview_edge": 2048})
+    assert r["ok"]
+    assert called and called[0].name.endswith(".tmp")
+    assert not list((tmp_path / "x").glob("*.tmp"))
+    again = st.SettingsStore(tmp_path / "x" / "s.json", restrict=lambda p: None).data
+    assert again["confirm_default"] is False and again["preview_edge"] == 2048 and again["schema"] == st.SCHEMA_VERSION
+
+
+def test_no_secret_like_fields_saved(store):
+    store.update({"confirm_default": True})
+    text = store.path.read_text(encoding="utf-8").lower()
+    assert not any(w in text for w in ("token", "password", "api_key", "apikey", "secret"))
+
+
+# ---------------------------------------------------------------- 文件夹
+def test_folder_valid_existing(tmp_path):
+    v = st.validate_folder(str(tmp_path))
+    assert v["ok"] and v["exists"]
+
+
+def test_folder_missing_but_creatable(tmp_path):
+    v = st.validate_folder(str(tmp_path / "新建" / "子"))
+    assert v["ok"] and not v["exists"]
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "relative\\dir", "\\\\server\\share\\x", "//server/share/x", "C:"])
+def test_folder_rejects_non_absolute_or_network(bad):
+    v = st.validate_folder(bad)
+    assert not v["ok"] and v["message"]
+
+
+def test_folder_rejects_drive_root():
+    assert not st.validate_folder("C:\\")["ok"]
+
+
+@pytest.mark.parametrize("sub", ["C:\\Windows", "C:\\Windows\\System32", "C:\\Program Files", "C:\\Program Files\\Foo",
+                                 "C:\\Program Files (x86)\\Bar", "C:\\ProgramData\\X"])
+def test_folder_rejects_system_dirs(sub):
+    v = st.validate_folder(sub)
+    assert not v["ok"] and "系统" in v["message"]
+
+
+def test_folder_rejects_file(tmp_path):
+    f = tmp_path / "a.txt"
+    f.write_text("x")
+    v = st.validate_folder(str(f))
+    assert not v["ok"] and "文件" in v["message"]
+
+
+def test_folder_rejects_unwritable(tmp_path, monkeypatch):
+    monkeypatch.setattr(st, "_writable", lambda d: False)
+    assert "不可写" in st.validate_folder(str(tmp_path))["message"]
+    assert "没有写入权限" in st.validate_folder(str(tmp_path / "new"))["message"]
+
+
+def test_create_folder(tmp_path):
+    target = tmp_path / "a" / "b"
+    r = st.create_folder(str(target))
+    assert r["ok"] and r["exists"] and target.is_dir()
+
+
+# ---------------------------------------------------------------- update
+def test_update_folder_needs_create_then_create(store, tmp_path):
+    target = tmp_path / "图库"
+    r = store.update({"base_folder": str(target)})
+    assert not r["ok"] and r["needs_create"] and not target.exists()
+    assert store.data["base_folder"] != str(target)                       # 未保存
+    r = store.update({"base_folder": str(target)}, create_missing=True)
+    assert r["ok"] and target.is_dir() and store.data["base_folder"] == str(target)
+
+
+def test_update_invalid_folder_reports_reason_and_saves_nothing(store):
+    r = store.update({"base_folder": "C:\\Windows\\x", "confirm_default": False})
+    assert not r["ok"] and "系统" in r["errors"]["base_folder"]
+    assert store.data["confirm_default"] is True and not store.path.exists()
+
+
+def test_update_rejects_bad_values(store):
+    r = store.update({"preview_edge": 1000, "confirm_default": "on"})
+    assert not r["ok"] and set(r["errors"]) == {"preview_edge", "confirm_default"}
+    assert not store.update({"preview_edge": True})["ok"]
+
+
+def test_update_save_failure_is_reported(store, monkeypatch):
+    def boom(data):
+        raise PermissionError(13, "拒绝访问")
+    monkeypatch.setattr(store, "save", boom)
+    r = store.update({"confirm_default": False})
+    assert not r["ok"] and "保存失败" in r["errors"]["_"]
+
+
+# ---------------------------------------------------------------- AI 来源选择
+def test_provider_selection_rules(store):
+    assert store.update({"provider": "claude"}, selectable=is_selectable)["ok"]
+    for pid in ("codex", "api", "unknown", 5):
+        r = store.update({"provider": pid}, selectable=is_selectable)
+        assert not r["ok"] and "后续提供" in r["errors"]["provider"]
+    assert store.data["provider"] == "claude"
+
+
+# ---------------------------------------------------------------- 后端接口（Api）
+@pytest.fixture
+def api(tmp_path, monkeypatch):
+    monkeypatch.setattr(st, "SETTINGS_FILE", tmp_path / "app_settings.json")
+    monkeypatch.setattr(st, "restrict_to_current_user", lambda p: None)
+    monkeypatch.setattr(st.SettingsStore.__init__, "__defaults__", (None, lambda p: None))
+    import main
+    a = main.Api()
+    yield a
+    a._shutdown()
+
+
+def test_api_get_settings_shape(api):
+    r = api.get_settings()
+    assert r["settings"]["provider"] == "claude" and r["edges"] == [768, 1024, 1536, 2048]
+    ids = [p["id"] for p in r["providers"]]
+    assert ids == ["claude", "codex", "api"]
+    assert [p["selectable"] for p in r["providers"]] == [True, False, False]
+    assert set(r["about"]) == {"app_version", "lightroom_version", "plugin_version", "data_dir", "project_url"}
+    assert r["about"]["data_dir"] == "~/LrMcp" and r["about"]["project_url"].endswith("Denvolatos/lightroom-mcp-win")
+
+
+def test_api_save_applies_preview_edge_immediately(api):
+    r = api.save_settings({"preview_edge": 1536})
+    assert r["ok"] and api._preview.edge == 1536
+    assert not api.save_settings({"preview_edge": 5})["ok"] and api._preview.edge == 1536
+
+
+def test_api_save_rejects_unavailable_provider(api):
+    r = api.save_settings({"provider": "codex"})
+    assert not r["ok"] and "provider" in r["errors"]
+
+
+def test_api_save_settings_bad_input(api):
+    assert not api.save_settings("x")["ok"]
+
+
+def test_api_check_folder(api, tmp_path):
+    assert api.check_folder(str(tmp_path))["ok"]
+    assert not api.check_folder("C:\\Windows")["ok"]
+
+
+def test_api_choose_folder_without_window(api):
+    assert api.choose_folder() == {"ok": False, "path": ""}
+
+
+def test_provider_switch_takes_effect_on_new_chat_only(api, monkeypatch):
+    calls = []
+
+    class Other:
+        id = "other"
+        alive = busy = False
+        spawned_at = None
+
+        def start(self, env=None): calls.append("start")
+        def close(self): calls.append("close")
+        def reset(self): calls.append("reset")
+        def stop(self): pass
+
+    import main
+    monkeypatch.setattr(main, "is_selectable", lambda pid: True)
+    monkeypatch.setattr(main, "create_provider", lambda pid, **k: Other())
+    old = api._provider
+    old_closed = []
+    monkeypatch.setattr(old, "close", lambda: old_closed.append(1))
+    monkeypatch.setattr(old, "reset", lambda: calls.append("old_reset"))
+    assert api.save_settings({"provider": "claude"})["ok"]
+    api._settings.data["provider"] = "other"                 # 模拟设置里选了另一个来源
+    assert api._provider is old                              # 保存后不立刻切换
+    api.reset()
+    assert api._provider.id == "other" and old_closed and "start" in calls and "reset" not in calls
+    assert api._backend.session is api._provider
