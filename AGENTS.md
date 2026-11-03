@@ -1,5 +1,7 @@
 # AGENTS.md — for AI coding agents working on this repository
 
+> macOS: if you are working on the macOS port, read [`docs/macOS交接说明.md`](docs/macOS交接说明.md) first (rules, what to measure, what to deliver).
+
 (If you only want to **install or use** the software for a user, read [`AI_GUIDE.md`](AI_GUIDE.md) instead.)
 
 ## What this repo is
