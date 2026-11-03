@@ -1411,20 +1411,34 @@ function M.select_photos(params)
 		end
 	end
 
-	local ok, err = LrTasks.pcall(function()
-		catalog:setSelectedPhotos(active, others)
-	end)
-	local selected = selectedIds(catalog)
-	local got = {}
-	for _, id in ipairs(selected) do
-		got[id] = true
+	-- Right after setActiveSources Lightroom needs a moment to show the folder; until then the photos are not in the current
+	-- view and setSelectedPhotos selects nothing without an error (seen on real Lightroom 15.2): wait, select, read back, and
+	-- try again a few times. Without a folder switch there is one attempt only.
+	local attempts = folderShown and 5 or 1
+	if folderShown then
+		LrTasks.sleep(0.3)
 	end
-	local notSelected = {}
-	for _, p in ipairs(found) do
-		local id = p:getRawMetadata("uuid")
-		if not got[id] then
-			notSelected[#notSelected + 1] = id
+	local ok, err, selected, notSelected
+	for attempt = 1, attempts do
+		ok, err = LrTasks.pcall(function()
+			catalog:setSelectedPhotos(active, others)
+		end)
+		selected = selectedIds(catalog)
+		local got = {}
+		for _, id in ipairs(selected) do
+			got[id] = true
 		end
+		notSelected = {}
+		for _, p in ipairs(found) do
+			local id = p:getRawMetadata("uuid")
+			if not got[id] then
+				notSelected[#notSelected + 1] = id
+			end
+		end
+		if not ok or #notSelected == 0 or attempt == attempts then
+			break
+		end
+		LrTasks.sleep(0.4)
 	end
 	local reason
 	if not ok then
