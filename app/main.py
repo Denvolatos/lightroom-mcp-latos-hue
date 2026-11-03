@@ -198,10 +198,10 @@ class Api:
         return {"ok": r["ok"], "conflict": r["conflict"], "message": r["message"]}
 
     # ---- 设置 ------------------------------------------------------
-    def get_settings(self) -> dict:
-        """设置对话框打开时调用：当前设置、AI 来源列表（含状态）、关于信息。"""
-        cur = self._provider.status()
-        return {"settings": dict(self._settings.data), "providers": available_providers(cur if self._provider.id == "claude" else None),
+    def get_settings(self, include_status: bool = True) -> dict:
+        """当前设置、AI 来源列表（含状态）、关于信息。include_status=False（启动时）不做登录检测，只取设置值。"""
+        cur = self._provider.status() if include_status else {"available": True, "state": "unknown", "reason": "", "next_step": ""}
+        return {"settings": dict(self._settings.data), "providers": available_providers(cur),
                 "current_provider": self._provider.id, "edges": list(appsettings.EDGE_CHOICES),
                 "default_base_folder": appsettings.default_base_folder(), "about": self._about()}
 
