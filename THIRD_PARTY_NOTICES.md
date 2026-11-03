@@ -37,6 +37,34 @@ legal advice (待验证 by a lawyer if it matters to you). The packages keep the
 exception which allows to use PyInstaller to build and distribute non-free programs", per its package metadata.
 Inno Setup is used to build the installer.
 
+## Contributions under the MIT license / 按 MIT 许可提交的贡献
+
+Code contributed before 2026-11-03 under the MIT license stays under the MIT license, together with its copyright notice:
+2026-11-03 之前按 MIT 许可提交的代码仍保留 MIT 许可及其版权声明：
+
+- **Galio1991** — pull requests #1 and #2 (guarded edit restoration, review and edit-reuse workflow).
+
+```
+MIT License
+
+Copyright (c) 2026 Galio1991
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy,
+modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+Contributions submitted from 2026-11-03 on are licensed under the AGPL-3.0, as stated in `CONTRIBUTING.md`.
+自 2026-11-03 起提交的贡献按 AGPL-3.0 授权，见 `CONTRIBUTING.md`。
+
 ## Adobe
 
 This project is **not affiliated with, endorsed by, or sponsored by Adobe**. "Adobe" and "Lightroom" are trademarks
