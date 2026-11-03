@@ -38,10 +38,12 @@ def load_record(edit_id: str, directory: Path = EDIT_DIR) -> dict | None:
 
 
 def _result_json(text: str) -> dict | None:
+    """工具结果可能是纯 JSON，也可能在 JSON 之后带有“[Image: ...]”等附加文字（预览图），所以只解析开头的 JSON 对象。"""
     try:
-        data = json.loads(text)
+        start = (text or "").index("{")
+        data, _ = json.JSONDecoder().raw_decode(text[start:])
         if isinstance(data, dict) and set(data) == {"result"} and isinstance(data["result"], str):
-            data = json.loads(data["result"])      # 个别客户端会把文本再包一层 {"result": "..."}
+            data = _result_json(data["result"])      # 个别客户端会把文本再包一层 {"result": "..."}
     except (TypeError, ValueError):
         return None
     return data if isinstance(data, dict) else None

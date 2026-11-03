@@ -159,3 +159,12 @@ def test_mark_undone_in_tracker_after_service_success(tmp_path):
     t.observe({"type": "tool_result", "id": "T1", "text": SET_RESULT, "is_error": False})
     assert t.mark_undone({"20261103-120000-ab12"}) is True
     assert t.mark_undone({"20261103-120000-ab12"}) is False
+
+
+def test_result_with_trailing_image_markers_still_parses(tmp_path):
+    """真实调用里模型常带 preview=true，结果文字在 JSON 之后还有 [Image: ...] 标记（实测踩过）。"""
+    t = adj.AdjustmentTracker(edit_dir=tmp_path)
+    t.observe(tool_ev())
+    text = SET_RESULT + "[Image: source: C:/x/a.jpg][Image: source: C:/x/b.jpg]"
+    t.observe({"type": "tool_result", "id": "T1", "text": text, "is_error": False})
+    assert t.rows[0]["status"] == "已应用" and t.rows[0]["edit_id"] == "20261103-120000-ab12"
