@@ -21,13 +21,14 @@ SIDE_MAX_ATTEMPTS = 3           # 连续重建次数上限，之后冷却一段�
 SIDE_COOLDOWN_SECONDS = 120
 LR_RESTART_SECONDS = 30         # 窗口自己的 Bridge 连不上时，每隔这么久换端口重登记一次
 CLEAN_SECONDS = 30
-PHOTO_POLL_SECONDS = 4
+PHOTO_POLL_SECONDS = 3
 WAIT_READY_SECONDS = 25         # 发送消息时若尚未连接，最多等多久
 
 
 class Backend:
     def __init__(self, lr, session, tracker, emit, state_file=None, clock=time.monotonic,
-                 cleaner=clean_stale_announcements):
+                 cleaner=clean_stale_announcements, previews=None):
+        self.previews = previews                    # PreviewManager（可为空）：巡检时顺带请求刷新中栏预览
         self.lr, self.session, self.tracker, self.emit = lr, session, tracker, emit
         self.state_file = state_file
         self._clock = clock
@@ -104,6 +105,8 @@ class Backend:
                 self._cleaner()
             except Exception:
                 pass
+        if self.previews is not None and st["app"]:
+            self.previews.poll()
         if st["app"] and not busy and now - self._last_photo_poll >= PHOTO_POLL_SECONDS:
             self._last_photo_poll = now
             self.refresh_photo()

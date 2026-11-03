@@ -160,6 +160,39 @@ class LrService:
         name = next((p.get("name") for p in r.get("photos") or [] if p.get("id") == pid), None)
         return {"id": pid, "name": name}
 
+    def selected_detail(self) -> dict | None:
+        """当前选中（活动）照片的 id、文件名与基本信息（相机、ISO、光圈等，取自插件的 list_selected）；读不到返回 None。"""
+        if not self.connected:
+            return None
+        try:
+            r = self._bridge.call("list_selected", {"limit": 20}, timeout=8)
+        except Exception:
+            return None
+        pid = r.get("active_id")
+        if not pid:
+            return {"id": None, "name": None, "info": {}}
+        info = next((p for p in r.get("photos") or [] if p.get("id") == pid), {})
+        return {"id": pid, "name": info.get("name"), "info": info}
+
+    def develop_of(self, photo_id: str) -> dict:
+        """读取一张照片的调整参数（用来判断“编辑版本”是否变化）。出错直接抛异常，由调用方处理。"""
+        return self._bridge.call("get_develop", {"photo": photo_id}, timeout=15)
+
+    def preview_bytes(self, photo_id: str, long_edge: int) -> tuple[bytes, str | None]:
+        """让插件渲染一张预览并读回 JPEG 字节；只接受预览目录内的文件，读完删除（文件名每次唯一，只属于本次请求）。"""
+        edits_mod, _ = _import_server()
+        from lightroom_mcp import config
+        data = self._bridge.call("get_preview", {"photo": photo_id, "long_edge": int(long_edge)}, timeout=60)
+        path = Path(str(data.get("path", ""))).resolve()
+        if config.PREVIEW_DIR.resolve() not in path.parents or not path.is_file():
+            raise RuntimeError("插件返回的预览文件不在预期目录，已拒绝读取。")
+        raw = path.read_bytes()
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return raw, data.get("name")
+
     @property
     def connected(self) -> bool:
         return bool(self._bridge is not None and getattr(self._bridge, "connected", False))

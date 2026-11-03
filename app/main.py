@@ -18,6 +18,7 @@ from claude_bridge import ClaudeSession  # noqa: E402
 from confirm_hub import ConfirmHub  # noqa: E402
 from lr_service import LrService  # noqa: E402
 from persistent_session import PersistentSession  # noqa: E402
+from preview import PreviewManager, PreviewServer, PreviewStore  # noqa: E402
 from ports import STATE_DIR  # noqa: E402
 
 WEB = Path(__file__).resolve().parent / "web" / "index.html"
@@ -46,7 +47,8 @@ class Api:
                     if self._persistent else LrService())
         self._hub = ConfirmHub(self._emit, current_values=self._lr.current_values)
         self._hub.start()
-        self._backend = Backend(self._lr, self._session, self._tracker, self._emit, state_file=None)
+        self._preview = PreviewManager(self._lr, PreviewServer(PreviewStore()), self._emit)
+        self._backend = Backend(self._lr, self._session, self._tracker, self._emit, state_file=None, previews=self._preview)
 
     def _start_background(self) -> None:
         """窗口一出现就预热：Bridge、常驻 claude（含 lightroom_mcp 与确认服务）同时启动，之后每条消息零启动开销。"""
@@ -57,10 +59,13 @@ class Api:
             token = self._hub.begin_session()
             self._session.start({"LRAPP_PORT": str(self._hub.port), "LRAPP_TOKEN": token,
                                  "LRAPP_RPC_TOKEN": self._rpc_token})
+        self._preview.server.start()
+        self._preview.start()
         self._backend.start()
 
     def _shutdown(self) -> None:
         self._backend.stop()
+        self._preview.stop()
         if self._persistent:
             self._session.shutdown()
         self._hub.stop()
@@ -83,6 +88,7 @@ class Api:
         self._emit(ev)
         if rows is not None:
             self._emit({"type": "adjust", "rows": rows})
+            self._preview.request()          # 调整/撤销/还原有变化：短防抖后刷新“当前”预览
 
     def _push_rows(self) -> None:
         with self._lock:
@@ -155,6 +161,7 @@ class Api:
             with self._lock:
                 self._tracker.mark_undone({edit_id})
             self._push_rows()
+            self._preview.request()
         return {"ok": r["ok"], "conflict": r["conflict"], "message": r["message"]}
 
     def restore_original(self, force: bool = False) -> dict:
@@ -164,7 +171,16 @@ class Api:
             with self._lock:
                 self._tracker.mark_undone(undone)
             self._push_rows()
+            self._preview.request()
         return {"ok": r["ok"], "conflict": r["conflict"], "message": r["message"]}
+
+    def preview_state(self) -> dict:
+        """页面刚加载时取最近一次预览内容（之后靠 onClaudeEvent 的 preview 事件更新）。"""
+        return self._preview.last or {"state": "loading", "message": "正在读取预览"}
+
+    def set_preview_edge(self, edge) -> dict:
+        """预览长边像素（256–2048）；"初始"图保持首次取图时的分辨率。"""
+        return {"ok": True, "edge": self._preview.set_edge(edge)}
 
 
 def main() -> None:
