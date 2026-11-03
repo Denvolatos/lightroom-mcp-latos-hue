@@ -116,6 +116,7 @@ local modules = {
   LrApplication = { activeCatalog = function() return catalog end, developPresetFolders = function() return { folder } end,
                     versionTable = function() return { major = 15, minor = 2, revision = 0, build_version = "x" } end },
   LrDate = { currentTime = function() return 0 end },
+  LrTasks = { pcall = pcall },
   LrExportSession = function(args)
     return { doExportOnCurrentTask = function()
       local s = args.exportSettings
@@ -653,3 +654,13 @@ def test_import_reports_a_busy_catalog_and_lightrooms_own_error(lr):
     lr.set_flag("add_fails", True)
     reply = lr.run("import_photo", path=enc(PHOTO_FILE))
     assert not reply["ok"] and "The file is corrupt." in reply["error"]
+
+
+def test_commands_lua_never_uses_a_bare_pcall():
+    """Real Lightroom 15.2: a plain pcall around a call that yields (addPhoto inside the write gate) fails with
+    "yielding is not allowed"; the fake SDK cannot show that, so the source is checked: only LrTasks.pcall."""
+    import re
+
+    source = (Path(__file__).resolve().parents[2] / "plugin" / "lrmcp.lrdevplugin" / "Commands.lua").read_text(encoding="utf-8")
+    bare = [n for n, line in enumerate(source.splitlines(), 1) if re.search(r"(?<![.\w])pcall\s*\(", line)]
+    assert not bare, f"bare pcall in Commands.lua at lines {bare}; use LrTasks.pcall"
