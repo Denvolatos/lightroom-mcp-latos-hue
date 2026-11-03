@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>修图助手（模板）</title>
+<title>修图助手</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root {
@@ -126,12 +126,12 @@
 <body>
 
 <div class="topbar">
-  <span class="brand">修图助手</span><span class="badge">模板 · 数据都是假的</span>
-  <button class="btn" onclick="toast('导入：将来从 SD 卡选文件夹，复制到软件文件夹')">导入</button>
+  <span class="brand">修图助手</span><span class="badge" id="demobadge">界面演示 · 示例数据</span>
+  <button class="btn" onclick="toast('导入：功能开发中')">导入</button>
   <button class="btn" onclick="openExport()">导出</button>
   <button class="btn" onclick="undo()">撤销</button>
   <span class="spacer"></span>
-  <span class="status"><span class="dot"></span>Lightroom 已连接（假）</span>
+  <span class="status"><span class="dot" id="lrdot"></span><span id="lrstat">Lightroom 已连接（示例）</span></span>
   <span class="status" id="toastbox"></span>
 </div>
 
@@ -148,7 +148,7 @@
     </div>
     <div class="lower">
       <div class="section-title">文件 <span class="spacer"></span>
-        <button class="btn small" onclick="toast('将来：新建分类文件夹')">新建分类</button></div>
+        <button class="btn small" onclick="toast('新建分类：功能开发中')">新建分类</button></div>
       <div class="pane" id="files"></div>
     </div>
   </div>
@@ -165,14 +165,14 @@
   <!-- RIGHT -->
   <div class="col right">
     <div class="params">
-      <div class="section-title">本轮 AI 改了什么</div>
+      <div class="section-title">本次调整</div>
       <div class="pane"><table id="ptable"><thead><tr><th>参数</th><th>改前</th><th>改后</th><th></th></tr></thead><tbody></tbody></table>
-        <div class="empty" id="pempty">还没有改动。在下面告诉 AI 你想要什么。</div></div>
+        <div class="empty" id="pempty">暂无调整。请在下方输入修图需求。</div></div>
     </div>
     <div class="chat">
-      <div class="msgs" id="msgs"><div class="msg ai">你好，选一张照片，告诉我你想要的效果。</div></div>
-      <div class="opts"><button class="switch" id="sw" title="打开后，AI 每改一步都先问你"></button><span id="swlabel">逐步询问：关（AI 直接改）</span></div>
-      <div class="chatbar"><input id="inp" placeholder="例如：天空通透一点，整体更震撼" autocomplete="off"><button class="btn primary" id="send">发送</button><button class="btn" id="stop" style="display:none">停止</button></div>
+      <div class="msgs" id="msgs"><div class="msg ai">请选择照片并输入期望的修图效果。</div></div>
+      <div class="opts"><button class="switch" id="sw" title="开启后，每项调整需先经确认才会执行"></button><span id="swlabel">逐项确认：关（自动执行）</span></div>
+      <div class="chatbar"><input id="inp" placeholder="例如：提高天空通透度，增强整体层次感" autocomplete="off"><button class="btn primary" id="send">发送</button><button class="btn" id="stop" style="display:none">停止</button></div>
     </div>
   </div>
 </div>
@@ -195,7 +195,7 @@ const PHOTOS = [
   {n:'IMG_0415.JPG', f:'街拍', c:'#9c7a5b'}, {n:'IMG_0420.JPG', f:'未分类', c:'#7a8f6a'}
 ];
 const PRESETS = ['清爽风光', '电影感', '黑白高对比', '日系低饱和'];
-const EXPERIENCE = ['雪山天空发灰：先降高光，再加蓝色饱和度', '逆光人像：提阴影 +40，轻微降曝光'];
+const EXPERIENCE = ['天空发灰：先降低高光，再提高蓝色饱和度', '逆光人像：阴影 +40，曝光小幅降低'];
 let sel = 0, fav = new Set([0]), favP = new Set(['电影感']), steps = [], history = [], mode = 'pair', ask = false;
 
 const $ = s => document.querySelector(s);
@@ -209,12 +209,12 @@ function renderLeft(){
     const d=document.createElement('div'); d.className='list-item';
     d.innerHTML=`<span class="name">${x}</span><span class="star ${favP.has(x)?'on':''}">★</span>`;
     d.querySelector('.star').onclick=e=>{e.stopPropagation(); favP.has(x)?favP.delete(x):favP.add(x); renderLeft();};
-    d.onclick=()=>toast('将来：把「'+x+'」套到当前照片'); p.appendChild(d); });
+    d.onclick=()=>toast('应用预设「'+x+'」：功能开发中'); p.appendChild(d); });
   if (ltab==='fav'){ const l=[...PHOTOS.filter((_,i)=>fav.has(i)).map(x=>'照片 · '+x.n), ...[...favP].map(x=>'预设 · '+x)];
-    if(!l.length) p.innerHTML='<div class="empty">还没有收藏。点 ★ 就能收藏。</div>';
+    if(!l.length) p.innerHTML='<div class="empty">暂无收藏。点击 ★ 添加收藏。</div>';
     l.forEach(x=>{const d=document.createElement('div'); d.className='list-item'; d.innerHTML=`<span class="name">${x}</span>`; p.appendChild(d);}); }
   if (ltab==='exp') { EXPERIENCE.forEach(x=>{const d=document.createElement('div'); d.className='list-item'; d.innerHTML=`<span class="name">${x}</span>`; p.appendChild(d);});
-    p.insertAdjacentHTML('beforeend','<div class="empty">经验只存在你自己的电脑上，由你的 AI 记录。</div>'); }
+    p.insertAdjacentHTML('beforeend','<div class="empty">经验仅保存在本机，由 AI 记录。</div>'); }
 }
 $('#ltabs').onclick = e => { const t=e.target.closest('.tab'); if(!t) return;
   document.querySelectorAll('#ltabs .tab').forEach(x=>x.classList.toggle('on',x===t)); ltab=t.dataset.t; renderLeft(); };
@@ -237,12 +237,12 @@ function renderStage(){
   s.className='stage '+mode;
   if(mode==='pair') s.innerHTML=`
     <div class="frame"><div class="pic scene"></div><span class="label">原图</span></div>
-    <div class="frame"><div class="pic scene ${steps.length?'after':''}"></div><span class="label">现在</span>
-      <span class="note">${steps.length?'已改 '+steps.length+' 项':'还没有改动'}</span></div>`;
+    <div class="frame"><div class="pic scene ${steps.length?'after':''}"></div><span class="label">当前</span>
+      <span class="note">${steps.length?'已调整 '+steps.length+' 项':'暂无调整'}</span></div>`;
   else s.innerHTML=`
     <div class="frame"><div class="pic scene"></div><span class="label">原图</span></div>
     <div class="frame"><div class="pic scene v2"></div><span class="label">清爽版</span></div>
-    <div class="frame"><div class="pic scene v3"></div><span class="label">电影感版</span><span class="note">将来：点任一版就回到那个版本</span></div>`;
+    <div class="frame"><div class="pic scene v3"></div><span class="label">电影感版</span><span class="note">版本切换：功能开发中</span></div>`;
 }
 $('#modes').onclick=e=>{const b=e.target.closest('button'); if(!b) return;
   document.querySelectorAll('#modes button').forEach(x=>x.classList.toggle('on',x===b)); mode=b.dataset.m; renderStage();};
@@ -257,67 +257,67 @@ function renderParams(){
 function say(t, who='ai'){ const m=document.createElement('div'); m.className='msg '+who; m.textContent=t; $('#msgs').appendChild(m); m.scrollIntoView(); return m; }
 
 const PLAN = [
-  {k:'高光', a:0, b:-35, why:'天空有过亮的部分，压一压让云层有细节'},
-  {k:'蓝色饱和度', a:0, b:18, why:'天空蓝一点'},
-  {k:'清晰度', a:0, b:12, why:'山体轮廓更清楚'}
+  {k:'高光', a:0, b:-35, why:'天空高光区域过亮，降低以保留云层层次'},
+  {k:'蓝色饱和度', a:0, b:18, why:'增强天空蓝色'},
+  {k:'清晰度', a:0, b:12, why:'提升山体轮廓清晰度'}
 ];
 function apply(s){ steps.push(s); renderParams(); renderStage(); }
 function runPlan(i=0){
-  if(i>=PLAN.length){ say('改完了，左右对比看看。不满意可以点右上方每一项的「撤销」。'); return; }
+  if(i>=PLAN.length){ say('调整已完成。可在「本次调整」中逐项撤销。'); return; }
   const s=PLAN[i];
   if(!ask){ apply(s); setTimeout(()=>runPlan(i+1),500); return; }
   const m=document.createElement('div'); m.className='ask';
-  m.innerHTML=`我想把「${s.k}」从 ${s.a} 改到 ${s.b}<div class="why">${s.why}</div><div class="row"><button class="btn primary small">同意</button><button class="btn small">不改</button></div>`;
+  m.innerHTML=`拟调整：${s.k} ${s.a} → ${s.b}<div class="why">依据：${s.why}</div><div class="row"><button class="btn primary small">同意</button><button class="btn small">拒绝</button></div>`;
   $('#msgs').appendChild(m); m.scrollIntoView();
   const [ok,no]=m.querySelectorAll('button');
   ok.onclick=()=>{ m.querySelector('.row').remove(); apply(s); runPlan(i+1); };
-  no.onclick=()=>{ m.querySelector('.row').remove(); m.append('（已跳过）'); runPlan(i+1); };
+  no.onclick=()=>{ m.querySelector('.row').remove(); m.append('已拒绝'); runPlan(i+1); };
 }
 const REAL = () => !!(window.pywebview && window.pywebview.api && window.pywebview.api.send);
 let cur = null, busy = false;   // cur = 正在流式显示的那条 AI 消息
 function setBusy(b){ busy=b; $('#send').disabled=b; $('#inp').disabled=b; $('#stop').style.display=b?'':'none'; }
 function note(t){ const n=document.createElement('div'); n.className='note'; n.textContent=t; $('#msgs').appendChild(n); n.scrollIntoView(); return n; }
-function fmtCost(c){ return (c==null) ? '' : '，估算 $'+Number(c).toFixed(3); }
+function fmtCost(c){ return (c==null) ? '' : '，估算费用 $'+Number(c).toFixed(3); }
 /* 后端（Python）把每个事件推到这里 */
 window.onClaudeEvent = function(ev){
   if (ev.type==='text'){ if(!cur) cur=say('', 'ai'); cur.textContent+=ev.text; cur.scrollIntoView(); }
   else if (ev.type==='tool'){ cur=null; note(ev.label); }
   else if (ev.type==='error'){ cur=null; say(ev.message,'err'); }
-  else if (ev.type==='stopped'){ cur=null; note('已停止。'); }
+  else if (ev.type==='stopped'){ cur=null; note('已停止'); }
   else if (ev.type==='done'){
     if (!cur && ev.text && !ev.is_error && !$('#msgs').lastChild.classList.contains('ai')) say(ev.text,'ai');
     cur=null; setBusy(false);
-    if (ev.tokens) note('本轮约 '+ev.tokens.toLocaleString()+' token'+fmtCost(ev.cost)+'（估算，非账单）');
+    if (ev.tokens) note('本次用量约 '+ev.tokens.toLocaleString()+' token'+fmtCost(ev.cost)+'（估算值，非实际账单）');
   }
 };
 function send(){ const v=$('#inp').value.trim(); if(!v || busy) return; $('#inp').value=''; say(v,'me');
   if (REAL()){
-    setBusy(true); cur=null; note('正在思考…');
+    setBusy(true); cur=null; note('正在处理请求');
     window.pywebview.api.send(v).then(r=>{ if(r && !r.ok){ say(r.message,'err'); setBusy(false); } })
-      .catch(()=>{ say('没能连上后台，请重新打开程序。','err'); setBusy(false); });
+      .catch(()=>{ say('无法连接后台，请重新启动程序。','err'); setBusy(false); });
     return;
   }
-  setTimeout(()=>{ say('好的，我先看一下这张照片，然后分几步改。（这里是假回复，将来由你的 AI 回答）'); setTimeout(()=>runPlan(0),500); },400); }
+  setTimeout(()=>{ say('已收到需求，正在分析照片并制定调整方案。（演示回复）'); setTimeout(()=>runPlan(0),500); },400); }
 $('#stop').onclick=()=>{ if(REAL()) window.pywebview.api.stop(); };
 $('#send').onclick=send; $('#inp').onkeydown=e=>{ if(e.key==='Enter') send(); };
 $('#sw').onclick=()=>{ ask=!ask; $('#sw').classList.toggle('on',ask);
-  $('#swlabel').textContent= ask?'逐步询问：开（每步先问你）':'逐步询问：关（AI 直接改）'; };
+  $('#swlabel').textContent= ask?'逐项确认：开（每项调整需先确认）':'逐项确认：关（自动执行）'; };
 
 function undoOne(k){ steps=steps.filter(s=>s.k!==k); renderParams(); renderStage(); toast('已撤销「'+k+'」'); }
-function undo(){ if(!steps.length) return toast('没有可撤销的改动'); const s=steps.pop(); renderParams(); renderStage(); toast('已撤销「'+s.k+'」'); }
+function undo(){ if(!steps.length) return toast('没有可撤销的调整'); const s=steps.pop(); renderParams(); renderStage(); toast('已撤销「'+s.k+'」'); }
 
 /* ---- export dialog ---- */
 function openExport(){ $('#mask').classList.add('show'); }
 function closeExport(){ $('#mask').classList.remove('show'); }
-function doExport(){ closeExport(); toast('假导出：将来在这里真正导出 '+$('#exfmt').value+' 到你选的位置'); }
+function doExport(){ closeExport(); toast('导出功能开发中（所选格式：'+$('#exfmt').value+'）'); }
 $('#mask').onclick=e=>{ if(e.target.id==='mask') closeExport(); };
 
 function renderAll(){ renderLeft(); renderFiles(); renderStage(); renderParams(); }
 renderAll();
 /* 截图用：地址后加 #demo 会自动演示一轮 */
 if (location.hash === '#demo') {
-  say('天空通透一点，整体更震撼', 'me');
-  say('好的，我先看一下这张照片，然后分几步改。');
+  say('提高天空通透度，增强整体层次感', 'me');
+  say('已收到需求，正在分析照片并制定调整方案。（演示回复）');
   runPlan(0);
 }
 </script>

@@ -37,17 +37,17 @@ class Api:
 
     def send(self, text: str) -> dict:
         if self._busy:
-            return {"ok": False, "message": "上一句还在处理中，请稍等。"}
+            return {"ok": False, "message": "上一条请求仍在处理，请稍候。"}
         text = (text or "").strip()
         if not text:
-            return {"ok": False, "message": "请先输入内容。"}
+            return {"ok": False, "message": "请输入内容。"}
         self._busy = True
 
         def run() -> None:
             try:
                 self._session.send(text, self._emit)
             except Exception as e:  # 兜底：不让后台线程悄悄死掉
-                self._emit({"type": "error", "message": f"程序出错了：{e}"})
+                self._emit({"type": "error", "message": f"程序发生错误：{e}"})
                 self._emit({"type": "done", "tokens": 0, "cost": None, "text": "", "is_error": True})
             finally:
                 self._busy = False

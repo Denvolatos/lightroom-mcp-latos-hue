@@ -94,10 +94,10 @@ def test_error_result_is_friendly():
 
 
 def test_friendly_errors_in_chinese():
-    assert "还没登录" in cb.friendly_error("Not logged in")
+    assert "尚未登录" in cb.friendly_error("Not logged in")
     assert "额度" in cb.friendly_error("5-hour usage limit reached")
     assert "网络" in cb.friendly_error("getaddrinfo ENOTFOUND")
-    assert "出了点问题" in cb.friendly_error("weird")
+    assert "发生错误" in cb.friendly_error("weird")
     assert "claude" in cb.MSG_NO_CLAUDE and "180" in cb.MSG_TIMEOUT
 
 
