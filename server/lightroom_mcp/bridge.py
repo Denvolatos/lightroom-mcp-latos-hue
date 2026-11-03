@@ -110,6 +110,7 @@ class Bridge:
         self._latest_gen = 0.0
         self.last_seen = 0.0
         self.plugin_version: str | None = None
+        self._stopping = threading.Event()  # set by stop(): wakes every /poll that is waiting for a job
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -178,14 +179,18 @@ class Bridge:
         return sorted(ports)
 
     def stop(self) -> None:
-        if self._server is not None:
-            self._server.shutdown()
-            self._server.server_close()
-            self._server = None
+        """Announcement first (a new server may take this port the next moment), then wake every waiting /poll so the
+        plug-in's long poll returns at once instead of after ``poll_hold`` seconds, then close the socket."""
+        self._stopping.set()
         if self.info_file is not None:
             self.info_file.unlink(missing_ok=True)
         if self.port == self.legacy_port:
             self.token_file.unlink(missing_ok=True)
+        if self._server is not None:
+            server, self._server = self._server, None
+            server.shutdown()  # waits for the accept loop only; request threads are daemons and are not joined
+            server.server_close()
+            time.sleep(0.05)  # let the woken /poll handlers write their "none" before the process exits
 
     # ---- state -----------------------------------------------------
     @property
@@ -240,17 +245,25 @@ class Bridge:
                 pass
 
     def _next_job(self, gen: float) -> str:
+        if self._stopping.is_set():
+            return "none"
         self._heal_token_file()
         with self._lock:
             self.last_seen = time.time()
             if gen < self._latest_gen:
                 return "stop"  # an older plug-in instance (before a reload) must exit
             self._latest_gen = gen
-        try:
-            _, line = self._jobs.get(timeout=self.poll_hold)
-        except queue.Empty:
-            return "none"
-        return line
+        deadline = time.monotonic() + self.poll_hold
+        while not self._stopping.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                _, line = self._jobs.get(timeout=min(0.2, remaining))
+            except queue.Empty:
+                continue
+            return line
+        return "none"
 
     def _store_result(self, job_id: int, body: str) -> None:
         self._results[job_id] = body
