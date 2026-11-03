@@ -41,8 +41,9 @@ MSG_OFFLINE = "Lightroom 未连接，无法显示照片信息"
 MSG_TIMEOUT = "Lightroom 没有在时限内回复，可能正忙。请稍后再试。"
 MSG_TRUNCATED = f"仅显示前 {MAX_PHOTOS} 张。"
 MSG_READONLY = "只读模式已开启，无法加入 Lightroom。请先关闭只读模式（删除只读开关文件）后再试。"
-THUMB_ERRORS = {"not_found": "照片在 Lightroom 目录中不存在", "timeout": "读取缩略图超时", "too_large": "缩略图过大",
+THUMB_ERRORS = {"not_found": "照片在 Lightroom 目录中不存在", "timeout": "读取缩略图超时", "too_large": "缩略图过大（超过 150 KB），无法显示",
                 "bad_jpeg": "缩略图数据无效", "no_reply": "Lightroom 没有返回该缩略图", "not_added": "尚未加入 Lightroom，没有缩略图"}
+AUTO_RETRY_CODES = ("timeout", "too_large")   # 偶发失败（一批同时渲染的超时；真机上冷启动时偶尔先得到过大的预览，再取就正常）：自动再试一次（只一次），仍失败才显示“读取失败”
 
 
 def norm_key(path) -> str:
@@ -176,6 +177,7 @@ class PhotoLibrary:
         self._inflight: set[str] = set()
         self._wanted: set[str] = set()
         self._failed: dict[str, str] = {}
+        self._retried: set[str] = set()
         self._dirty: dict[str, float] = {}
         self._stale_inflight: set[str] = set()
         self.stats = {"requested": 0, "hits": 0, "fetched": 0, "failed": 0, "batches": 0, "batch_max": 0, "fetch_seconds": 0.0, "bytes": 0}
@@ -374,6 +376,7 @@ class PhotoLibrary:
                     continue
                 if retry:
                     self._failed.pop(i, None)
+                    self._retried.discard(i)
                 if i in self._failed:
                     thumbs[i] = {"error": self._failed[i]}
                     continue
@@ -422,12 +425,17 @@ class PhotoLibrary:
                 if t and t.get("ok") and t.get("jpeg"):
                     e = self.store.put(uid, THUMB_SIZE, THUMB_VERSION, t["jpeg"], (t.get("width"), t.get("height")))
                     self._failed.pop(uid, None)
+                    self._retried.discard(uid)
                     self.stats["fetched"] += 1
                     self.stats["bytes"] += len(t["jpeg"])
                     items.append({"id": uid, "url": self.server.url_for(e)})
                 else:
                     code = (t or {}).get("error") or ("no_reply" if not batch_error else "")
-                    msg = batch_error or THUMB_ERRORS.get(code, "无法读取缩略图")
+                    if code in AUTO_RETRY_CODES and uid not in self._retried and uid in self._wanted:
+                        self._retried.add(uid)
+                        self._queue.append(uid)
+                        continue
+                    msg = batch_error or THUMB_ERRORS.get(code) or (f"无法读取缩略图（{str(code)[:60]}）")
                     self._failed[uid] = msg
                     self.stats["failed"] += 1
                     items.append({"id": uid, "error": msg})

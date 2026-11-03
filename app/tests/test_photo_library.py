@@ -398,19 +398,48 @@ def test_failed_thumbnails_and_retry(env):
     seed(env, 3, 0)
     env.lib.refresh_sync()
     ids = [p["id"] for p in env.lib.state()["photos"]]
-    env.lr.thumb_fail = {ids[1]: "timeout", ids[2]: "not_found"}
+    env.lr.thumb_fail = {ids[1]: "too_large", ids[2]: "not_found"}
     env.lib.request_thumbs(ids)
     env.lib.process_thumbs_once()
+    env.lib.process_thumbs_once()                                              # too_large 自动再试了一次，仍失败
     ev = [i for e in env.events if e["type"] == "library_thumbs" for i in e["items"]]
     err = {i["id"]: i["error"] for i in ev if "error" in i}
-    assert err == {ids[1]: "读取缩略图超时", ids[2]: "照片在 Lightroom 目录中不存在"}
+    assert err == {ids[1]: "缩略图过大（超过 150 KB），无法显示", ids[2]: "照片在 Lightroom 目录中不存在"}
     r = env.lib.request_thumbs(ids)                                           # 不重试：失败的直接给错误，不再排队
-    assert r["pending"] == [] and set(r["thumbs"][ids[1]]) == {"error"} and len(env.lr.thumb_calls) == 1
+    assert r["pending"] == [] and set(r["thumbs"][ids[1]]) == {"error"} and len(env.lr.thumb_calls) == 2
     env.lr.thumb_fail = {}
     r = env.lib.request_thumbs(ids, retry=True)
     assert r["pending"] == [ids[1], ids[2]]
     env.lib.process_thumbs_once()
     assert env.lr.thumb_calls[-1] == [ids[1], ids[2]] and env.lib.state()["failed"] == {}
+
+
+def test_timeout_is_retried_once_automatically(env):
+    seed(env, 2, 0)
+    env.lib.refresh_sync()
+    ids = [p["id"] for p in env.lib.state()["photos"]]
+    env.lr.thumb_fail = {ids[0]: "timeout"}
+    env.lib.request_thumbs(ids)
+    env.lib.process_thumbs_once()
+    assert env.lib.state()["failed"] == {}                                     # 第一次超时：不报失败，排队再试
+    assert [i["id"] for e in env.events if e["type"] == "library_thumbs" for i in e["items"]] == [ids[1]]
+    env.lib.process_thumbs_once()                                              # 再试仍超时：才算失败
+    assert env.lr.thumb_calls[-1] == [ids[0]] and env.lib.state()["failed"] == {ids[0]: "读取缩略图超时"}
+    assert env.lib.process_thumbs_once() is False                              # 只试一次，不会一直重试
+    env.lr.thumb_fail = {}
+    env.lib.request_thumbs(ids, retry=True)                                    # 用户点“重试”：重新开始
+    env.lib.process_thumbs_once()
+    assert ids[0] in env.lib.state()["thumbs"]
+
+
+def test_unknown_error_code_is_shown_in_message(env):
+    seed(env, 1, 0)
+    env.lib.refresh_sync()
+    pid = env.lib.state()["photos"][0]["id"]
+    env.lr.thumb_fail = {pid: "Lightroom 说：渲染失败"}
+    env.lib.request_thumbs([pid])
+    env.lib.process_thumbs_once()
+    assert env.lib.state()["failed"][pid] == "无法读取缩略图（Lightroom 说：渲染失败）"
 
 
 def test_whole_batch_failure_marks_every_photo(env):
