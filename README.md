@@ -70,6 +70,11 @@ Claude / Codex ──(MCP, stdio)──▶ lrmcp（Python 服务，本机队列 
 2. **在你自己的资源管理器里双击运行**（不要通过 Claude 桌面版启动，见下面的 MSIX 提醒）。程序没有代码签名，Windows SmartScreen 会提示"未知发布者"。
 3. 安装完重启 Lightroom 和你的 AI 助手，让它调用 `lr_status`。
 
+## 🍎 macOS（实验，待验证）
+
+`macos` 分支让服务端代码能在 macOS 上运行，单元测试已通过；**还没有用真实的 Lightroom Classic for Mac 验证过**
+（插件载入、预览导出、读写参数都没测）。请不要把它当成"已支持"。详见 [`docs/macOS验证记录.md`](docs/macOS验证记录.md)。
+
 ## 🚀 从源码安装
 
 1. **服务**（普通 PowerShell）：

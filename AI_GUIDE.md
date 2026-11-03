@@ -105,6 +105,21 @@ Then ask the user to **restart Lightroom**. After the restart, *File → Plug-in
   Where the configuration lives and its format differ per app, follow your own app's documentation. **Use the name with an underscore,
   `lightroom_mcp`** (some apps silently ignore other spellings).
 
+### 3.3b macOS (experimental — not yet tested with a real Lightroom)
+
+On the `macos` branch the server code runs on macOS and its unit tests pass, but **nothing has been verified against a real
+Lightroom Classic on a Mac yet**. Treat every step below as "to be verified" and tell the user so. Do not present macOS as supported.
+
+```bash
+pip install "https://github.com/Denvolatos/lightroom-mcp-win/archive/refs/heads/macos.zip#subdirectory=server"
+lrmcp --version
+lrmcp register --dry-run    # then, after the user agrees: lrmcp register
+```
+
+For the plug-in, copy the folder `plugin/lrmcp.lrdevplugin` to a place the user chooses (for example `~/LrMcp-plugin`), delete
+`DevRun.lua` and `devscripts` from the copy, and ask the user to add it in Lightroom: *File → Plug-in Manager → Add*. The shared
+files live in `~/LrMcp` (same as on Windows). If `lr_status` does not show `"connected": true`, call `lr_doctor`.
+
 ### 3.4 Restart and verify
 
 1. Ask the user to **restart your AI app** (so it loads the new MCP server) and to keep **Lightroom open**.

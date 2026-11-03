@@ -3,6 +3,16 @@
 Versions: a new feature raises the middle number, a small fix the last one. The server version lives in
 `server/lightroom_mcp/__init__.py`, the plug-in version in `plugin/lrmcp.lrdevplugin/Version.lua` (and `Info.lua`).
 
+## Unreleased — macOS groundwork (branch `macos`, experimental, not verified with a real Lightroom)
+
+- `lr_doctor` looks for the `Adobe Lightroom Classic` process on macOS (via `ps`); Windows still uses `tasklist`.
+- Shared announcement/token files get mode 600 on macOS/Linux (Windows ACL unchanged).
+- The bridge may rebind a port still in `TIME_WAIT` on macOS (Windows keeps its exclusive bind). A second server on a port in use is
+  still refused (tested).
+- Plug-in: `Json.lua` and `Commands.lua` no longer use the locale-dependent `%c` pattern class. On a UTF-8 locale it matched
+  bytes 0x80–0x9F and corrupted Chinese text in every reply; the explicit control-character set behaves like the C locale did on Windows.
+- Tests: 157 (was 151). Needs `lupa`, otherwise the Lua tests are skipped silently.
+
 ## 0.3.0 — several AI sessions at once
 
 - Every server takes the first free port in 58770–58789 and announces itself in `~/LrMcp/servers/<port>.txt`; the
