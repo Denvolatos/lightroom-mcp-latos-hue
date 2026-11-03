@@ -76,11 +76,12 @@ class RemoteBridge:
 
 class LrService:
     def __init__(self, bridge=None, edit_service=None, state_file: Path | None = None, rpc_token: str | None = None,
-                 alive=lambda: True, restart_hook=None):
+                 alive=lambda: True, restart_hook=None, library_service=None):
         """给了 state_file 与 rpc_token：借用常驻 claude 的服务（RemoteBridge），自己不起 Bridge；否则自己起一个。"""
         self._bridge = bridge
         self._edits = edit_service
         self._remote = (state_file, rpc_token, alive) if state_file is not None and rpc_token else None
+        self._library_svc = library_service       # 测试时可传入假的图库服务
         self._restart_hook = restart_hook
         self._lock = threading.Lock()
         self.start_error: str | None = None
@@ -282,6 +283,29 @@ class LrService:
             return recs[-1]["edit_id"] if recs else None
         except Exception:
             return None
+
+    # ---- 图库：列照片、缩略图、选中（server 的 LibraryService，只给软件用，不是 MCP 工具；都不写入照片或目录） ----
+    def _library(self):
+        if self._library_svc is not None:
+            return self._library_svc
+        if not self.start() or self._bridge is None:
+            _, bridge_mod = _import_server()
+            raise bridge_mod.PluginNotConnected("无法建立与 Lightroom 的连接。")
+        _import_server()
+        from lightroom_mcp import library as library_mod
+        return library_mod.LibraryService(self._bridge.call)
+
+    def library_list(self, path: str, offset: int = 0, limit: int = 500) -> dict:
+        """软件文件夹（含子文件夹）里、目录已有的照片，分页：{"in_catalog","total","offset","photos":[...]}。"""
+        return self._library().list_folder_photos(path, True, offset, limit)
+
+    def library_thumbnails(self, ids: list, size: int = 256) -> dict:
+        """一批缩略图（只含 JPEG 字节）：{"size","thumbnails":[{id, ok, jpeg, ...} | {id, ok False, error}]}。"""
+        return self._library().get_thumbnails(ids, size)
+
+    def library_select(self, ids: list, active: str | None, show_folder: str | None) -> dict:
+        """在 Lightroom 里选中这些照片（不切到前台）：{"status","selected","not_selected","missing","all_selected","reason","message"}。"""
+        return self._library().select_photos(ids, active, show_folder)
 
     # ---- 预设：读取当前照片、套用（只给软件用） --------------------
     def _need_edits(self) -> None:
