@@ -66,25 +66,36 @@
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
   .seg button { border: none; background: var(--panel2); padding: 4px 14px; color: var(--muted); }
   .seg button.on { background: var(--accent2); color: #fff; }
-  .stage { flex: 1; min-height: 0; display: grid; gap: 10px; padding: 12px; }
-  .stage.pair { grid-template-columns: 1fr 1fr; }
-  .stage.multi { grid-template-columns: repeat(3, 1fr); }
+  .stage { flex: 1; min-height: 0; display: grid; gap: 10px; padding: 12px 12px 6px; grid-template-rows: minmax(0, 1fr); }
+  .stage.pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .frame { position: relative; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line);
-    min-height: 0; }
-  .frame .pic { position: absolute; inset: 0; transition: filter .4s ease; }
+    min-height: 0; min-width: 0; background: #0f1012; }
+  .frame .scroller { position: absolute; inset: 0; display: flex; overflow: hidden; }
+  .frame .pimg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; }
+  .frame.has .pimg { display: block; }
+  .stage.actual .scroller { overflow: auto; }
+  .stage.actual .pimg { position: static; width: auto; height: auto; max-width: none; margin: auto; flex: none; }
   .frame .label { position: absolute; left: 10px; top: 10px; padding: 2px 10px; border-radius: 99px;
-    background: rgba(0,0,0,.55); font-size: 12px; }
+    background: rgba(0,0,0,.6); font-size: 12px; z-index: 2; }
   .frame .note { position: absolute; left: 10px; bottom: 10px; right: 10px; font-size: 12px; color: #dfe3e8;
-    text-shadow: 0 1px 2px #000; }
-  .scene { background:
+    text-shadow: 0 1px 2px #000; z-index: 2; pointer-events: none; }
+  .frame .ph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
+    padding: 0 24px; color: var(--muted); font-size: 13px; z-index: 1; }
+  .frame.has .ph { display: none; }
+  .frame .chip { position: absolute; right: 10px; top: 10px; padding: 2px 10px; border-radius: 99px; z-index: 2;
+    background: rgba(0,0,0,.6); font-size: 12px; color: var(--warn); display: none; }
+  .frame.busy .chip { display: block; }
+  .infobar { flex: none; padding: 2px 14px 10px; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
+  .infobar .line { color: var(--text); opacity: .85; font-variant-numeric: tabular-nums; user-select: text; }
+  .seg button:disabled { opacity: .5; cursor: not-allowed; }
+  .viewbar select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; font: inherit; font-size: 12px; }
+  /* 仅界面演示用（#demo）：示例画面，非真实照片 */
+  .scene { position: absolute; inset: 0; background:
     radial-gradient(circle at 70% 22%, #f6d9a8 0 6%, transparent 7%),
     linear-gradient(180deg, #6f93b8 0%, #9db8cf 38%, #c9d3d6 52%, transparent 52%),
     linear-gradient(165deg, transparent 0 52%, #e9eef2 52% 60%, #8a95a0 60% 72%, #3d4a3a 72% 100%);
-    background-color: #c9d3d6;
-  }
+    background-color: #c9d3d6; transition: filter .4s ease; }
   .scene.after { filter: contrast(1.18) saturate(1.35) brightness(1.04); }
-  .scene.v2 { filter: contrast(1.05) saturate(1.1) brightness(1.1) hue-rotate(-6deg); }
-  .scene.v3 { filter: contrast(1.3) saturate(0.85) brightness(.92) sepia(.2); }
   /* ---------- right ---------- */
   .right .params { flex: 2; min-height: 0; display: flex; flex-direction: column; }
   .right .chat { flex: 1; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); }
@@ -164,10 +175,17 @@
   <!-- CENTER -->
   <div class="center">
     <div class="viewbar">
-      <div class="seg" id="modes"><button class="on" data-m="pair">并排</button><button data-m="multi">多版本</button></div>
-      <span class="spacer"></span><span class="why" id="cur">DSC08205.JPG</span>
+      <div class="seg" id="modes"><button class="on" data-m="pair">并排</button><button data-m="multi" disabled title="需要版本功能，后续提供">多版本</button></div>
+      <span class="why">多版本：需要版本功能，后续提供</span>
+      <span class="spacer"></span>
+      <span id="pvctl" style="display:none;align-items:center;gap:8px">
+        <label class="why">预览清晰度 <select id="edge"><option value="768">长边 768 px</option><option value="1024" selected>长边 1024 px</option><option value="1536">长边 1536 px</option><option value="2048">长边 2048 px</option></select></label>
+        <button class="btn small" id="zoom" title="双击画面也可切换">适合窗口</button>
+      </span>
+      <span class="why" id="cur"></span>
     </div>
     <div class="stage pair" id="stage"></div>
+    <div class="infobar" id="infobar"></div>
   </div>
 
   <!-- RIGHT -->
@@ -242,20 +260,50 @@ function renderFiles(){
 
 /* ---- center ---- */
 function nApplied(){ return REAL() ? rows.filter(r=>r.status==='已应用').length : steps.length; }
-function renderStage(){
-  const s=$('#stage'); $('#cur').textContent=(REAL() && photoName) ? photoName : PHOTOS[sel].n;
-  s.className='stage '+mode;
-  if(mode==='pair') s.innerHTML=`
-    <div class="frame"><div class="pic scene"></div><span class="label">原图</span></div>
-    <div class="frame"><div class="pic scene ${nApplied()?'after':''}"></div><span class="label">当前</span>
-      <span class="note">${nApplied()?'已调整 '+nApplied()+' 项':'暂无调整'}</span></div>`;
-  else s.innerHTML=`
-    <div class="frame"><div class="pic scene"></div><span class="label">原图</span></div>
-    <div class="frame"><div class="pic scene v2"></div><span class="label">清爽版</span></div>
-    <div class="frame"><div class="pic scene v3"></div><span class="label">电影感版</span><span class="note">版本切换：功能开发中</span></div>`;
+const DEMO = location.hash === '#demo';
+let pv = null, actual = false, noBackend = false;   // pv = 后端推送的最近一次预览内容
+const PH_INITIAL = '初始（首次打开时）';
+const PH_INITIAL_TIP = '软件第一次读取该照片时的状态。若照片此前已在 Lightroom 中调整过，则不等同于原片。';
+function fmtInfo(p){ return [p.name,p.camera,p.iso,p.aperture,p.shutter,p.focal,p.format,p.size].filter(x=>x).join('  ·  '); }
+function frameHTML(id, label, tip){ return `<div class="frame" id="${id}"><div class="scroller"><img class="pimg" alt=""></div><div class="ph"></div><span class="label" ${tip?`title="${esc(tip)}"`:''}>${label}</span><span class="chip">正在读取预览</span><span class="note"></span></div>`; }
+function setFrame(id, o){   // o: {url, text, note, busy}
+  const f=$('#'+id), img=f.querySelector('.pimg');
+  if (o.url){ if (img.getAttribute('src')!==o.url) img.src=o.url; f.classList.add('has'); }
+  else { img.removeAttribute('src'); f.classList.remove('has'); f.querySelector('.ph').textContent=o.text||''; }
+  f.classList.toggle('busy', !!o.busy); f.querySelector('.note').textContent=o.note||'';
 }
-$('#modes').onclick=e=>{const b=e.target.closest('button'); if(!b) return;
-  document.querySelectorAll('#modes button').forEach(x=>x.classList.toggle('on',x===b)); mode=b.dataset.m; renderStage();};
+function renderStage(){
+  const s=$('#stage'), real=REAL(), kind = real ? 'real' : (DEMO ? 'demo' : 'none');
+  s.classList.toggle('actual', actual && real);
+  if (s.dataset.kind!==kind){
+    s.dataset.kind=kind;
+    if (kind==='demo') s.innerHTML=`<div class="frame has"><div class="scene"></div><span class="label">初始（示例）</span></div><div class="frame has"><div class="scene"></div><span class="label">当前（示例）</span><span class="note"></span></div>`;
+    else { s.innerHTML=frameHTML('fi',PH_INITIAL,PH_INITIAL_TIP)+frameHTML('fc','当前'); s.ondblclick=toggleZoom; }
+  }
+  $('#pvctl').style.display = real ? 'flex' : 'none';
+  if (kind==='demo'){ $('#cur').textContent='界面演示 · 示例画面，非真实照片';
+    s.children[1].querySelector('.scene').classList.toggle('after', !!nApplied());
+    s.children[1].querySelector('.note').textContent = nApplied()?'已调整 '+nApplied()+' 项':'暂无调整'; $('#infobar').innerHTML=''; return; }
+  if (kind==='none'){ $('#cur').textContent='';
+    const t = noBackend ? '当前为静态页面，无预览（地址后加 #demo 可查看界面演示）' : '正在读取预览';
+    setFrame('fi',{text:t}); setFrame('fc',{text:t}); $('#infobar').innerHTML=''; return; }
+  const p = pv || {state:'loading', message:'正在读取预览'}, ph = p.photo || {};
+  $('#cur').textContent = ph.name || photoName || '';
+  if (p.state==='ok'){
+    const n = nApplied(), pi = p.current;
+    setFrame('fi',{url:p.initial.url});
+    setFrame('fc',{url:p.current.url, busy:!!p.loading, note: p.same ? (n?'':'与初始一致') : (n?'已调整 '+n+' 项':'')});
+    $('#infobar').innerHTML = `<div class="line">${esc(fmtInfo(ph))}</div><div>预览 ${pi.w&&pi.h?pi.w+' × '+pi.h+' 像素':''}${actual?'（100% 显示）':''}。“初始”指软件首次读取该照片时的状态；若此前已在 Lightroom 中调整过，则不等同于原片。</div>`;
+  } else {
+    const t = p.message || '正在读取预览';
+    setFrame('fi',{text:t}); setFrame('fc',{text:t});
+    $('#infobar').innerHTML = ph.name ? `<div class="line">${esc(fmtInfo(ph))}</div>` : '';
+  }
+}
+function toggleZoom(){ if(!REAL()) return; actual=!actual; $('#zoom').textContent = actual ? '100%' : '适合窗口'; renderStage(); }
+$('#zoom').onclick=toggleZoom;
+$('#edge').onchange=()=>{ if(REAL()) window.pywebview.api.set_preview_edge(parseInt($('#edge').value,10)); };
+setTimeout(()=>{ if(!REAL()){ noBackend=true; renderStage(); } }, 2500);
 
 /* ---- right ---- */
 let rows = [];   // 真实模式下的“本次调整”（由后端推送）
@@ -329,6 +377,7 @@ window.onClaudeEvent = function(ev){
   else if (ev.type==='adjust'){ rows=ev.rows; renderParams(); renderStage(); }
   else if (ev.type==='status'){ showStatus(ev); }
   else if (ev.type==='photo'){ photoName=ev.name; renderStage(); }
+  else if (ev.type==='preview'){ pv=ev; renderStage(); }
   else if (ev.type==='connecting'){ cur=null; note(ev.message); }
   else if (ev.type==='confirm'){ cur=null; showConfirm(ev); }
   else if (ev.type==='confirm_done'){ closeConfirm(ev); }
@@ -393,6 +442,7 @@ if (location.hash !== '#demo') window.addEventListener('pywebviewready', ()=>{
   $('#demobadge').style.display='none';
   $('#newchat').style.display='';
   const poll=()=>window.pywebview.api.status().then(s=>{ showStatus(s); if (s.photo && s.photo.name && s.photo.name!==photoName){ photoName=s.photo.name; renderStage(); } }).catch(()=>{});
+  window.pywebview.api.preview_state().then(r=>{ pv=r; renderStage(); }).catch(()=>{});
   poll(); setInterval(poll, 3000); renderParams(); renderStage(); });
 function renderAll(){ renderLeft(); renderFiles(); renderStage(); renderParams(); }
 renderAll();
