@@ -168,33 +168,41 @@ function M.get_develop(params)
 	}
 end
 
-local function previewSettings(name, edge)
-	return {
+-- name: file name without extension; dir: destination folder; edge: pixels of the long side (0 = original size)
+local function exportSettings(name, dir, edge, quality, minimalMetadata)
+	local settings = {
 		LR_export_destinationType = "specificFolder",
-		LR_export_destinationPathPrefix = previewDir,
+		LR_export_destinationPathPrefix = dir,
 		LR_export_useSubfolder = false,
 		LR_reimportExportedPhoto = false,
-		LR_collisionHandling = "overwrite",
+		LR_collisionHandling = "overwrite", -- callers pick a free name themselves (previews are unique, exports check)
 		LR_renamingTokensOn = true,
 		LR_tokens = "{{custom_token}}",
 		LR_tokenCustomString = name,
 		LR_extensionCase = "lowercase",
 		LR_format = "JPEG",
-		LR_jpeg_quality = 0.8,
+		LR_jpeg_quality = quality,
 		LR_export_colorSpace = "sRGB",
-		LR_size_doConstrain = true,
-		LR_size_resizeType = "longEdge",
-		LR_size_maxHeight = edge,
-		LR_size_maxWidth = edge,
+		LR_size_doConstrain = edge > 0,
 		LR_size_units = "pixels",
 		LR_size_doNotEnlarge = true,
 		LR_size_resolution = 72,
 		LR_size_resolutionUnits = "inch",
 		LR_outputSharpeningOn = false,
-		LR_minimizeEmbeddedMetadata = true,
+		LR_minimizeEmbeddedMetadata = minimalMetadata,
 		LR_useWatermark = false,
 		LR_includeVideoFiles = false,
 	}
+	if edge > 0 then
+		settings.LR_size_resizeType = "longEdge"
+		settings.LR_size_maxHeight = edge
+		settings.LR_size_maxWidth = edge
+	end
+	return settings
+end
+
+local function previewSettings(name, edge)
+	return exportSettings(name, previewDir, edge, 0.8, true)
 end
 
 function M.get_preview(params)
@@ -209,7 +217,7 @@ function M.get_preview(params)
 	-- unique per call: two AI sessions may ask for a preview of the same photo within the same second, and a shared
 	-- file name would let one session read the other's picture
 	previewCounter = previewCounter + 1
-	local name = string.format("p_%s_%d_%d", uuid, math.floor(LrDate.currentTime() * 1000), previewCounter)
+	local name = string.format("p_%s_%.0f_%d", uuid, math.floor(LrDate.currentTime() * 1000), previewCounter)
 	local path = LrPathUtils.child(previewDir, name .. ".jpg")
 	if LrFileUtils.exists(path) then
 		LrFileUtils.delete(path)
@@ -875,6 +883,126 @@ function M.set_metadata(params)
 	return { before = before, after = after, verified = verified, photo = describe(photo) }
 end
 
+-- ---------------------------------------------------------------------------------------------------------------------
+-- Export (v0.13): writes a JPEG of the photo as it looks now (adjustments and crop included) into the folder the USER names
+-- in the chat (parameter "folder", an absolute path, percent-encoded), or into a standard place by name (destination =
+-- desktop | pictures | documents | data). Because a path now comes from a request, it is checked here and not trusted:
+-- it must be an existing local folder (no network paths, no "..", nothing under system folders or this tool's own data),
+-- the file name is made here from the photo's file name, the file type is always JPEG, and a file is never overwritten.
+-- Not sent to the AI service.
+-- ---------------------------------------------------------------------------------------------------------------------
+local MAX_EXPORT_EDGE = 20000
+local BLOCKED_FOLDERS = {
+	"/windows/", "/program files", "/programdata/", "/appdata/", "/.ssh/", "/lrmcp/", "/system/", "/library/", "/usr/",
+	"/bin/", "/sbin/", "/etc/", "/applications/", "/adobe/lightroom/modules",
+}
+
+local function checkExportFolder(path)
+	if path == "" or #path > 400 or path:find("%c") then
+		fail("导出文件夹的路径不合法（为空、太长或含控制字符）。")
+	end
+	if path:sub(1, 2) == "\\\\" or path:sub(1, 2) == "//" then
+		fail("不允许导出到网络路径。请用本机的文件夹。")
+	end
+	if not LrPathUtils.isAbsolute(path) then
+		fail("导出文件夹必须是完整路径，比如 D:\\照片\\导出 。")
+	end
+	local norm = (path:gsub("\\", "/")):lower() .. "/"
+	norm = norm:gsub("//+", "/")
+	for part in norm:gmatch("[^/]+") do
+		if part == ".." then
+			fail("路径里不能有 .. 。")
+		end
+	end
+	for _, bad in ipairs(BLOCKED_FOLDERS) do
+		if norm:find(bad, 1, true) and not (bad == "/lrmcp/" and norm:find("/lrmcp/exports/", 1, true)) then
+			fail("这个位置不允许导出（系统目录，或本工具自己的数据目录）：" .. path)
+		end
+	end
+	if LrFileUtils.exists(path) ~= "directory" then
+		fail("这个文件夹不存在，或者不是文件夹：" .. path .. "。导出不会替你创建文件夹，请先建好。")
+	end
+end
+
+-- Parameters: photo=<"selected"|uuid>, and ONE of folder=<percent-encoded absolute path> | destination=desktop|pictures|documents|data;
+-- optional long_edge=0 (original size) | 256..20000, quality=40..100, metadata=minimal|all
+function M.export_photo(params)
+	local catalog = LrApplication.activeCatalog()
+	local photo = photoFromRef(catalog, params.photo)
+	if photo:getRawMetadata("isVideo") then
+		fail("这是视频文件，暂不支持导出。")
+	end
+	local destination = params.destination
+	local root
+	if params.folder and params.folder ~= "" then
+		root = (params.folder:gsub("%%(%x%x)", function(h)
+			return string.char(tonumber(h, 16))
+		end))
+		checkExportFolder(root)
+		destination = "folder"
+	elseif destination == "desktop" or destination == "pictures" or destination == "documents" then
+		root = LrPathUtils.getStandardFilePath(destination)
+	elseif destination == "data" then
+		root = LrPathUtils.child(LrPathUtils.child(LrPathUtils.getStandardFilePath("home"), "LrMcp"), "exports")
+		LrFileUtils.createAllDirectories(root)
+	else
+		fail("请让用户说清楚导出到哪里：用 folder 给完整路径，或用 destination=desktop / pictures / documents。")
+	end
+	local longEdge = tonumber(params.long_edge) or 0
+	if longEdge ~= 0 and (longEdge ~= longEdge or longEdge < 256 or longEdge > MAX_EXPORT_EDGE) then
+		fail(string.format("long_edge 要么是 0（原始尺寸），要么在 256 到 %d 之间。", MAX_EXPORT_EDGE))
+	end
+	longEdge = math.floor(longEdge)
+	local quality = tonumber(params.quality) or 90
+	if quality ~= quality then
+		quality = 90
+	end
+	quality = math.max(40, math.min(100, math.floor(quality)))
+	local minimal = params.metadata ~= "all"
+
+	-- the file name comes from the photo's own file name, only safe characters; the first free name is used
+	local leaf = LrPathUtils.leafName(photo:getRawMetadata("path") or "photo")
+	local base = (LrPathUtils.removeExtension(leaf):gsub("[^%w%-_]", "_"))
+	if base == "" then
+		base = "photo"
+	end
+	local stem = base .. "_LrMCP" .. (longEdge > 0 and ("_" .. longEdge .. "px") or "_full")
+	local name, n = stem, 1
+	while LrFileUtils.exists(LrPathUtils.child(root, name .. ".jpg")) do
+		n = n + 1
+		name = stem .. "_" .. n
+	end
+	local path = LrPathUtils.child(root, name .. ".jpg")
+
+	LrExportSession({
+		photosToExport = { photo },
+		exportSettings = exportSettings(name, root, longEdge, quality / 100, minimal),
+	}):doExportOnCurrentTask()
+	if not LrFileUtils.exists(path) then
+		fail("Lightroom 没有生成导出文件（可能被导出设置、磁盘空间或权限拦截）。")
+	end
+	local attrs = LrFileUtils.fileAttributes(path)
+	local dims = photo:getRawMetadata("croppedDimensions") or photo:getRawMetadata("dimensions") or {}
+	local width, height = dims.width, dims.height
+	if width and height and longEdge > 0 and math.max(width, height) > longEdge then
+		local scale = longEdge / math.max(width, height)
+		width, height = math.floor(width * scale + 0.5), math.floor(height * scale + 0.5)
+	end
+	return {
+		path = path,
+		file = name .. ".jpg",
+		folder = root,
+		destination = destination,
+		bytes = attrs and attrs.fileSize,
+		width = width,
+		height = height,
+		long_edge = longEdge,
+		quality = quality,
+		metadata = minimal and "minimal" or "all",
+		photo = describe(photo),
+	}
+end
+
 local COMMANDS = {
 	status = M.status,
 	list_selected = M.list_selected,
@@ -885,6 +1013,7 @@ local COMMANDS = {
 	snapshot = M.snapshot,
 	apply_preset = M.apply_preset,
 	restore_settings = M.restore_settings,
+	export_photo = M.export_photo,
 	get_metadata = M.get_metadata,
 	set_metadata = M.set_metadata,
 }

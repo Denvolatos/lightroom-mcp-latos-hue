@@ -20,6 +20,7 @@ from typing import Callable
 
 from . import config
 from .bridge import BridgeTimeout
+from .versions import VersionError, VersionStore
 
 COLORS = ("Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta")
 GLOBAL_KEYS = (
@@ -373,8 +374,10 @@ class EditService:
     ``call(command, params, timeout)`` talks to the plug-in (``Bridge.call``).
     """
 
-    def __init__(self, call: Call, store: EditStore | None = None, readonly_file: Path = config.READONLY_FILE):
+    def __init__(self, call: Call, store: EditStore | None = None, readonly_file: Path = config.READONLY_FILE,
+                 versions: VersionStore | None = None):
         self.call = call
+        self.versions = versions or VersionStore()
         self.store = store or EditStore()
         self.readonly_file = readonly_file
         self._plans: dict[str, dict] = {}   # batch plans from a dry run; in memory only, single use
@@ -879,6 +882,96 @@ class EditService:
             self.store.save(record)
         return {"batch": record["edit_id"], "restored": restored, "problems": problems,
                 "note": "有些照片没能还原，请看 problems；成功的已经还原，可以再次调用补做剩下的。" if problems else "整批已还原。"}
+
+    # ---- named versions of one photo -------------------------------
+    @staticmethod
+    def _version_keys(settings: dict) -> dict:
+        """Only what this project may change: sliders, curves, crop and the white balance label."""
+        return {k: v for k, v in settings.items() if k in LIMITS or k in CURVE_KEYS or k == "WhiteBalance"}
+
+    def photo_id_of(self, photo: str) -> tuple[str, str | None]:
+        photo_id, develop = self._resolve_photo(photo)
+        return photo_id, develop["photo"].get("name")
+
+    def save_version(self, name: str, note: str = "", photo: str = "selected", thumbnail: bytes | None = None,
+                     overwrite: bool = False) -> dict:
+        photo_id, photo_name = self.photo_id_of(photo)
+        snap = self.call("snapshot", {"photo": photo_id}, timeout=60)
+        settings = self._version_keys(snap.get("settings", {}))
+        try:
+            record = self.versions.save(photo_id, photo_name, name, note, settings, thumbnail, overwrite)
+        except VersionError as e:
+            raise EditError(str(e)) from e
+        return {
+            "version": record["name"], "photo": photo_name, "photo_id": photo_id, "saved_settings": len(settings),
+            "has_preview_picture": record["has_thumbnail"],
+            "note": "只存了这张照片当前所有可调的参数（滑块、曲线、裁剪、白平衡）；蒙版不在其中。用 lr_apply_version 可以回到这个版本。",
+        }
+
+    def list_versions(self, photo: str = "selected") -> dict:
+        photo_id, photo_name = self.photo_id_of(photo)
+        try:
+            rows = self.versions.list(photo_id)
+        except VersionError as e:
+            raise EditError(str(e)) from e
+        return {"photo": photo_name, "photo_id": photo_id, "count": len(rows), "versions": [
+            {"name": r["name"], "note": r.get("note", ""), "created": r.get("created"),
+             "settings": len(r.get("settings", {})), "has_preview_picture": bool(r.get("has_thumbnail"))} for r in rows]}
+
+    def delete_version(self, name: str, photo: str = "selected") -> dict:
+        photo_id, photo_name = self.photo_id_of(photo)
+        try:
+            self.versions.delete(photo_id, name)
+        except VersionError as e:
+            raise EditError(str(e)) from e
+        return {"deleted": name, "photo": photo_name, "note": "只删了这个版本的记录和它的预览图，照片本身和其他版本都没动。"}
+
+    def apply_version(self, name: str, reason: str = "", photo: str = "selected") -> dict:
+        """Write a saved version back to its photo as ONE change that lr_restore can undo (also past the per-call limits)."""
+        self.check_writable()
+        photo_id, photo_name = self.photo_id_of(photo)
+        try:
+            version = self.versions.get(photo_id, name)
+        except VersionError as e:
+            raise EditError(str(e)) from e
+        snap = self.call("snapshot", {"photo": photo_id}, timeout=60)
+        current = snap.get("settings", {})
+        target = {k: v for k, v in self._version_keys(version.get("settings", {})).items() if k in current}
+        changed = {k: v for k, v in target.items() if not self._same(current.get(k), v)}
+        if not changed:
+            return {"version": version["name"], "photo": photo_name, "settings_changed": 0,
+                    "note": "这张照片现在已经是这个版本的样子，没有做任何改动。"}
+        record = {
+            "edit_id": self.store.new_id(), "kind": "set", "status": "pending", "generic": True,
+            "created": time.strftime("%Y-%m-%d %H:%M:%S"), "created_ns": _now_ns(),
+            "photo_id": photo_id, "photo_name": photo_name, "reason": str(reason)[:500] or f"回到版本“{version['name']}”",
+            "requested": {"version": version["name"]}, "before": {},
+            "snapshot": current,  # the whole state is on disk BEFORE anything is written
+        }
+        self.store.save(record)
+        try:
+            data = self._write_generic(photo_id, record["edit_id"], changed)
+        except BridgeTimeout as e:
+            record.update(status="uncertain", error=str(e))
+            self.store.save(record)
+            raise
+        except Exception as e:
+            record.update(status="failed", error=str(e))
+            record.pop("snapshot", None)
+            self.store.save(record)
+            raise
+        record.update(status="applied", before={k: current[k] for k in changed}, after=dict(changed), changed_keys=sorted(changed),
+                      new_keys=[], version_name=version["name"], verified=bool(data.get("verified")))
+        record.pop("snapshot", None)
+        self.store.save(record)
+        rows = [{"parameter": k, "before": current[k], "after": changed[k]} for k in sorted(changed)
+                if not isinstance(changed[k], (list, dict))]
+        return {
+            "edit_id": record["edit_id"], "photo": photo_name, "photo_id": photo_id, "version": version["name"],
+            "verified": record["verified"], "settings_changed": len(changed), "changes": rows[:MAX_PRESET_ROWS_IN_REPLY],
+            "curves_changed": [k for k in changed if isinstance(changed[k], (list, dict))],
+            "undo": f"lr_restore(edit_id=\"{record['edit_id']}\") 回到切换之前的样子。",
+        }
 
     # ---- presets ---------------------------------------------------
     def list_presets(self, query: str = "", limit: int = 30) -> dict:
