@@ -283,6 +283,7 @@ def test_undo_conflict_is_not_forced_by_default_then_force(env):
     r = env.undo()
     assert not r["ok"] and r["partial"] and r["conflict"]
     assert [x["status"] for x in r["results"]] == ["conflict", "undone"]
+    assert r["results"][0]["message"] == pa.MSG_CONFLICT and "force" not in r["results"][0]["message"]
     env.lr_.undo_result["E1"] = {"ok": True, "conflict": False, "message": ""}
     r = env.undo(force=True)                                      # 用户明确同意后才强制，且只重试没还原的
     assert r["ok"] and env.lr_.undo_calls[-1] == ("E1", True) and len(env.lr_.undo_calls) == 3

@@ -15,6 +15,7 @@ FLAG_LABEL = {"pick": "留用", "none": "无旗标", "reject": "排除"}
 MSG_READONLY = "只读模式已开启，不允许修改照片。要写入星级和旗标，请先关闭只读模式。"
 MSG_NO_LR = "Lightroom 未连接。请确认 Lightroom 已打开且插件已启用。"
 MSG_NOTHING = "没有可写入的建议。请先完成一次 AI 挑片。"
+MSG_CONFLICT = "这张照片的星级或旗标在写入之后又被改动过，直接还原会覆盖这些改动。"
 UNDO_REASON = "AI 挑片（用户确认）"
 
 
@@ -175,8 +176,9 @@ class ApplyService:
                 out.append({"photo_id": r["photo_id"], "name": r["name"], "status": "undone", "message": ""})
             else:
                 conflicts += 1 if res.get("conflict") else 0
+                msg = MSG_CONFLICT if res.get("conflict") else res.get("message", "")
                 out.append({"photo_id": r["photo_id"], "name": r["name"], "status": "conflict" if res.get("conflict") else "failed",
-                            "message": res.get("message", "")})
+                            "message": msg})
         ok_n = sum(1 for o in out if o["status"] == "undone")
         return {"ok": ok_n == len(out), "partial": 0 < ok_n < len(out), "conflict": conflicts > 0, "results": out,
                 "message": "" if ok_n == len(out) else "部分照片未能还原，详见下方。"}
