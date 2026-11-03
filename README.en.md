@@ -5,13 +5,13 @@ A Lightroom plug-in plus a small MCP server. It can see the photo you selected, 
 the assistant a preview with histogram numbers. It can also make guarded develop changes, update catalog information,
 and save old values for restoration.
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.13.0-orange)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.14.0-orange)
 
 [中文说明](README.md) · [Changelog](CHANGELOG.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md)
 
 > 🤖 **AI assistant reading this for a user?** Read [`AI_GUIDE.md`](AI_GUIDE.md): it has the whole install and usage procedure.
 
-> ⚠️ **Early version (0.13.0).** Tested only on Windows 11 with Lightroom Classic 15.2. An installer is published, but it has not been install/uninstall-tested on a clean machine yet (待验证).
+> ⚠️ **Early version (0.14.0).** Tested only on Windows 11 with Lightroom Classic 15.2. An installer is published, but it has not been install/uninstall-tested on a clean machine yet (待验证).
 > Not affiliated with Adobe.
 
 ## ✨ What it does
@@ -139,6 +139,7 @@ The principles stay: photos are not uploaded, every step can be undone, each per
 |---|---|
 | 0.1 | Read-only: look at photos, develop settings, preview, histogram numbers, self check |
 | 0.2–0.11.2 | Guarded single-photo edits, catalog metadata, batch dry runs, presets, and restoration; see the tools above |
+| 0.14 | Reconnect fix: a restarted server is found again within about a second or two, no more plug-in reload (one reload needed after updating) |
 | 0.13 | Full-size export (to the place you name in the chat), named versions, side-by-side comparison, region analysis in the preview numbers |
 | 0.12 | Restore conflict protection, before/after previews, review of several selected photos, and batch plans from verified edits (a contribution by Galio1991) |
 | later | Preset amount slider, batch presets, installer acceptance on a clean Windows machine (macOS, Photoshop, Premiere paused; masks measured unreliable, not planned) |
