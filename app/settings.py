@@ -15,7 +15,7 @@ from pathlib import Path
 
 SCHEMA_VERSION = 1
 SETTINGS_FILE = Path.home() / "LrMcp" / "app_settings.json"
-APP_VERSION = "0.9.0"                  # 桌面软件 Latos Hue 的版本（开发中，尚未发布；首个发布版本为 1.0.0）
+APP_VERSION = "0.10.0"                  # 桌面软件 Latos Hue 的版本（开发中，尚未发布；首个发布版本为 1.0.0）
 PROJECT_URL = "https://github.com/Denvolatos/lightroom-mcp-win"
 DATA_DIR_TEXT = "~/LrMcp"
 
@@ -38,7 +38,7 @@ def defaults() -> dict:
     return {"schema": SCHEMA_VERSION, "base_folder": default_base_folder(), "provider": DEFAULT_PROVIDER,
             "confirm_default": True, "preview_edge": 1024,
             "export_last_folder": "", "export_format": "jpeg", "export_size": 0, "export_quality": 92,
-            "export_bit_depth": 16, "export_metadata": "minimal"}
+            "export_bit_depth": 16, "export_metadata": "minimal", "ai_use_notes": True}
 
 
 # ---------------------------------------------------------------- 文件夹校验
@@ -180,6 +180,7 @@ def sanitize(data) -> dict:
     out["provider"] = pv if isinstance(pv, str) and pv else d["provider"]
     out["confirm_default"] = out["confirm_default"] if isinstance(out.get("confirm_default"), bool) else d["confirm_default"]
     out["preview_edge"] = _clean_edge(out.get("preview_edge")) or d["preview_edge"]
+    out["ai_use_notes"] = out["ai_use_notes"] if isinstance(out.get("ai_use_notes"), bool) else d["ai_use_notes"]
     for k in EXPORT_FIELD_LABELS:
         c = clean_export_field(k, out.get(k))
         out[k] = d[k] if c is None else c
@@ -260,6 +261,11 @@ class SettingsStore:
                 errors["preview_edge"] = "预览清晰度只能选择 " + "、".join(str(x) for x in EDGE_CHOICES) + " 之一。"
             else:
                 new["preview_edge"] = e
+        if "ai_use_notes" in changes:
+            if isinstance(changes["ai_use_notes"], bool):
+                new["ai_use_notes"] = changes["ai_use_notes"]
+            else:
+                errors["ai_use_notes"] = "请选择开或关。"
         for k, label in EXPORT_FIELD_LABELS.items():
             if k in changes:
                 c = clean_export_field(k, changes[k])
