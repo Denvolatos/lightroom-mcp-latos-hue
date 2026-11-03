@@ -15,6 +15,8 @@ import threading
 import time
 from pathlib import Path
 
+from timing import TurnTimer
+
 SERVER_NAME = "lightroom_mcp"
 REPO = Path(__file__).resolve().parent.parent
 WORKDIR = Path.home() / "LrMcp" / "app_workdir"   # 空的中性文件夹，避免读到项目 CLAUDE.md
@@ -216,6 +218,7 @@ class ClaudeSession:
         self._proc: subprocess.Popen | None = None
         self._stopped = False
         self._lock = threading.Lock()
+        self.last_timing: dict | None = None       # 上一轮的计时摘要（只含时间，见 timing.py）
 
     def reset(self) -> None:
         self.stop()
@@ -237,6 +240,7 @@ class ClaudeSession:
             emit({"type": "done", "tokens": 0, "cost": None, "text": "", "is_error": True})
             return
         self.workdir.mkdir(parents=True, exist_ok=True)
+        timer = TurnTimer("per_turn")
         cmd = build_command(prompt, write_mcp_config(confirm=confirm), self.session_id, claude, confirm)
         self._stopped = False
         state: dict = {}
@@ -252,9 +256,10 @@ class ClaudeSession:
             emit({"type": "done", "tokens": 0, "cost": None, "text": "", "is_error": True})
             return
         proc = self._proc
-        timer = threading.Timer(TIMEOUT_SECONDS, self._timeout)
+        timer.mark("spawn")
+        watchdog = threading.Timer(TIMEOUT_SECONDS, self._timeout)
         self._timed_out = False
-        timer.start()
+        watchdog.start()
         err_chunks: list[str] = []
         threading.Thread(target=lambda: err_chunks.append(proc.stderr.read()), daemon=True).start()
         try:
@@ -265,10 +270,11 @@ class ClaudeSession:
                     if ev["type"] == "done":
                         got_done = True
                         self.session_id = ev.get("session_id") or self.session_id
+                    timer.observe(ev)
                     emit(ev)
             proc.wait()
         finally:
-            timer.cancel()
+            watchdog.cancel()
         stderr_text = "".join(err_chunks)
         if self._timed_out:
             emit({"type": "error", "message": MSG_TIMEOUT})
@@ -278,6 +284,9 @@ class ClaudeSession:
             emit({"type": "error", "message": friendly_error(stderr_text or "命令行未返回结果")})
         if not got_done:
             emit({"type": "done", "tokens": 0, "cost": None, "text": "", "is_error": True})
+        timer.mark("exit")
+        self.last_timing = timer.summary()
+        timer.write()
 
     def _timeout(self) -> None:
         self._timed_out = True
