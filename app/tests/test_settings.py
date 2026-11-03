@@ -142,10 +142,11 @@ def test_update_save_failure_is_reported(store, monkeypatch):
 # ---------------------------------------------------------------- AI 来源选择
 def test_provider_selection_rules(store):
     assert store.update({"provider": "claude"}, selectable=is_selectable)["ok"]
-    for pid in ("codex", "api", "unknown", 5):
+    assert store.update({"provider": "codex"}, selectable=is_selectable)["ok"]
+    for pid in ("api", "unknown", 5):
         r = store.update({"provider": pid}, selectable=is_selectable)
         assert not r["ok"] and "后续提供" in r["errors"]["provider"]
-    assert store.data["provider"] == "claude"
+    assert store.data["provider"] == "codex"
 
 
 # ---------------------------------------------------------------- 后端接口（Api）
@@ -165,7 +166,7 @@ def test_api_get_settings_shape(api):
     assert r["settings"]["provider"] == "claude" and r["edges"] == [768, 1024, 1536, 2048]
     ids = [p["id"] for p in r["providers"]]
     assert ids == ["claude", "codex", "api"]
-    assert [p["selectable"] for p in r["providers"]] == [True, False, False]
+    assert [p["selectable"] for p in r["providers"]] == [True, True, False]
     assert set(r["about"]) == {"app_version", "lightroom_version", "plugin_version", "data_dir", "project_url"}
     assert r["about"]["data_dir"] == "~/LrMcp" and r["about"]["project_url"].endswith("Denvolatos/lightroom-mcp-win")
 
@@ -176,9 +177,9 @@ def test_api_save_applies_preview_edge_immediately(api):
     assert not api.save_settings({"preview_edge": 5})["ok"] and api._preview.edge == 1536
 
 
-def test_api_save_rejects_unavailable_provider(api):
+def test_api_save_accepts_codex_provider(api):
     r = api.save_settings({"provider": "codex"})
-    assert not r["ok"] and "provider" in r["errors"]
+    assert r["ok"] and api._provider.id == "claude"
 
 
 def test_api_save_settings_bad_input(api):
@@ -220,3 +221,20 @@ def test_provider_switch_takes_effect_on_new_chat_only(api, monkeypatch):
     api.reset()
     assert api._provider.id == "other" and old_closed and "start" in calls and "reset" not in calls
     assert api._backend.session is api._provider
+
+
+def test_switch_to_codex_updates_import_and_export_services(api, monkeypatch):
+    from unittest.mock import MagicMock
+    import main
+
+    new_lr = MagicMock()
+    new_provider = MagicMock(id="codex")
+    new_provider.id = "codex"
+    monkeypatch.setattr(main, "LrService", lambda *a, **k: new_lr)
+    monkeypatch.setattr(main, "create_provider", lambda *a, **k: new_provider)
+    monkeypatch.setattr(main, "PreviewManager", lambda *a, **k: MagicMock())
+    monkeypatch.setattr(main, "PreviewServer", lambda *a, **k: MagicMock())
+    monkeypatch.setattr(main, "Backend", lambda *a, **k: MagicMock())
+    api._settings.data["provider"] = "codex"
+    assert api._apply_provider_choice()
+    assert api._import.lr is new_lr and api._export.lr is new_lr

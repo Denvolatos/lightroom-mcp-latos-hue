@@ -71,6 +71,9 @@ def test_denied_and_failed(tmp_path):
     t.observe(tool_ev(tid="T3", inp={"changes": {"Tint": 1}}))
     t.observe({"type": "tool_result", "id": "T3", "text": f"确认超过 {120} 秒未响应，已视为拒绝，未执行。", "is_error": True})
     assert t.rows[-1]["status"] == "已拒绝"
+    t.observe(tool_ev(tid="T4", inp={"changes": {"Tint": 1}}))
+    t.observe({"type": "tool_result", "id": "T4", "text": "未获用户确认，已视为拒绝，未执行。", "is_error": True})
+    assert t.rows[-1]["status"] == "已拒绝"
 
 
 def test_wrapped_result_text_is_unwrapped(tmp_path):
