@@ -160,6 +160,21 @@ class LrService:
         name = next((p.get("name") for p in r.get("photos") or [] if p.get("id") == pid), None)
         return {"id": pid, "name": name}
 
+    def selected_all(self, limit: int = 20) -> dict | None:
+        """Lightroom 当前选中的全部照片（只读，一次 list_selected 调用，上限 20 张）：
+        {"count", "active_id", "photos": [{"id","name","rating","flag"}]}；读不到返回 None。"""
+        if not self.connected:
+            return None
+        try:
+            r = self._bridge.call("list_selected", {"limit": max(1, min(int(limit), 20))}, timeout=8)
+        except Exception:
+            return None
+        photos = [{"id": p.get("id"), "name": p.get("name"), "rating": p.get("rating"), "flag": p.get("flag")}
+                  for p in (r.get("photos") or []) if isinstance(p, dict) and p.get("id")]
+        count = r.get("count")
+        return {"count": count if isinstance(count, int) and not isinstance(count, bool) else len(photos),
+                "active_id": r.get("active_id"), "photos": photos}
+
     def selected_detail(self) -> dict | None:
         """当前选中（活动）照片的 id、文件名与基本信息（相机、ISO、光圈等，取自插件的 list_selected）；读不到返回 None。"""
         if not self.connected:
@@ -241,6 +256,32 @@ class LrService:
             _, bridge_mod = _import_server()
             raise bridge_mod.PluginNotConnected("无法建立与 Lightroom 的连接。")
         return self._edits.export_photo_for_app(folder, fmt, long_edge, quality, metadata, bit_depth, photo)
+
+    # ---- AI 挑片：读目录信息、只写星级与旗标 ------------------------
+    def metadata_of(self, photo_id: str) -> dict:
+        """一张照片的目录信息（星级、旗标等）；出错直接抛异常。"""
+        if not self.start() or self._edits is None:
+            _, bridge_mod = _import_server()
+            raise bridge_mod.PluginNotConnected("无法建立与 Lightroom 的连接。")
+        return self._edits.get_metadata(photo_id)
+
+    def set_rating_flag(self, photo_id: str, rating: int | None, flag: str | None, reason: str = "") -> dict:
+        """只改星级与旗标（server 的 EditService.set_metadata，改前存旧值、可还原；只读开关开着会抛 ReadOnlyError）。
+        不传关键词、标题等其他字段。异常原样抛出，由 pick_service 翻成中文。"""
+        if not self.start() or self._edits is None:
+            _, bridge_mod = _import_server()
+            raise bridge_mod.PluginNotConnected("无法建立与 Lightroom 的连接。")
+        return self._edits.set_metadata(rating=rating, flag=flag, reason=reason, photo=photo_id)
+
+    def latest_meta_edit(self, photo_id: str) -> str | None:
+        """某张照片最近一条目录信息修改记录的 id（写入状态不确定时用来找到可还原的记录）；找不到返回 None。"""
+        svc = self._edits
+        try:
+            recs = [r for r in svc.store.all() if r.get("kind") == "meta" and r.get("photo_id") == photo_id]
+            recs.sort(key=lambda r: r.get("created_ns", 0))
+            return recs[-1]["edit_id"] if recs else None
+        except Exception:
+            return None
 
     # ---- 撤销 ------------------------------------------------------
     def _run(self, fn) -> dict:

@@ -328,6 +328,10 @@ class Api:
         """在资源管理器中显示本次导出的结果文件（路径来自后端记录）。"""
         return self._export.reveal_last()
 
+    def selection_state(self) -> dict:
+        """Lightroom 当前选中的全部照片（页面刚加载时取一次，之后靠 selection 事件更新）。"""
+        return self._backend.selection_public()
+
     def preview_state(self) -> dict:
         """页面刚加载时取最近一次预览内容（之后靠 onClaudeEvent 的 preview 事件更新）。"""
         return self._preview.last or {"state": "loading", "message": "正在读取预览"}

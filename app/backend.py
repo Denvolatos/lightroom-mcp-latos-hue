@@ -43,6 +43,8 @@ class Backend:
         self._last_clean = t
         self._last_photo_poll = -PHOTO_POLL_SECONDS
         self.photo: dict | None = None
+        self.selection: dict = {"count": 0, "photos": [], "active_id": None}   # Lightroom 当前选中的全部照片（只读）
+        self._sel_key: tuple | None = None
         self.events: list[str] = []                 # 恢复动作记录（便于测试与排查，不含敏感内容）
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -113,15 +115,37 @@ class Backend:
         return st
 
     def refresh_photo(self) -> None:
-        sel = self.lr.selected_photo()
-        if sel is None:
-            return
+        """一次 list_selected 同时得到“当前这一张”和“全部选中的照片”（没有增加调用次数）。"""
+        if hasattr(self.lr, "selected_all"):
+            allsel = self.lr.selected_all()
+            if allsel is None:
+                return
+            aid = allsel.get("active_id")
+            sel = {"id": aid, "name": next((p.get("name") for p in allsel["photos"] if p.get("id") == aid), None)} if aid                 else {"id": None, "name": None}
+            self._set_selection(allsel)
+        else:
+            sel = self.lr.selected_photo()
+            if sel is None:
+                return
         old = (self.photo or {}).get("id")
         self.photo = sel
         self.tracker.current_photo = sel.get("id")
         if sel.get("id") != old:
             self.emit({"type": "photo", "id": sel.get("id"), "name": sel.get("name")})
             self.emit({"type": "adjust", "rows": self.tracker.snapshot(sel.get("id"))})
+
+    def _set_selection(self, allsel: dict) -> None:
+        key = (allsel.get("count"), allsel.get("active_id"), tuple((p["id"], p.get("name")) for p in allsel["photos"]))
+        self.selection = {"count": allsel.get("count", 0), "active_id": allsel.get("active_id"), "photos": list(allsel["photos"])}
+        if key != self._sel_key:
+            self._sel_key = key
+            self.emit({"type": "selection", **self.selection_public()})
+
+    def selection_public(self) -> dict:
+        """给页面的选中照片：数量与名字列表（id 也给，页面不会拿它做别的事）。"""
+        s = self.selection
+        return {"count": s.get("count", 0), "active_id": s.get("active_id"),
+                "photos": [{"id": p["id"], "name": p.get("name")} for p in s.get("photos", [])]}
 
     def rows(self) -> list[dict]:
         return self.tracker.snapshot((self.photo or {}).get("id"))
