@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>修图助手（模板）</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #17181b; --panel: #1f2125; --panel2: #25282d; --line: #31353b;
+    --text: #e6e8eb; --muted: #8b929b; --accent: #4c9aff; --accent2: #2d6fd6;
+    --ok: #3ecf8e; --warn: #f5a524; --bad: #f31260;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 14px/1.5 "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+    display: flex; flex-direction: column; overflow: hidden; user-select: none;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  /* ---------- top bar ---------- */
+  .topbar { height: 48px; flex: none; display: flex; align-items: center; gap: 8px;
+    padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .brand { font-weight: 600; margin-right: 8px; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: #3b2f12; color: var(--warn); }
+  .btn { background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 5px 14px; transition: background .15s, border-color .15s; }
+  .btn:hover { background: #2d3138; border-color: #454b53; }
+  .btn.primary { background: var(--accent2); border-color: var(--accent2); }
+  .btn.primary:hover { background: var(--accent); border-color: var(--accent); }
+  .btn.small { padding: 2px 10px; font-size: 12px; }
+  .spacer { flex: 1; }
+  .status { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  /* ---------- three columns ---------- */
+  .main { flex: 1; min-height: 0; display: grid; grid-template-columns: 280px 1fr 360px; }
+  .col { min-height: 0; display: flex; flex-direction: column; background: var(--panel); }
+  .col.left { border-right: 1px solid var(--line); }
+  .col.right { border-left: 1px solid var(--line); }
+  .tabs { display: flex; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid var(--line); flex: none; }
+  .tab { padding: 6px 12px; border: none; background: none; color: var(--muted);
+    border-bottom: 2px solid transparent; }
+  .tab:hover { color: var(--text); }
+  .tab.on { color: var(--text); border-bottom-color: var(--accent); }
+  .pane { overflow: auto; padding: 10px; min-height: 0; }
+  .list-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px;
+    border: 1px solid transparent; cursor: pointer; }
+  .list-item:hover { background: var(--panel2); }
+  .list-item .name { flex: 1; }
+  .list-item .tag { font-size: 11px; color: var(--muted); }
+  .star { color: var(--muted); cursor: pointer; }
+  .star.on { color: var(--warn); }
+  .empty { color: var(--muted); font-size: 12px; padding: 4px 8px; }
+  /* left: upper tabs area ~1/3, files ~2/3 */
+  .left .upper { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .left .lower { flex: 2; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+  .section-title { padding: 8px 12px; color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 8px; flex: none; }
+  .folder { padding: 4px 8px; color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .thumb { width: 44px; height: 32px; border-radius: 4px; flex: none; }
+  /* ---------- center ---------- */
+  .center { background: var(--bg); display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .viewbar { height: 40px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px;
+    border-bottom: 1px solid var(--line); background: var(--panel); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .seg button { border: none; background: var(--panel2); padding: 4px 14px; color: var(--muted); }
+  .seg button.on { background: var(--accent2); color: #fff; }
+  .stage { flex: 1; min-height: 0; display: grid; gap: 10px; padding: 12px; }
+  .stage.pair { grid-template-columns: 1fr 1fr; }
+  .stage.multi { grid-template-columns: repeat(3, 1fr); }
+  .frame { position: relative; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line);
+    min-height: 0; }
+  .frame .pic { position: absolute; inset: 0; transition: filter .4s ease; }
+  .frame .label { position: absolute; left: 10px; top: 10px; padding: 2px 10px; border-radius: 99px;
+    background: rgba(0,0,0,.55); font-size: 12px; }
+  .frame .note { position: absolute; left: 10px; bottom: 10px; right: 10px; font-size: 12px; color: #dfe3e8;
+    text-shadow: 0 1px 2px #000; }
+  .scene { background-color: #4a5a46; background:
+    radial-gradient(circle at 70% 22%, #f6d9a8 0 6%, transparent 7%),
+    linear-gradient(180deg, #6f93b8 0%, #9db8cf 38%, #c9d3d6 52%, transparent 52%),
+    linear-gradient(165deg, transparent 0 52%, #e9eef2 52% 60%, #8a95a0 60% 72%, #3d4a3a 72% 100%);
+  }
+  .scene.after { filter: contrast(1.18) saturate(1.35) brightness(1.04); }
+  .scene.v2 { filter: contrast(1.05) saturate(1.1) brightness(1.1) hue-rotate(-6deg); }
+  .scene.v3 { filter: contrast(1.3) saturate(0.85) brightness(.92) sepia(.2); }
+  /* ---------- right ---------- */
+  .right .params { flex: 2; min-height: 0; display: flex; flex-direction: column; }
+  .right .chat { flex: 1; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 400; font-size: 12px; padding: 4px 6px; }
+  td { padding: 5px 6px; border-top: 1px solid var(--line); }
+  td.num { font-variant-numeric: tabular-nums; }
+  .up { color: var(--ok); } .down { color: var(--warn); }
+  .why { color: var(--muted); font-size: 12px; }
+  .msgs { flex: 1; min-height: 0; overflow: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+  .msg { padding: 6px 10px; border-radius: 10px; max-width: 92%; user-select: text; }
+  .msg.me { align-self: flex-end; background: var(--accent2); }
+  .msg.ai { align-self: flex-start; background: var(--panel2); }
+  .ask { align-self: stretch; border: 1px solid var(--warn); border-radius: 10px; padding: 8px 10px; background: #2a2414; }
+  .ask .row { display: flex; gap: 8px; margin-top: 6px; }
+  .chatbar { flex: none; display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--line); }
+  .chatbar input { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 6px 10px; font: inherit; outline: none; user-select: text; }
+  .chatbar input:focus { border-color: var(--accent); }
+  .opts { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 10px; font-size: 12px; color: var(--muted);
+    border-top: 1px solid var(--line); }
+  .switch { position: relative; width: 34px; height: 18px; border-radius: 99px; background: #444a52; border: none; padding: 0; transition: background .2s; }
+  .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left .2s; }
+  .switch.on { background: var(--ok); } .switch.on::after { left: 18px; }
+  /* ---------- export dialog ---------- */
+  .mask { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; }
+  .mask.show { display: flex; }
+  .dialog { width: 460px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+  .dialog h3 { margin: 0 0 12px; }
+  .field { display: grid; grid-template-columns: 90px 1fr; gap: 8px; align-items: center; margin: 8px 0; }
+  .field select, .field input { background: var(--bg); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 8px; font: inherit; }
+  .dialog .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; } ::-webkit-scrollbar-thumb { background: #3a3f46; border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="brand">修图助手</span><span class="badge">模板 · 数据都是假的</span>
+  <button class="btn" onclick="toast('导入：将来从 SD 卡选文件夹，复制到软件文件夹')">导入</button>
+  <button class="btn" onclick="openExport()">导出</button>
+  <button class="btn" onclick="undo()">撤销</button>
+  <span class="spacer"></span>
+  <span class="status"><span class="dot"></span>Lightroom 已连接（假）</span>
+  <span class="status" id="toastbox"></span>
+</div>
+
+<div class="main">
+  <!-- LEFT -->
+  <div class="col left">
+    <div class="upper">
+      <div class="tabs" id="ltabs">
+        <button class="tab on" data-t="preset">预设</button>
+        <button class="tab" data-t="fav">收藏</button>
+        <button class="tab" data-t="exp">经验</button>
+      </div>
+      <div class="pane" id="lpane"></div>
+    </div>
+    <div class="lower">
+      <div class="section-title">文件 <span class="spacer"></span>
+        <button class="btn small" onclick="toast('将来：新建分类文件夹')">新建分类</button></div>
+      <div class="pane" id="files"></div>
+    </div>
+  </div>
+
+  <!-- CENTER -->
+  <div class="center">
+    <div class="viewbar">
+      <div class="seg" id="modes"><button class="on" data-m="pair">并排</button><button data-m="multi">多版本</button></div>
+      <span class="spacer"></span><span class="why" id="cur">DSC08205.JPG</span>
+    </div>
+    <div class="stage pair" id="stage"></div>
+  </div>
+
+  <!-- RIGHT -->
+  <div class="col right">
+    <div class="params">
+      <div class="section-title">本轮 AI 改了什么</div>
+      <div class="pane"><table id="ptable"><thead><tr><th>参数</th><th>改前</th><th>改后</th><th></th></tr></thead><tbody></tbody></table>
+        <div class="empty" id="pempty">还没有改动。在下面告诉 AI 你想要什么。</div></div>
+    </div>
+    <div class="chat">
+      <div class="msgs" id="msgs"><div class="msg ai">你好，选一张照片，告诉我你想要的效果。</div></div>
+      <div class="opts"><button class="switch" id="sw" title="打开后，AI 每改一步都先问你"></button><span id="swlabel">逐步询问：关（AI 直接改）</span></div>
+      <div class="chatbar"><input id="inp" placeholder="例如：天空通透一点，整体更震撼" autocomplete="off"><button class="btn primary" id="send">发送</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="mask" id="mask">
+  <div class="dialog">
+    <h3>导出照片</h3>
+    <div class="field"><span>保存到</span><input id="exdir" value="D:\导出\雪山" readonly></div>
+    <div class="field"><span>格式</span><select id="exfmt"><option>JPEG</option><option>TIFF</option></select></div>
+    <div class="field"><span>大小</span><select><option>原始尺寸</option><option>长边 4096 像素</option><option>长边 2048 像素</option></select></div>
+    <div class="field"><span>质量</span><input type="range" min="40" max="100" value="92"></div>
+    <div class="row"><button class="btn" onclick="closeExport()">取消</button><button class="btn primary" onclick="doExport()">导出</button></div>
+  </div>
+</div>
+
+<script>
+const PHOTOS = [
+  {n:'DSC08205.JPG', f:'雪山', c:'#6f93b8'}, {n:'DSC08206.JPG', f:'雪山', c:'#8aa5bd'},
+  {n:'DSC08211.JPG', f:'雪山', c:'#5d7f9e'}, {n:'IMG_0412.JPG', f:'街拍', c:'#b08968'},
+  {n:'IMG_0415.JPG', f:'街拍', c:'#9c7a5b'}, {n:'IMG_0420.JPG', f:'未分类', c:'#7a8f6a'}
+];
+const PRESETS = ['清爽风光', '电影感', '黑白高对比', '日系低饱和'];
+const EXPERIENCE = ['雪山天空发灰：先降高光，再加蓝色饱和度', '逆光人像：提阴影 +40，轻微降曝光'];
+let sel = 0, fav = new Set([0]), favP = new Set(['电影感']), steps = [], history = [], mode = 'pair', ask = false;
+
+const $ = s => document.querySelector(s);
+function toast(t){ const b=$('#toastbox'); b.textContent=t; clearTimeout(toast.t); toast.t=setTimeout(()=>b.textContent='',3500); }
+
+/* ---- left tabs ---- */
+let ltab = 'preset';
+function renderLeft(){
+  const p = $('#lpane'); p.innerHTML = '';
+  if (ltab==='preset') PRESETS.forEach(x=>{
+    const d=document.createElement('div'); d.className='list-item';
+    d.innerHTML=`<span class="name">${x}</span><span class="star ${favP.has(x)?'on':''}">★</span>`;
+    d.querySelector('.star').onclick=e=>{e.stopPropagation(); favP.has(x)?favP.delete(x):favP.add(x); renderLeft();};
+    d.onclick=()=>toast('将来：把「'+x+'」套到当前照片'); p.appendChild(d); });
+  if (ltab==='fav'){ const l=[...PHOTOS.filter((_,i)=>fav.has(i)).map(x=>'照片 · '+x.n), ...[...favP].map(x=>'预设 · '+x)];
+    if(!l.length) p.innerHTML='<div class="empty">还没有收藏。点 ★ 就能收藏。</div>';
+    l.forEach(x=>{const d=document.createElement('div'); d.className='list-item'; d.innerHTML=`<span class="name">${x}</span>`; p.appendChild(d);}); }
+  if (ltab==='exp') { EXPERIENCE.forEach(x=>{const d=document.createElement('div'); d.className='list-item'; d.innerHTML=`<span class="name">${x}</span>`; p.appendChild(d);});
+    p.insertAdjacentHTML('beforeend','<div class="empty">经验只存在你自己的电脑上，由你的 AI 记录。</div>'); }
+}
+$('#ltabs').onclick = e => { const t=e.target.closest('.tab'); if(!t) return;
+  document.querySelectorAll('#ltabs .tab').forEach(x=>x.classList.toggle('on',x===t)); ltab=t.dataset.t; renderLeft(); };
+
+/* ---- files ---- */
+function renderFiles(){
+  const box=$('#files'); box.innerHTML=''; let last='';
+  PHOTOS.forEach((p,i)=>{
+    if(p.f!==last){ last=p.f; box.insertAdjacentHTML('beforeend',`<div class="folder">📁 ${p.f}</div>`); }
+    const d=document.createElement('div'); d.className='list-item'; if(i===sel) d.style.background='var(--panel2)', d.style.borderColor='var(--accent)';
+    d.innerHTML=`<div class="thumb" style="background:linear-gradient(160deg,${p.c},#2b3138)"></div><span class="name">${p.n}</span><span class="star ${fav.has(i)?'on':''}">★</span>`;
+    d.querySelector('.star').onclick=e=>{e.stopPropagation(); fav.has(i)?fav.delete(i):fav.add(i); renderFiles(); if(ltab==='fav') renderLeft();};
+    d.onclick=()=>{ sel=i; steps=[]; history=[]; renderAll(); };
+    box.appendChild(d); });
+}
+
+/* ---- center ---- */
+function renderStage(){
+  const s=$('#stage'); $('#cur').textContent=PHOTOS[sel].n;
+  s.className='stage '+mode;
+  if(mode==='pair') s.innerHTML=`
+    <div class="frame"><div class="pic scene"></div><span class="label">原图</span></div>
+    <div class="frame"><div class="pic scene ${steps.length?'after':''}"></div><span class="label">现在</span>
+      <span class="note">${steps.length?'已改 '+steps.length+' 项':'还没有改动'}</span></div>`;
+  else s.innerHTML=`
+    <div class="frame"><div class="pic scene"></div><span class="label">原图</span></div>
+    <div class="frame"><div class="pic scene v2"></div><span class="label">清爽版</span></div>
+    <div class="frame"><div class="pic scene v3"></div><span class="label">电影感版</span><span class="note">将来：点任一版就回到那个版本</span></div>`;
+}
+$('#modes').onclick=e=>{const b=e.target.closest('button'); if(!b) return;
+  document.querySelectorAll('#modes button').forEach(x=>x.classList.toggle('on',x===b)); mode=b.dataset.m; renderStage();};
+
+/* ---- right ---- */
+function renderParams(){
+  const tb=$('#ptable tbody'); tb.innerHTML='';
+  steps.forEach(s=>{ tb.insertAdjacentHTML('beforeend',
+    `<tr><td>${s.k}<div class="why">${s.why}</div></td><td class="num">${s.a}</td><td class="num ${s.b>s.a?'up':'down'}">${s.b}</td><td><button class="btn small" onclick="undoOne('${s.k}')">撤销</button></td></tr>`); });
+  $('#pempty').style.display = steps.length?'none':'block';
+}
+function say(t, who='ai'){ const m=document.createElement('div'); m.className='msg '+who; m.textContent=t; $('#msgs').appendChild(m); m.scrollIntoView(); return m; }
+
+const PLAN = [
+  {k:'高光', a:0, b:-35, why:'天空有过亮的部分，压一压让云层有细节'},
+  {k:'蓝色饱和度', a:0, b:18, why:'天空蓝一点'},
+  {k:'清晰度', a:0, b:12, why:'山体轮廓更清楚'}
+];
+function apply(s){ steps.push(s); renderParams(); renderStage(); }
+function runPlan(i=0){
+  if(i>=PLAN.length){ say('改完了，左右对比看看。不满意可以点右上方每一项的「撤销」。'); return; }
+  const s=PLAN[i];
+  if(!ask){ apply(s); setTimeout(()=>runPlan(i+1),500); return; }
+  const m=document.createElement('div'); m.className='ask';
+  m.innerHTML=`我想把「${s.k}」从 ${s.a} 改到 ${s.b}<div class="why">${s.why}</div><div class="row"><button class="btn primary small">同意</button><button class="btn small">不改</button></div>`;
+  $('#msgs').appendChild(m); m.scrollIntoView();
+  const [ok,no]=m.querySelectorAll('button');
+  ok.onclick=()=>{ m.querySelector('.row').remove(); apply(s); runPlan(i+1); };
+  no.onclick=()=>{ m.querySelector('.row').remove(); m.append('（已跳过）'); runPlan(i+1); };
+}
+function send(){ const v=$('#inp').value.trim(); if(!v) return; $('#inp').value=''; say(v,'me');
+  setTimeout(()=>{ say('好的，我先看一下这张照片，然后分几步改。（这里是假回复，将来由你的 AI 回答）'); setTimeout(()=>runPlan(0),500); },400); }
+$('#send').onclick=send; $('#inp').onkeydown=e=>{ if(e.key==='Enter') send(); };
+$('#sw').onclick=()=>{ ask=!ask; $('#sw').classList.toggle('on',ask);
+  $('#swlabel').textContent= ask?'逐步询问：开（每步先问你）':'逐步询问：关（AI 直接改）'; };
+
+function undoOne(k){ steps=steps.filter(s=>s.k!==k); renderParams(); renderStage(); toast('已撤销「'+k+'」'); }
+function undo(){ if(!steps.length) return toast('没有可撤销的改动'); const s=steps.pop(); renderParams(); renderStage(); toast('已撤销「'+s.k+'」'); }
+
+/* ---- export dialog ---- */
+function openExport(){ $('#mask').classList.add('show'); }
+function closeExport(){ $('#mask').classList.remove('show'); }
+function doExport(){ closeExport(); toast('假导出：将来在这里真正导出 '+$('#exfmt').value+' 到你选的位置'); }
+$('#mask').onclick=e=>{ if(e.target.id==='mask') closeExport(); };
+
+function renderAll(){ renderLeft(); renderFiles(); renderStage(); renderParams(); }
+renderAll();
+</script>
+</body>
+</html>
