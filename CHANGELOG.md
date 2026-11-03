@@ -26,6 +26,7 @@ Versions: a new feature raises the middle number, a small fix the last one. The 
   `format` is refused. The server side is `EditService.export_photo_for_app`, which is **not an MCP tool**: `lr_export` keeps its
   parameters and stays JPEG-only, so an AI assistant cannot ask for TIFF (the tool list is still 22 tools).
 - After updating, reload the plug-in once in Lightroom (the new command lives in the plug-in).
+- Also in 0.15.0 (desktop app only, **not an MCP tool**, tool list unchanged): `EditService.apply_settings` writes a set of whitelisted settings (sliders, curves, white balance label) to one photo as one change that `lr_restore` can undo. It is used by the desktop app's "my presets" after the user clicks a confirmation list; keys outside the whitelist and out-of-range numbers are refused, the read-only switch applies, and no existing tool changed. Tests added in `server/tests/test_edits.py`.
 
 ## 0.14.0 — reconnect fix
 
