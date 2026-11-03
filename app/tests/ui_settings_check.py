@@ -22,7 +22,9 @@ STUB = """<script>
   }[scen === 'nologin' ? 'nologin' : scen === 'missing' ? 'missing' : 'ok'];
   const providers = [
     Object.assign({id:'claude', name:'Claude Code 命令行', selectable:true}, claude),
-    {id:'codex', name:'Codex 命令行', available:false, state:'unavailable', reason:'Codex 命令行——后续提供，欢迎贡献。', next_step:'', selectable:false},
+    {id:'codex', name:'Codex 命令行', available:true, state:'ready', reason:'已安装并已登录。', next_step:'', selectable:true, experimental:true,
+     experimental_notice:'该来源由外部贡献者接入，尚未在真实 Codex 与 Lightroom 上完成验收，请在测试照片上使用。',
+     privacy_notice:'使用 Codex 时，选中照片的预览会发送至所选的 Codex 服务。'},
     {id:'api', name:'API 密钥', available:false, state:'unavailable', reason:'API 密钥（兼容 OpenAI 接口的各家，含 DeepSeek 等）——后续提供。', next_step:'', selectable:false}];
   const settings = {schema:1, base_folder:'C:\\\\Users\\\\示例用户\\\\Pictures\\\\修图助手', provider:'claude', confirm_default:true, preview_edge:1024};
   window.__CALLS__ = [];
@@ -52,6 +54,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   if (q === 'error') { document.getElementById('s_folder').value = 'C:\\\\Windows\\\\System32'; document.getElementById('s_save').click(); }
   if (q === 'create') { document.getElementById('s_folder').value = 'D:\\\\新建图库'; document.getElementById('s_save').click(); }
   if (q === 'saved') { document.getElementById('s_save').click(); }
+  if (q === 'codex') { const sel = document.getElementById('s_provider'); sel.value = 'codex'; sel.onchange(); }
 })();
 </script>"""
 
@@ -78,7 +81,7 @@ def main(out: Path) -> None:
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
-        for name in ("main", "ok", "nologin", "missing", "error", "create", "saved"):
+        for name in ("main", "ok", "nologin", "missing", "error", "create", "saved", "codex"):
             target = out / f"settings_{name}.png"
             subprocess.run([EDGE, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--window-size=1440,900",
                             "--virtual-time-budget=4000", f"--screenshot={target}",

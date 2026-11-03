@@ -174,7 +174,7 @@ def test_settings_store_roundtrip_and_update_errors(tmp_path):
 
 
 def test_app_version():
-    assert st.APP_VERSION == "0.11.0"
+    assert st.APP_VERSION == "0.12.0"
 
 
 # ---------------------------------------------------------------- 服务：对话框状态

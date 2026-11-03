@@ -10,7 +10,7 @@ import threading
 import time
 from pathlib import Path
 
-from claude_bridge import ENABLED_WRITE_TOOLS, READONLY_TOOLS, SYSTEM_PROMPT, TOOL_LABELS, WORKDIR
+from claude_bridge import ENABLED_WRITE_TOOLS, MSG_TIMEOUT, READONLY_TOOLS, SYSTEM_PROMPT, TOOL_LABELS, WORKDIR
 from .base import AIProvider, NOT_INSTALLED, NOT_LOGGED_IN, READY, UNKNOWN, make_status
 
 TIMEOUT_SECONDS = 180
@@ -74,6 +74,9 @@ class CodexProvider(AIProvider):
     id = "codex"
     display_name = "Codex 命令行"
     supports_images = True
+    experimental = True
+    experimental_notice = "该来源由外部贡献者接入，尚未在真实 Codex 与 Lightroom 上完成验收，请在测试照片上使用。"
+    privacy_notice = "使用 Codex 时，选中照片的预览会发送至所选的 Codex 服务。"
 
     def __init__(self, state_file=None, persistent=True, *, workdir: Path = WORKDIR,
                  find=find_codex, login_check=check_login, clock=time.monotonic):
@@ -208,7 +211,7 @@ class CodexProvider(AIProvider):
         if stopped:
             on_event({"type": "stopped"})
         elif timed_out:
-            on_event({"type": "error", "message": "Codex 等待超时，请稍后重试。"})
+            on_event({"type": "error", "message": MSG_TIMEOUT})
         elif failed or not finished or proc.returncode != 0:
             on_event({"type": "error", "message": "Codex 运行失败，请检查登录或网络连接。"})
         on_event({"type": "done", "tokens": tokens, "cost": None, "text": "".join(message),

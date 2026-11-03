@@ -15,7 +15,7 @@ from pathlib import Path
 
 SCHEMA_VERSION = 1
 SETTINGS_FILE = Path.home() / "LrMcp" / "app_settings.json"
-APP_VERSION = "0.11.0"                  # 桌面软件 Latos Hue 的版本（开发中，尚未发布；首个发布版本为 1.0.0）
+APP_VERSION = "0.12.0"                  # 桌面软件 Latos Hue 的版本（开发中，尚未发布；首个发布版本为 1.0.0）
 PROJECT_URL = "https://github.com/Denvolatos/lightroom-mcp-win"
 DATA_DIR_TEXT = "~/LrMcp"
 

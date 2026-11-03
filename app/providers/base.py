@@ -58,6 +58,9 @@ class AIProvider(ABC):
     id: str = ""                    # 稳定的英文标识，用于设置文件与注册表
     display_name: str = ""          # 界面显示名（中文）
     supports_images: bool = False   # 能否看图（lr_get_preview 返回的预览图）
+    experimental: bool = False      # 实验性来源：设置里会标注，并显示 experimental_notice
+    experimental_notice: str = ""   # 实验性来源的正式提示（界面原样显示）
+    privacy_notice: str = ""        # 数据去向说明（界面原样显示；为空则不显示）
 
     @abstractmethod
     def status(self) -> dict:

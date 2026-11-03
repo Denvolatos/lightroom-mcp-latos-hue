@@ -23,17 +23,24 @@ class _NoSession:
     spawned_at = None
 
 
+def _flags(cls) -> dict:
+    """来源的固定属性：是否实验性及对应的正式提示、数据去向说明。"""
+    return {"experimental": bool(cls.experimental), "experimental_notice": cls.experimental_notice,
+            "privacy_notice": cls.privacy_notice}
+
+
 def available_providers(claude_status: dict | None = None, codex_status: dict | None = None) -> list[dict]:
     """返回 [{"id","name","available","state","reason","next_step","selectable"}]。
     claude_status：已有的 Claude 状态（传入当前实例 status() 的结果可避免重复检测）。"""
     st = claude_status if claude_status is not None else ClaudeProvider(session=_NoSession()).status()
     out = [{"id": "claude", "name": ClaudeProvider.display_name, "available": st["available"], "state": st["state"],
-            "reason": st["reason"], "next_step": st["next_step"], "selectable": True}]
+            "reason": st["reason"], "next_step": st["next_step"], "selectable": True, **_flags(ClaudeProvider)}]
     codex = codex_status if codex_status is not None else CodexProvider().status()
-    out.append({"id": "codex", "name": CodexProvider.display_name, **codex, "selectable": True})
+    out.append({"id": "codex", "name": CodexProvider.display_name, **codex, "selectable": True, **_flags(CodexProvider)})
     for pid, (name, why) in PLACEHOLDERS.items():
         out.append({"id": pid, "name": name, "available": False, "state": UNAVAILABLE, "reason": why,
-                    "next_step": "", "selectable": False})
+                    "next_step": "", "selectable": False, "experimental": False, "experimental_notice": "",
+                    "privacy_notice": ""})
     return out
 
 

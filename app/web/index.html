@@ -412,7 +412,7 @@
       <div class="sgroup">
         <h4>AI 来源</h4>
         <div class="srow"><label for="s_provider">使用的来源</label><select id="s_provider"></select>
-          <span class="sub" id="s_pstate"></span><span class="sub" id="s_pnote">切换来源后，下一次“新对话”生效。</span>
+          <span class="sub" id="s_pstate"></span><span class="sub bad" id="s_pexp" style="display:none"></span><span class="sub" id="s_ppriv" style="display:none"></span><span class="sub" id="s_pnote">切换来源后，下一次“新对话”生效。</span>
           <span class="ferr" id="e_provider"></span></div>
       </div>
       <div class="sgroup">
@@ -1514,13 +1514,16 @@ function showProviderState(){
   const st = $('#s_pstate'); st.className = 'sub ' + (p.selectable ? (p.available ? 'ok' : 'bad') : '');
   st.textContent = p.selectable ? p.reason + (p.next_step ? ' ' + p.next_step : '') : p.reason;
   $('#s_pnote').style.display = (p.selectable && p.id !== SET.current_provider) ? '' : 'none';
+  const ex = $('#s_pexp'), pv = $('#s_ppriv');
+  ex.textContent = p.experimental ? (p.experimental_notice || '') : ''; ex.style.display = ex.textContent ? '' : 'none';
+  pv.textContent = p.privacy_notice || ''; pv.style.display = pv.textContent ? '' : 'none';
 }
 $('#s_provider').onchange=showProviderState;
 function fillSettings(r){
   SET = r; const s = r.settings;
   $('#s_folder').value = s.base_folder;
   const sel = $('#s_provider'); sel.innerHTML='';
-  r.providers.forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.textContent=p.name + (p.selectable?'':'（后续提供）'); o.disabled=!p.selectable; sel.appendChild(o); });
+  r.providers.forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.textContent=p.name + (p.experimental?'（实验性，未经真机验证）':'') + (p.selectable?'':'（后续提供）'); o.disabled=!p.selectable; sel.appendChild(o); });
   sel.value = s.provider;
   const ed = $('#s_edge'); ed.innerHTML=''; r.edges.forEach(e=>{ const o=document.createElement('option'); o.value=e; o.textContent='长边 '+e+' px'; ed.appendChild(o); }); ed.value = s.preview_edge;
   setConfirmUI(s.confirm_default); setNotesUI(s.ai_use_notes!==false); showProviderState();
