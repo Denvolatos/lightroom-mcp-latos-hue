@@ -102,6 +102,11 @@
   .chatbar button:disabled { opacity: .45; cursor: not-allowed; }
   .ask { align-self: stretch; border: 1px solid var(--warn); border-radius: 10px; padding: 8px 10px; background: #2a2414; }
   .ask .row { display: flex; gap: 8px; margin-top: 6px; }
+  .restore-row { margin-top: 10px; }
+  .st-ok { color: var(--ok); } .st-bad { color: var(--bad); } .st-wait { color: var(--warn); } .st-mute { color: var(--muted); }
+  .ask .items { margin: 4px 0; } .ask .items div { font-variant-numeric: tabular-nums; }
+  .ask.done { border-color: var(--line); background: var(--panel2); }
+  .dialog.small { width: 380px; } .dialog p { margin: 0; white-space: pre-wrap; }
   .chatbar { flex: none; display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--line); }
   .chatbar input { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--line);
     border-radius: var(--radius); padding: 6px 10px; font: inherit; outline: none; user-select: text; }
@@ -166,12 +171,13 @@
   <div class="col right">
     <div class="params">
       <div class="section-title">本次调整</div>
-      <div class="pane"><table id="ptable"><thead><tr><th>参数</th><th>改前</th><th>改后</th><th></th></tr></thead><tbody></tbody></table>
-        <div class="empty" id="pempty">暂无调整。请在下方输入修图需求。</div></div>
+      <div class="pane"><table id="ptable"><thead><tr><th>参数</th><th>改前</th><th>改后</th><th>状态</th><th></th></tr></thead><tbody></tbody></table>
+        <div class="empty" id="pempty">暂无调整。请在下方输入修图需求。</div>
+        <div class="restore-row" id="restorerow" style="display:none"><button class="btn small" onclick="restoreOriginal()">还原到原始状态</button></div></div>
     </div>
     <div class="chat">
       <div class="msgs" id="msgs"><div class="msg ai">请选择照片并输入期望的修图效果。</div></div>
-      <div class="opts"><button class="switch" id="sw" title="开启后，每项调整需先经确认才会执行"></button><span id="swlabel">逐项确认：关（自动执行）</span></div>
+      <div class="opts"><button class="switch on" id="sw" title="开启后，每项调整需先经确认才会执行"></button><span id="swlabel">逐项确认：开（每项调整需先确认）</span></div>
       <div class="chatbar"><input id="inp" placeholder="例如：提高天空通透度，增强整体层次感" autocomplete="off"><button class="btn primary" id="send">发送</button><button class="btn" id="stop" style="display:none">停止</button></div>
     </div>
   </div>
@@ -196,10 +202,10 @@ const PHOTOS = [
 ];
 const PRESETS = ['清爽风光', '电影感', '黑白高对比', '日系低饱和'];
 const EXPERIENCE = ['天空发灰：先降低高光，再提高蓝色饱和度', '逆光人像：阴影 +40，曝光小幅降低'];
-let sel = 0, fav = new Set([0]), favP = new Set(['电影感']), steps = [], history = [], mode = 'pair', ask = false;
+let sel = 0, fav = new Set([0]), favP = new Set(['电影感']), steps = [], history = [], mode = 'pair', ask = true;
 
 const $ = s => document.querySelector(s);
-function toast(t){ const b=$('#toastbox'); b.textContent=t; clearTimeout(toast.t); toast.t=setTimeout(()=>b.textContent='',3500); }
+function toast(t){ const b=$('#toastbox'); b.textContent=t; clearTimeout(toast.t); toast.t=setTimeout(()=>b.textContent='',6000); }
 
 /* ---- left tabs ---- */
 let ltab = 'preset';
@@ -232,13 +238,14 @@ function renderFiles(){
 }
 
 /* ---- center ---- */
+function nApplied(){ return REAL() ? rows.filter(r=>r.status==='已应用').length : steps.length; }
 function renderStage(){
   const s=$('#stage'); $('#cur').textContent=PHOTOS[sel].n;
   s.className='stage '+mode;
   if(mode==='pair') s.innerHTML=`
     <div class="frame"><div class="pic scene"></div><span class="label">原图</span></div>
-    <div class="frame"><div class="pic scene ${steps.length?'after':''}"></div><span class="label">当前</span>
-      <span class="note">${steps.length?'已调整 '+steps.length+' 项':'暂无调整'}</span></div>`;
+    <div class="frame"><div class="pic scene ${nApplied()?'after':''}"></div><span class="label">当前</span>
+      <span class="note">${nApplied()?'已调整 '+nApplied()+' 项':'暂无调整'}</span></div>`;
   else s.innerHTML=`
     <div class="frame"><div class="pic scene"></div><span class="label">原图</span></div>
     <div class="frame"><div class="pic scene v2"></div><span class="label">清爽版</span></div>
@@ -248,10 +255,22 @@ $('#modes').onclick=e=>{const b=e.target.closest('button'); if(!b) return;
   document.querySelectorAll('#modes button').forEach(x=>x.classList.toggle('on',x===b)); mode=b.dataset.m; renderStage();};
 
 /* ---- right ---- */
+let rows = [];   // 真实模式下的“本次调整”（由后端推送）
+const STCLS = {'已应用':'st-ok','失败':'st-bad','已拒绝':'st-bad','待确认':'st-wait','处理中':'st-wait','已撤销':'st-mute'};
+function esc(t){ return String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function renderParams(){
   const tb=$('#ptable tbody'); tb.innerHTML='';
+  if (REAL()){
+    rows.forEach(r=>{ const can = r.status==='已应用' && r.edit_id;
+      tb.insertAdjacentHTML('beforeend',
+        `<tr><td>${esc(r.label)}<div class="why">${esc(r.reason)}</div></td><td class="num">${esc(r.before)}</td><td class="num">${esc(r.after)}</td><td class="${STCLS[r.status]||''}">${esc(r.status)}</td><td>${can?`<button class="btn small" data-eid="${esc(r.edit_id)}">撤销</button>`:''}</td></tr>`); });
+    tb.querySelectorAll('button[data-eid]').forEach(b=>b.onclick=()=>undoRow(b.dataset.eid));
+    $('#pempty').style.display = rows.length?'none':'block';
+    $('#restorerow').style.display = rows.some(r=>r.status==='已应用')?'block':'none';
+    return;
+  }
   steps.forEach(s=>{ tb.insertAdjacentHTML('beforeend',
-    `<tr><td>${s.k}<div class="why">${s.why}</div></td><td class="num">${s.a}</td><td class="num ${s.b>s.a?'up':'down'}">${s.b}</td><td><button class="btn small" onclick="undoOne('${s.k}')">撤销</button></td></tr>`); });
+    `<tr><td>${s.k}<div class="why">${s.why}</div></td><td class="num">${s.a}</td><td class="num ${s.b>s.a?'up':'down'}">${s.b}</td><td class="st-ok">已应用</td><td><button class="btn small" onclick="undoOne('${s.k}')">撤销</button></td></tr>`); });
   $('#pempty').style.display = steps.length?'none':'block';
 }
 function say(t, who='ai'){ const m=document.createElement('div'); m.className='msg '+who; m.textContent=t; $('#msgs').appendChild(m); m.scrollIntoView(); return m; }
@@ -279,10 +298,24 @@ function setBusy(b){ busy=b; $('#send').disabled=b; $('#inp').disabled=b; $('#st
 function note(t){ const n=document.createElement('div'); n.className='note'; n.textContent=t; $('#msgs').appendChild(n); n.scrollIntoView(); return n; }
 function fmtCost(c){ return (c==null) ? '' : '，估算费用 $'+Number(c).toFixed(3); }
 /* 后端（Python）把每个事件推到这里 */
+function showConfirm(ev){
+  const m=document.createElement('div'); m.className='ask'; m.id='cf_'+ev.id;
+  const items = ev.items.length ? ev.items.map(i=>`<div>${esc(i.label)}：${esc(i.from)} → ${esc(i.to)}</div>`).join('') : '';
+  m.innerHTML=`${esc(ev.title)}${items?'':'：'+esc(ev.reason)}<div class="items">${items}</div>${items&&ev.reason?`<div class="why">依据：${esc(ev.reason)}</div>`:''}<div class="row"><button class="btn primary small">同意</button><button class="btn small">拒绝</button></div>`;
+  $('#msgs').appendChild(m); m.scrollIntoView();
+  const [ok,no]=m.querySelectorAll('button');
+  ok.onclick=()=>{ m.querySelector('.row').innerHTML='已提交：同意'; window.pywebview.api.answer(ev.id,true); };
+  no.onclick=()=>{ m.querySelector('.row').innerHTML='已提交：拒绝'; window.pywebview.api.answer(ev.id,false); };
+}
+function closeConfirm(ev){ const m=document.getElementById('cf_'+ev.id); if(!m) return; m.classList.add('done');
+  m.querySelector('.row').innerHTML = ev.allow ? '已同意' : (ev.message && ev.message.indexOf('超过')>=0 ? '确认超时，已视为拒绝' : '已拒绝'); }
 window.onClaudeEvent = function(ev){
   if (ev.type==='text'){ if(!cur) cur=say('', 'ai'); cur.textContent+=ev.text; cur.scrollIntoView(); }
   else if (ev.type==='tool'){ cur=null; note(ev.label); }
   else if (ev.type==='error'){ cur=null; say(ev.message,'err'); }
+  else if (ev.type==='adjust'){ rows=ev.rows; renderParams(); renderStage(); }
+  else if (ev.type==='confirm'){ cur=null; showConfirm(ev); }
+  else if (ev.type==='confirm_done'){ closeConfirm(ev); }
   else if (ev.type==='stopped'){ cur=null; note('已停止'); }
   else if (ev.type==='done'){
     if (!cur && ev.text && !ev.is_error && !$('#msgs').lastChild.classList.contains('ai')) say(ev.text,'ai');
@@ -293,7 +326,7 @@ window.onClaudeEvent = function(ev){
 function send(){ const v=$('#inp').value.trim(); if(!v || busy) return; $('#inp').value=''; say(v,'me');
   if (REAL()){
     setBusy(true); cur=null; note('正在处理请求');
-    window.pywebview.api.send(v).then(r=>{ if(r && !r.ok){ say(r.message,'err'); setBusy(false); } })
+    window.pywebview.api.send(v, ask).then(r=>{ if(r && !r.ok){ say(r.message,'err'); setBusy(false); } })
       .catch(()=>{ say('无法连接后台，请重新启动程序。','err'); setBusy(false); });
     return;
   }
@@ -303,8 +336,35 @@ $('#send').onclick=send; $('#inp').onkeydown=e=>{ if(e.key==='Enter') send(); };
 $('#sw').onclick=()=>{ ask=!ask; $('#sw').classList.toggle('on',ask);
   $('#swlabel').textContent= ask?'逐项确认：开（每项调整需先确认）':'逐项确认：关（自动执行）'; };
 
+/* 弹窗：返回 Promise<boolean> */
+function askDialog(title, text, okLabel){ return new Promise(res=>{
+  const mk=document.createElement('div'); mk.className='mask show';
+  mk.innerHTML=`<div class="dialog small"><h3>${esc(title)}</h3><p>${esc(text)}</p><div class="row"><button class="btn">取消</button><button class="btn primary">${esc(okLabel)}</button></div></div>`;
+  document.body.appendChild(mk); const [c,o]=mk.querySelectorAll('button');
+  c.onclick=()=>{ mk.remove(); res(false); }; o.onclick=()=>{ mk.remove(); res(true); }; }); }
+async function undoRow(eid, force=false){
+  const r = await window.pywebview.api.undo(eid, force);
+  if (r.ok) return toast('已撤销');
+  if (r.conflict && !force){
+    if (await askDialog('参数在调整后又发生变化', r.message+'\n\n强制撤销将覆盖这些后续改动。', '强制撤销')) return undoRow(eid, true);
+    return;
+  }
+  toast('撤销失败：'+r.message);
+}
+async function restoreOriginal(force=false){
+  if (!force && !await askDialog('还原到原始状态', '将当前照片还原到首次调整之前的状态，已应用的调整均会被撤销。是否继续？', '还原')) return;
+  const r = await window.pywebview.api.restore_original(force);
+  if (r.ok) return toast('已还原到原始状态');
+  if (r.conflict && !force){
+    if (await askDialog('参数在调整后又发生变化', r.message+'\n\n强制还原将覆盖这些后续改动。', '强制还原')) return restoreOriginal(true);
+    return;
+  }
+  toast('还原失败：'+r.message);
+}
 function undoOne(k){ steps=steps.filter(s=>s.k!==k); renderParams(); renderStage(); toast('已撤销「'+k+'」'); }
-function undo(){ if(!steps.length) return toast('没有可撤销的调整'); const s=steps.pop(); renderParams(); renderStage(); toast('已撤销「'+s.k+'」'); }
+function undo(){
+  if (REAL()){ const last=[...rows].reverse().find(r=>r.status==='已应用'&&r.edit_id); if(!last) return toast('没有可撤销的调整'); return undoRow(last.edit_id); }
+  if(!steps.length) return toast('没有可撤销的调整'); const s=steps.pop(); renderParams(); renderStage(); toast('已撤销「'+s.k+'」'); }
 
 /* ---- export dialog ---- */
 function openExport(){ $('#mask').classList.add('show'); }
@@ -312,6 +372,12 @@ function closeExport(){ $('#mask').classList.remove('show'); }
 function doExport(){ closeExport(); toast('导出功能开发中（所选格式：'+$('#exfmt').value+'）'); }
 $('#mask').onclick=e=>{ if(e.target.id==='mask') closeExport(); };
 
+/* 真实模式：隐藏演示标记，显示 Lightroom 连接状态 */
+if (location.hash !== '#demo') window.addEventListener('pywebviewready', ()=>{
+  $('#demobadge').style.display='none';
+  const poll=()=>window.pywebview.api.status().then(s=>{ $('#lrstat').textContent = s.connected?'Lightroom 已连接':'Lightroom 未连接';
+    $('#lrdot').style.background = s.connected?'var(--ok)':'var(--bad)'; });
+  poll(); setInterval(poll, 5000); renderParams(); renderStage(); });
 function renderAll(){ renderLeft(); renderFiles(); renderStage(); renderParams(); }
 renderAll();
 /* 截图用：地址后加 #demo 会自动演示一轮 */
