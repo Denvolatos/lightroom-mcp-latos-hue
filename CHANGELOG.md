@@ -26,6 +26,15 @@ Versions: a new feature raises the middle number, a small fix the last one. The 
   `format` is refused. The server side is `EditService.export_photo_for_app`, which is **not an MCP tool**: `lr_export` keeps its
   parameters and stays JPEG-only, so an AI assistant cannot ask for TIFF (the tool list is still 22 tools).
 - After updating, reload the plug-in once in Lightroom (the new command lives in the plug-in).
+- Library browsing for the desktop app, so photos can be browsed and picked in the app instead of in Lightroom. Three new
+  plug-in commands, all **desktop app only and not MCP tools** (the tool list is still 22 tools; an AI assistant cannot call
+  them): `list_folder_photos` (photos of a catalog folder, with paging and an optional recursive flag; a folder that is not in
+  the catalog gives an empty answer, not an error), `get_thumbnails` (up to 24 JPEG thumbnails, 64-512 px, at most 150 KB each,
+  8 seconds per photo before `timeout`), and `select_photos` (selects photos in Lightroom, optionally switching to a folder
+  first, and reports what is really selected afterwards). They read catalog metadata and thumbnails or change only the
+  selection, never a photo or the catalog. Folder paths are checked like import and export. The server side is
+  `LibraryService` in `library.py`; the read-only switch does not block it.
+- Upgrading needs a plug-in reload (the three commands live in the plug-in).
 
 ## 0.14.0 — reconnect fix
 
