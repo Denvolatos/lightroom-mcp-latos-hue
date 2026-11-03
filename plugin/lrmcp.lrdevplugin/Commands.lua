@@ -711,7 +711,7 @@ local function urlDecode(text)
 end
 
 local function hasControlChars(text)
-	return text:find("[%c]") ~= nil
+	return text:find("[%z\1-\31\127]") ~= nil  -- not %c: that is locale-dependent (see Json.lua)
 end
 
 local function keywordNames(photo)

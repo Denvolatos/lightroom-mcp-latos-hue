@@ -19,7 +19,9 @@ local escapes = {
 }
 
 local function quote(s)
-	local escaped = s:gsub('[%c"\\]', function(c)
+	-- explicit control-character set: %c follows the C locale, and on macOS (UTF-8 locale) it also matches the
+	-- 0x80-0x9F bytes inside multi-byte UTF-8 text, which would corrupt it
+	local escaped = s:gsub('[%z\1-\31\127"\\]', function(c)
 		return escapes[c] or string.format("\\u%04x", c:byte())
 	end)
 	return '"' .. escaped .. '"'
