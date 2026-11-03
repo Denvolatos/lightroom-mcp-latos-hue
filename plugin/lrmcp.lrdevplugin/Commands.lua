@@ -564,6 +564,22 @@ function M.apply_preset(params)
 	local before = deepcopy(photo:getDevelopSettings())
 	local result = catalog:withWriteAccessDo("LrMCP " .. editId, function()
 		photo:applyDevelopPreset(preset)
+		if MAC_ENV then
+			-- Lightroom Classic 15.5.1 on macOS accepts photo:applyDevelopPreset but changes nothing (measured with 121
+			-- presets). Writing the preset's own settings does work, so do that when the preset left the photo unchanged.
+			local wanted, now = deepcopy(preset:getSetting() or {}), photo:getDevelopSettings()
+			wanted.MaskGroupBasedCorrections = nil
+			local differs = false
+			for k, v in pairs(wanted) do
+				if serialize(now[k]) ~= serialize(v) then
+					differs = true
+					break
+				end
+			end
+			if differs then
+				photo:applyDevelopSettings(wanted)
+			end
+		end
 	end, { timeout = 15 })
 	if result ~= "executed" then
 		fail("Lightroom 现在不能写入（可能正忙），没有做任何修改，请稍后再试。")
@@ -636,6 +652,7 @@ function M.restore_settings(params)
 	end
 	local current = photo:getDevelopSettings()
 	local count = 0
+	local later = {}
 	for key, value in pairs(values) do
 		count = count + 1
 		if count > 300 then
@@ -648,10 +665,13 @@ function M.restore_settings(params)
 			fail("不允许通过这个途径改蒙版/局部调整。")
 		end
 		local now = current[key]
-		if now == nil then
+		if now == nil and MAC_ENV and values.ConvertToGrayscale ~= nil then
+			-- a black-and-white photo has no colour keys (HSL ...); they come back once ConvertToGrayscale is written, so
+			-- they are written in a second step below (measured on Lightroom Classic 15.5.1 for macOS)
+			later[key] = true
+		elseif now == nil then
 			fail("照片当前没有这个设置，没法写回：" .. key)
-		end
-		if type(now) ~= type(value) then
+		elseif type(now) ~= type(value) then
 			fail("类型对不上，已取消还原：" .. key)
 		end
 		if type(value) == "number" then
@@ -673,7 +693,28 @@ function M.restore_settings(params)
 		end
 	end
 	local result = catalog:withWriteAccessDo("LrMCP " .. editId, function()
-		photo:applyDevelopSettings(values, "LrMCP " .. editId)
+		if next(later) == nil then
+			photo:applyDevelopSettings(values, "LrMCP " .. editId)
+			return
+		end
+		local firstPass, secondPass = {}, {}
+		for key, value in pairs(values) do
+			if later[key] then
+				secondPass[key] = value
+			else
+				firstPass[key] = value
+			end
+		end
+		photo:applyDevelopSettings(firstPass, "LrMCP " .. editId)
+		local mid = photo:getDevelopSettings()
+		for key, value in pairs(secondPass) do
+			if mid[key] == nil or type(mid[key]) ~= type(value) then
+				secondPass[key] = nil -- still not there: left out, so the check below reports verified = false
+			end
+		end
+		if next(secondPass) ~= nil then
+			photo:applyDevelopSettings(secondPass, "LrMCP " .. editId)
+		end
 	end, { timeout = 15 })
 	if result ~= "executed" then
 		fail("Lightroom 现在不能写入（可能正忙），没有做任何修改，请稍后再试。")
