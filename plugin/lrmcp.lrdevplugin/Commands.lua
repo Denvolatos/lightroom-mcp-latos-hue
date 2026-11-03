@@ -4,6 +4,7 @@
 local LrApplication = import "LrApplication"
 local LrDate = import "LrDate"
 local LrExportSession = import "LrExportSession"
+local LrExportSettings = import "LrExportSettings"
 local LrFileUtils = import "LrFileUtils"
 local LrPathUtils = import "LrPathUtils"
 local LrTasks = import "LrTasks"
@@ -170,7 +171,8 @@ function M.get_develop(params)
 end
 
 -- name: file name without extension; dir: destination folder; edge: pixels of the long side (0 = original size)
-local function exportSettings(name, dir, edge, quality, minimalMetadata)
+-- tiff: nil for JPEG (unchanged); or { bitDepth = 8|16 } for TIFF (sRGB, lossless ZIP compression, no JPEG quality)
+local function exportSettings(name, dir, edge, quality, minimalMetadata, tiff)
 	local settings = {
 		LR_export_destinationType = "specificFolder",
 		LR_export_destinationPathPrefix = dir,
@@ -194,6 +196,14 @@ local function exportSettings(name, dir, edge, quality, minimalMetadata)
 		LR_useWatermark = false,
 		LR_includeVideoFiles = false,
 	}
+	if tiff then
+		-- TODO(verify on a real Lightroom): the SDK documents only LR_format = 'TIFF'; the two keys below are the ones Lightroom
+		-- itself writes for TIFF export presets and are not listed in the SDK docs
+		settings.LR_format = "TIFF"
+		settings.LR_jpeg_quality = nil
+		settings.LR_export_bitDepth = tiff.bitDepth
+		settings.LR_tiff_compressionMethod = "compressionMethod_ZIP"
+	end
 	if edge > 0 then
 		settings.LR_size_resizeType = "longEdge"
 		settings.LR_size_maxHeight = edge
@@ -926,12 +936,29 @@ local function checkExportFolder(path)
 end
 
 -- Parameters: photo=<"selected"|uuid>, and ONE of folder=<percent-encoded absolute path> | destination=desktop|pictures|documents|data;
--- optional long_edge=0 (original size) | 256..20000, quality=40..100, metadata=minimal|all
+-- optional long_edge=0 (original size) | 256..20000, quality=40..100, metadata=minimal|all,
+-- format=jpeg (default) | tiff, bit_depth=8|16 (TIFF only, default 16; quality is ignored for TIFF).
+-- TIFF is reachable only from the desktop app: the MCP tool lr_export never sends "format".
 function M.export_photo(params)
 	local catalog = LrApplication.activeCatalog()
 	local photo = photoFromRef(catalog, params.photo)
 	if photo:getRawMetadata("isVideo") then
 		fail("这是视频文件，暂不支持导出。")
+	end
+	local format = params.format
+	if format == nil or format == "" then
+		format = "jpeg"
+	end
+	if format ~= "jpeg" and format ~= "tiff" then
+		fail("format 只能是 jpeg 或 tiff。")
+	end
+	local isTiff = format == "tiff"
+	local bitDepth = 16
+	if isTiff and params.bit_depth ~= nil and params.bit_depth ~= "" then
+		bitDepth = tonumber(params.bit_depth)
+		if bitDepth ~= 8 and bitDepth ~= 16 then
+			fail("bit_depth 只能是 8 或 16。")
+		end
 	end
 	local destination = params.destination
 	local root
@@ -960,6 +987,7 @@ function M.export_photo(params)
 	end
 	quality = math.max(40, math.min(100, math.floor(quality)))
 	local minimal = params.metadata ~= "all"
+	local ext = isTiff and LrExportSettings.extensionForFormat("TIFF") or "jpg"
 
 	-- the file name comes from the photo's own file name, only safe characters; the first free name is used
 	local leaf = LrPathUtils.leafName(photo:getRawMetadata("path") or "photo")
@@ -969,15 +997,15 @@ function M.export_photo(params)
 	end
 	local stem = base .. "_LrMCP" .. (longEdge > 0 and ("_" .. longEdge .. "px") or "_full")
 	local name, n = stem, 1
-	while LrFileUtils.exists(LrPathUtils.child(root, name .. ".jpg")) do
+	while LrFileUtils.exists(LrPathUtils.child(root, name .. "." .. ext)) do
 		n = n + 1
 		name = stem .. "_" .. n
 	end
-	local path = LrPathUtils.child(root, name .. ".jpg")
+	local path = LrPathUtils.child(root, name .. "." .. ext)
 
 	LrExportSession({
 		photosToExport = { photo },
-		exportSettings = exportSettings(name, root, longEdge, quality / 100, minimal),
+		exportSettings = exportSettings(name, root, longEdge, quality / 100, minimal, isTiff and { bitDepth = bitDepth } or nil),
 	}):doExportOnCurrentTask()
 	if not LrFileUtils.exists(path) then
 		fail("Lightroom 没有生成导出文件（可能被导出设置、磁盘空间或权限拦截）。")
@@ -991,14 +1019,17 @@ function M.export_photo(params)
 	end
 	return {
 		path = path,
-		file = name .. ".jpg",
+		file = name .. "." .. ext,
 		folder = root,
 		destination = destination,
 		bytes = attrs and attrs.fileSize,
 		width = width,
 		height = height,
 		long_edge = longEdge,
-		quality = quality,
+		format = format,
+		extension = ext,
+		quality = (not isTiff) and quality or nil,
+		bit_depth = isTiff and bitDepth or nil,
 		metadata = minimal and "minimal" or "all",
 		photo = describe(photo),
 	}
