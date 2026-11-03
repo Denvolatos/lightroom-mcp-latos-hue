@@ -6,6 +6,7 @@ local LrDate = import "LrDate"
 local LrExportSession = import "LrExportSession"
 local LrFileUtils = import "LrFileUtils"
 local LrPathUtils = import "LrPathUtils"
+local LrTasks = import "LrTasks"
 
 local Json = require "Json.lua"
 local Limits = require "Limits.lua"
@@ -1068,7 +1069,9 @@ function M.import_photo(params)
 
 	local added, addError
 	local result = catalog:withWriteAccessDo("LrMCP import", function()
-		local ok, res = pcall(function()
+		-- LrTasks.pcall, not pcall: addPhoto yields inside the write gate and a plain pcall forbids that
+		-- ("AgEventLoop.yieldToScheduler called when yielding is not allowed", found on real Lightroom 15.2).
+		local ok, res = LrTasks.pcall(function()
 			return catalog:addPhoto(path)
 		end)
 		if ok then
