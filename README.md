@@ -72,8 +72,9 @@ Claude / Codex ──(MCP, stdio)──▶ lrmcp（Python 服务，本机队列 
 
 ## 🍎 macOS（实验，待验证）
 
-`macos` 分支让服务端代码能在 macOS 上运行，单元测试已通过；**还没有用真实的 Lightroom Classic for Mac 验证过**
-（插件载入、预览导出、读写参数都没测）。请不要把它当成"已支持"。详见 [`docs/macOS验证记录.md`](docs/macOS验证记录.md)。
+`macos` 分支已在 **macOS 27 + Lightroom Classic 15.5.1** 上跑通六套真实验收（读取、写入还原、目录信息、预设、批量、挑片），
+157 个单元测试通过。仍是实验状态：没有 Mac 安装包，`lrmcp register` 和 Claude 桌面版登记未在 Mac 上测过，
+Windows 那边还没核对。预设功能在这个 Lightroom 版本上需要一个 Mac 专用的补救写法。详见 [`docs/macOS验证记录.md`](docs/macOS验证记录.md)。
 
 ## 🚀 从源码安装
 

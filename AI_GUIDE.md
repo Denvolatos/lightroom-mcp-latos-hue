@@ -107,8 +107,9 @@ Then ask the user to **restart Lightroom**. After the restart, *File → Plug-in
 
 ### 3.3b macOS (experimental — not yet tested with a real Lightroom)
 
-On the `macos` branch the server code runs on macOS and its unit tests pass, but **nothing has been verified against a real
-Lightroom Classic on a Mac yet**. Treat every step below as "to be verified" and tell the user so. Do not present macOS as supported.
+On the `macos` branch the server and plug-in passed all six acceptance suites on macOS 27 with Lightroom Classic 15.5.1 (details in
+`docs/macOS验证记录.md`). It is still experimental: there is no Mac installer, and registering with `lrmcp register` / Claude Desktop
+has not been tested on a Mac. Tell the user so and do not present macOS as fully supported.
 
 ```bash
 pip install "https://github.com/Denvolatos/lightroom-mcp-win/archive/refs/heads/macos.zip#subdirectory=server"

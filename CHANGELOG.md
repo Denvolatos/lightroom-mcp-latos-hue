@@ -11,6 +11,14 @@ Versions: a new feature raises the middle number, a small fix the last one. The 
   still refused (tested).
 - Plug-in: `Json.lua` and `Commands.lua` no longer use the locale-dependent `%c` pattern class. On a UTF-8 locale it matched
   bytes 0x80–0x9F and corrupted Chinese text in every reply; the explicit control-character set behaves like the C locale did on Windows.
+- Plug-in, macOS only (`MAC_ENV`): on Lightroom Classic 15.5.1 for Mac `photo:applyDevelopPreset` reports success but changes
+  nothing (121 presets tried), so `lr_apply_preset` writes the preset's own settings with `applyDevelopSettings` when the preset
+  left the photo unchanged. Restoring a black-and-white preset writes the colour keys in a second step, because a black-and-white
+  photo has no colour keys until `ConvertToGrayscale` is switched back.
+- Dev tools: `server/dev_tools.sh` (bash twin of `dev_tools.ps1`) and the dev scripts `select_raw.lua`, `select_mixed3.lua`, so
+  acceptance runs can select their test photos without clicking.
+- Acceptance: all six suites pass on macOS 27 + Lightroom Classic 15.5.1; `acceptance_presets.py` skips presets that change
+  nothing and checks a black-and-white preset. Not yet re-run on Windows.
 - Tests: 157 (was 151). Needs `lupa`, otherwise the Lua tests are skipped silently.
 
 ## 0.3.0 — several AI sessions at once
