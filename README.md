@@ -30,7 +30,7 @@ AI 可以用 **Claude**（调用你电脑上已安装并登录的 Claude Code �
 
 **系统要求：** Windows 10 / 11；已安装 **Adobe Lightroom Classic**（在 15.x 上开发和测试）；已安装并登录的 **Claude Code** 或 **Codex** 命令行（至少一个）。
 
-1. 到 [Releases](https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases) 下载 `LatosHue-Setup-1.0.0.exe`（发布标签形如 `hue-v1.0.0`），核对页面上的 SHA-256。
+1. 到 [Releases](https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases) 下载 `LatosHue-Setup-1.0.1.exe`（发布标签形如 `v1.0.1`），核对页面上的 SHA-256。**每个发布里有两个安装包：普通用户装 `LatosHue-Setup-*.exe`（桌面软件，已含 Lightroom 插件）；只想给 Claude Code / Codex 等 AI 客户端用 MCP 服务的人装 `LrMCP-Setup-*.exe`。** 两个安装包版本号相同。
 2. **在你自己的资源管理器里双击运行**（不要通过 Claude 桌面版启动，见下面 LrMCP 部分的 MSIX 提醒）。不需要管理员权限，不需要装 Python。
    安装包没有代码签名，Windows SmartScreen 可能提示"未知发布者"，点"更多信息"→"仍要运行"即可。
 3. 安装程序会自动把 Lightroom 插件装好。**装完请重启 Lightroom。**
@@ -78,7 +78,7 @@ Latos Hue 通过调用**你电脑上已经安装并登录好的** Claude Code �
 
 # LrMCP：给 AI 客户端直接用的服务端
 
-下面是 Latos Hue 背后用的 Lightroom 插件和 MCP 服务（**LrMCP**），它也可以**单独**装在 Claude Code、Codex 等 MCP 客户端里，不用 Latos Hue。版本线独立于 Latos Hue，见 [CHANGELOG.md](CHANGELOG.md)。
+下面是 Latos Hue 背后用的 Lightroom 插件和 MCP 服务（**LrMCP**），它也可以**单独**装在 Claude Code、Codex 等 MCP 客户端里，不用 Latos Hue。从 1.0.1 起与 Latos Hue 统一版本号、统一发布（标签 `v*`），见 [CHANGELOG.md](CHANGELOG.md)。
 
 **让 Claude / Codex 帮你看 Adobe Lightroom Classic 里的照片。**
 一个 Lightroom 插件加一个小型 MCP 服务：能看到你选中的照片、读取调整参数，并把预览图和直方图数字交给 AI。
@@ -86,7 +86,7 @@ Latos Hue 通过调用**你电脑上已经安装并登录好的** Claude Code �
 
 ![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.15.0-orange)
 
-> ⚠️ **早期版本（0.15.0）**：只在 Windows 11 + Lightroom Classic 15.2 上测过。安装包已发布但尚未在干净电脑上做过安装/卸载测试（待验证）。与 Adobe 无关联。
+> ⚠️ **早期版本（1.0.1）**：只在 Windows 11 + Lightroom Classic 15.2 上测过。安装包已发布但尚未在干净电脑上做过安装/卸载测试（待验证）。与 Adobe 无关联。
 
 ### ✨ 能做什么
 

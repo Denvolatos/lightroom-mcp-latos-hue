@@ -30,7 +30,7 @@ The AI can be **Claude** (the Claude Code command line already installed and sig
 
 **Requirements:** Windows 10 / 11; **Adobe Lightroom Classic** installed (developed and tested on 15.x); and the **Claude Code** or **Codex** command line installed and signed in (at least one).
 
-1. Download `LatosHue-Setup-1.0.0.exe` from [Releases](https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases) (release tags look like `hue-v1.0.0`) and compare the SHA-256 on the page.
+1. Download `LatosHue-Setup-1.0.1.exe` from [Releases](https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases) (release tags look like `v1.0.1`) and compare the SHA-256 on the page. **Each release has two installers: most people want `LatosHue-Setup-*.exe` (the desktop app, which already includes the Lightroom plug-in); install `LrMCP-Setup-*.exe` only if you want the MCP server for an AI client such as Claude Code or Codex.** Both carry the same version number.
 2. **Double-click it from your own File Explorer** (not from a shell started by Claude Desktop, see the MSIX note in the LrMCP part below). No administrator rights and no Python needed.
    The installer is not code-signed, so Windows SmartScreen may say "unknown publisher": click "More info", then "Run anyway".
 3. The installer puts the Lightroom plug-in in place for you. **Restart Lightroom after installing.**
@@ -78,7 +78,7 @@ The full version history and the per-stage "still to verify" lists are in [app/C
 
 # LrMCP: the server for AI clients
 
-What follows is the Lightroom plug-in and MCP server (**LrMCP**) that Latos Hue is built on. You can also install it **on its own** in Claude Code, Codex or another MCP client, without Latos Hue. Its version line is independent of Latos Hue; see [CHANGELOG.md](CHANGELOG.md).
+What follows is the Lightroom plug-in and MCP server (**LrMCP**) that Latos Hue is built on. You can also install it **on its own** in Claude Code, Codex or another MCP client, without Latos Hue. Since 1.0.1 it shares the version number and the release (tag `v*`) with Latos Hue; see [CHANGELOG.md](CHANGELOG.md).
 
 **Let Claude or Codex look at your photos in Adobe Lightroom Classic.**
 A Lightroom plug-in plus a small MCP server. It can see the photo you selected, read its develop settings, and show
@@ -87,7 +87,7 @@ and save old values for restoration.
 
 ![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.15.0-orange)
 
-> ⚠️ **Early version (0.15.0).** Tested only on Windows 11 with Lightroom Classic 15.2. An installer is published, but it has not been install/uninstall-tested on a clean machine yet (待验证).
+> ⚠️ **Early version (1.0.1).** Tested only on Windows 11 with Lightroom Classic 15.2. An installer is published, but it has not been install/uninstall-tested on a clean machine yet (待验证).
 > Not affiliated with Adobe.
 
 ### ✨ What it does

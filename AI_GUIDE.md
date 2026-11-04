@@ -24,7 +24,7 @@ A small tool that lets an AI "see" and gently adjust the photo a user selected i
 - **Lightroom plug-in** (Lua): runs inside Lightroom and only executes a fixed whitelist of commands.
 - **MCP server** (Python, command `lrmcp`): talks to the AI client over stdio and to the plug-in over `127.0.0.1`.
 
-Current version **0.15.0**. What it can do:
+Current version **1.0.1**. Since 1.0.1 this server/plug-in (LrMCP) and the desktop app Latos Hue in the same repository share one version number and one release tag (`v*`, e.g. `v1.0.1`). What it can do:
 
 - **Look:** read photo information and develop settings, render a preview image with histogram numbers, read catalog information.
 - **Change develop settings** (`lr_set_develop`): 89 whitelisted sliders (basic tone, HSL, colour grading, camera calibration, parametric
@@ -54,7 +54,7 @@ Current version **0.15.0**. What it can do:
 starts writes to `AppData`, Windows silently redirects the write and Lightroom cannot see it. So **ask the user to run step 3.2
 (copying the plug-in) in their own PowerShell**, not in your shell.
 
-Alternative: the project also publishes an installer (`LrMCP-Setup-*.exe` on the GitHub Releases page) that installs the server and the
+Alternative: every GitHub release has two installers. **`LrMCP-Setup-*.exe` is the one for AI clients that want the MCP server** (this guide); ordinary users who just want to retouch photos should use `LatosHue-Setup-*.exe` instead (the desktop app Latos Hue, which already includes the plug-in; see the Latos Hue section of README.en.md). The LrMCP installer installs the server and the
 plug-in without Python. It is not code-signed (Windows SmartScreen will warn) and has **not yet been install/uninstall-tested on a clean
 machine**, so the pip route below is the tested one. If the user prefers the installer, they must run it from their own File Explorer.
 
@@ -65,7 +65,7 @@ pip install "https://github.com/Denvolatos/lightroom-mcp-latos-hue/archive/refs/
 lrmcp --version
 ```
 
-Expected output like `lightroom_mcp 0.15.0` (the number may be newer). If `lrmcp` is not found, Python's Scripts folder is not on
+Expected output like `lightroom_mcp 1.0.1` (the number may be newer). If `lrmcp` is not found, Python's Scripts folder is not on
 PATH: find it with `python -m pip show -f lightroom-mcp`, or always use `python -m lightroom_mcp` instead of `lrmcp` and write the
 **absolute path** of Python when registering.
 
@@ -191,7 +191,7 @@ say honestly that it is not possible, and suggest that the user makes any edit t
 3. **Several AI sessions at once are fine** (for example one Claude and one Codex): each session's server takes its own port
    (58770–58789), the plug-in connects to all of them, and commands arriving at the same time are queued inside Lightroom.
    `lr_status` shows how many other sessions there are.
-4. **Updates:** once a day the server asks GitHub whether a newer release exists (anonymous, nothing about the user is sent) and
+4. **Updates:** once a day the server asks GitHub for the latest release (its tag, now like `v1.0.1`) and checks whether it is newer than the installed version (anonymous, nothing about the user is sent) and
    `lr_status` mentions it; nothing is downloaded or installed automatically. It can be switched off (see SECURITY.md).
 5. This is a personal project, **not an Adobe product**, an early version, tested only on Windows 11 + Lightroom Classic 15.2.
 
