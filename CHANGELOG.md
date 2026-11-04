@@ -3,14 +3,12 @@
 Versions: a new feature raises the middle number, a small fix the last one. The server version lives in
 `server/lightroom_mcp/__init__.py`, the plug-in version in `plugin/lrmcp.lrdevplugin/Version.lua` (and `Info.lua`).
 
-## Unreleased — license
+## 0.15.0 (2026-11-04) — import command and library commands for the desktop app, AGPL-3.0
 
-- The project's own code is now licensed under the **GNU AGPL-3.0** (was MIT), from the commits of 2026-11-03 on. In short: free
+- **License change:** The project's own code is now licensed under the **GNU AGPL-3.0** (was MIT), from the commits of 2026-11-03 on. In short: free
   to use, change and share; a distributed (or network-served) modified version must publish its source under the AGPL-3.0 too.
   The releases v0.1.0 to v0.14.0 that were published before stay under the MIT license.
-
-## 0.15.0 — import command for the desktop app
-
+  Every own source file now carries an `SPDX-License-Identifier: AGPL-3.0-only` header; `THIRD_PARTY_NOTICES.md` lists the bundled packages.
 - New plug-in command `import_photo`: adds one photo file that is already on this computer to the Lightroom catalog, the same as
   "Add" (not move) in the import dialog. It is for the desktop app on this computer only and is **not an MCP tool**: the tool list
   is unchanged (22 tools), so an AI assistant cannot call it.
