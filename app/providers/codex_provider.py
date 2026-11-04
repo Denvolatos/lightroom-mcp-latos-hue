@@ -74,8 +74,7 @@ class CodexProvider(AIProvider):
     id = "codex"
     display_name = "Codex 命令行"
     supports_images = True
-    experimental = True
-    experimental_notice = "该来源由外部贡献者接入，尚未在真实 Codex 与 Lightroom 上完成验收，请在测试照片上使用。"
+    experimental = False             # 贡献者已在真机验收（PR #5/#6 的验证报告）；标记机制保留给以后的新来源
     privacy_notice = "使用 Codex 时，选中照片的预览会发送至所选的 Codex 服务。"
 
     def __init__(self, state_file=None, persistent=True, *, workdir: Path = WORKDIR,

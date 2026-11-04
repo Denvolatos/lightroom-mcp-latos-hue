@@ -224,4 +224,4 @@ Codex 的 MCP 配置通过 `env_vars` 转发确认端点的环境变量名，令
 - **"逐项确认"开关**：由 `ConfirmHub.auto_allow` 实现，来源始终走 `/ask`，不用改进程参数。
 - **每轮启动 vs 常驻**：Claude 默认常驻会话（`start(env)` 传入端口与口令，会话期间有效）；Codex 每轮启动 CLI，软件经 `send(..., confirm=, extra_env=)` 传入本轮的端口与一次性口令，轮结束作废。两种来源切换时，软件会重建 Lightroom 通道并让图库、挑片、预设/经验、导入、导出重新绑定，旧来源被 `close()`。
 - **超时**：来源的单轮超时应发 `error`，`message` 取 `claude_bridge.MSG_TIMEOUT`，AI 挑片与"记成经验"据此识别超时。
-- **实验性来源**：Codex 当前标为实验性（由外部贡献者接入，尚未在真实 Codex 与 Lightroom 上完成验收），验收通过前保持该标记。第 9 节未勾选项即未验证清单。
+- **实验性标记**：新接入、尚未真机验收的来源应设 `experimental = True`。Codex 已由贡献者 Galio1991 在 Windows + Lightroom Classic 15.0（测试目录）上验收（读取预览、确认写入与撤销、拒绝路径、环境变量传递、模型自行调用 `lr_restore`，见 PR #5/#6 的验证报告），已去掉该标记；尚未覆盖的有：命令行黑窗口只做了采样观察（不能排除短暂闪现）。第 9 节未勾选项即未验证清单。

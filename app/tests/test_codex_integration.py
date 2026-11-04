@@ -252,12 +252,11 @@ def test_new_chat_context_block_does_not_depend_on_provider(api, monkeypatch):
 
 
 # ---------------------------------------------------------------- 实验性标记与默认来源
-def test_codex_is_experimental_and_claude_remains_default():
+def test_codex_is_no_longer_experimental_and_claude_remains_default():
     assert st.DEFAULT_PROVIDER == "claude" and providers.DEFAULT_PROVIDER == "claude"
     ready = {"available": True, "state": "ready", "reason": "已安装并已登录。", "next_step": ""}
     lst = {x["id"]: x for x in available_providers(ready, ready)}
-    assert lst["codex"]["experimental"] is True
-    assert "尚未在真实 Codex 与 Lightroom 上完成验收" in lst["codex"]["experimental_notice"]
+    assert lst["codex"]["experimental"] is False and lst["codex"]["experimental_notice"] == ""
     assert "预览会发送至" in lst["codex"]["privacy_notice"]
     assert lst["claude"]["experimental"] is False and lst["claude"]["experimental_notice"] == ""
     assert create_provider("unknown").id == "claude"
@@ -269,4 +268,4 @@ def test_detecting_codex_never_switches_provider(api, monkeypatch):
     r = api.get_settings()
     assert r["settings"]["provider"] == "claude" and r["current_provider"] == "claude"
     assert api._settings.data["provider"] == "claude"
-    assert next(p for p in r["providers"] if p["id"] == "codex")["experimental"] is True
+    assert next(p for p in r["providers"] if p["id"] == "codex")["experimental"] is False
