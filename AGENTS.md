@@ -6,10 +6,18 @@
 
 A Lightroom Classic plug-in (Lua, `plugin/lrmcp.lrdevplugin`) and a Python MCP server (`server/lightroom_mcp`).
 The server hosts a local HTTP queue on `127.0.0.1` (first free port in 58770–58789, one server per AI session, announced in `~/LrMcp/servers/<port>.txt`); the plug-in polls all of them and runs whitelisted commands.
-Version 0.15.0 reads photos and can make small, guarded changes (89 whitelisted sliders incl. RAW temperature/tint, colour grading, calibration, parametric curve, detail and effects, crop and straighten, plus catalog information (rating, flag, colour label, title, caption, keywords), a dry-run-first batch tool (at most 10 photos) and develop presets without masks (applied by Lightroom, undone by writing back every changed setting), plus 4 point curves; restorable).
+Version 1.0.1 reads photos and can make small, guarded changes (89 whitelisted sliders incl. RAW temperature/tint, colour grading, calibration, parametric curve, detail and effects, crop and straighten, plus catalog information (rating, flag, colour label, title, caption, keywords), a dry-run-first batch tool (at most 10 photos) and develop presets without masks (applied by Lightroom, undone by writing back every changed setting), plus 4 point curves; restorable).
 Windows + Lightroom Classic 15.2 is the only tested combination.
 
-The repository also holds **Latos Hue** (`app/`, version 1.0.0): a Windows desktop app (pywebview + Python) that talks to this plug-in and starts Claude or Codex itself. It has its own changelog (`app/CHANGELOG.md`), developer notes (`app/DEV_NOTES.md`), tests (`python -m pytest -q app/tests`), release tags (`hue-v*`) and installer (`build_app.ps1 -Installer`). The server/plug-in version line (`v0.x.0`) is separate.
+The repository also holds **Latos Hue** (`app/`, version 1.0.1): a Windows desktop app (pywebview + Python) that talks to this plug-in and starts Claude or Codex itself. It has its own changelog (`app/CHANGELOG.md`), developer notes (`app/DEV_NOTES.md`) and tests (`python -m pytest -q app/tests`).
+
+## Releases (one product, one version number)
+
+- Since 1.0.1 Latos Hue and LrMCP (plug-in + server) share **one version number, one tag `v<version>` and one GitHub release**. The old tags `hue-v1.0.0` (app) and `v0.x.0` (LrMCP) are history.
+- Each release carries two installers: `LatosHue-Setup-<ver>.exe` (`build_app.ps1 -Installer`) and `LrMCP-Setup-v<ver>.exe` (`build.ps1`). Put file names, sizes and SHA-256 in the release notes (`docs/release/v<ver>.md`).
+- The version has three places that must be the same: `app/settings.py` (`APP_VERSION`), `server/lightroom_mcp/__init__.py` (`__version__`), `plugin/lrmcp.lrdevplugin/Version.lua` and `Info.lua`. `build.ps1` checks plug-in vs server.
+- Order: push first; create the release only once the repository name/address is ready; the release created last is the one GitHub shows as Latest (the server's daily check reads it). Never push or publish without the project owner's confirmation.
+- Maintainer notes: the repository is `Denvolatos/lightroom-mcp-latos-hue` (renamed from `lightroom-mcp-win`; GitHub redirects the old name). `app/update_check.py` accepts both tag prefixes `v` and the historical `hue-v`, and release-page links under both repository names; **keep the old name in the accepted list permanently**. `server/lightroom_mcp/update.py` still points at the old address (redirected); change it in the next release.
 
 ## Commands
 

@@ -10,7 +10,8 @@ import pytest
 import settings as st
 import update_check as uc
 
-REPO_URL = "https://github.com/Denvolatos/lightroom-mcp-win/releases/tag/"
+REPO_URL = "https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases/tag/"
+OLD_REPO_URL = "https://github.com/Denvolatos/lightroom-mcp-win/releases/tag/"
 
 
 def rel(tag, **kw):
@@ -58,12 +59,12 @@ def run_jobs(jobs):
 
 # ---------------------------------------------------------------- 版本解析与比较
 @pytest.mark.parametrize("text,want", [("hue-v1.2.3", (1, 2, 3)), ("1.2.3", (1, 2, 3)), (" 0.15.0 ", (0, 15, 0)),
-                                       ("hue-v0.0.0", (0, 0, 0))])
+                                       ("hue-v0.0.0", (0, 0, 0)), ("v1.0.1", (1, 0, 1)), ("v0.15.0", (0, 15, 0))])
 def test_parse_version_ok(text, want):
     assert uc.parse_version(text) == want
 
 
-@pytest.mark.parametrize("text", ["v1.2.3", "hue-v1.2", "hue-v1.2.3.4", "hue-v1.2.3-beta", "hue-vx.y.z", "HUE-V1.2.3", "", "hue-v",
+@pytest.mark.parametrize("text", ["vv1.2.3", "v1.2", "v1.0.1-rc1", "hue-v1.2", "hue-v1.2.3.4", "hue-v1.2.3-beta", "hue-vx.y.z", "HUE-V1.2.3", "", "hue-v",
                                   "1.2.3\n4", "hue-v1.2.3 rc1", None, 5, [], {"a": 1}, "hue-v-1.2.3", "hue-v99999.1.1"])
 def test_parse_version_bad_never_raises(text):
     assert uc.parse_version(text) is None
@@ -71,7 +72,8 @@ def test_parse_version_bad_never_raises(text):
 
 def test_release_version_requires_prefix():
     assert uc.release_version("hue-v1.0.0") == (1, 0, 0)
-    assert uc.release_version("v0.14.0") is None and uc.release_version("1.0.0") is None
+    assert uc.release_version("v1.0.1") == (1, 0, 1) and uc.release_version("v0.14.0") == (0, 14, 0)
+    assert uc.release_version("1.0.0") is None and uc.release_version("V1.0.1") is None and uc.release_version("xv1.0.1") is None
     assert uc.release_version(None) is None
 
 
@@ -83,9 +85,14 @@ def test_is_newer_numeric_not_lexicographic():
 
 
 # ---------------------------------------------------------------- 挑选 release
-def test_pick_only_hue_prefix_ignores_plugin_tags():
-    assert uc.pick_latest([rel("v0.15.0"), rel("v9.9.9"), rel("1.2.3")]) is None
-    r = uc.pick_latest([rel("v9.9.9"), rel("hue-v1.0.0"), rel("hue-v1.2.0"), rel("hue-v1.10.0"), rel("hue-v1.9.0")])
+def test_pick_accepts_both_prefixes_and_ignores_junk_tags():
+    assert uc.pick_latest([rel("1.2.3"), rel("release-1.0.1"), rel("V1.0.1"), rel("foo")]) is None
+    assert uc.pick_latest([rel("hue-v1.0.0"), rel("v1.0.1")])["latest"] == "1.0.1"          # 两种前缀并存取最大
+    assert uc.pick_latest([rel("v1.0.1"), rel("hue-v1.0.0")])["latest"] == "1.0.1"
+    assert uc.pick_latest([rel("v0.15.0"), rel("hue-v1.0.0")])["latest"] == "1.0.0"
+    assert uc.pick_latest([rel("v1.0.2"), rel("hue-v1.5.0")])["latest"] == "1.5.0"
+    assert uc.pick_latest([rel("v0.15.0"), rel("v0.14.0")])["latest"] == "0.15.0"
+    r = uc.pick_latest([rel("hue-v1.0.0"), rel("hue-v1.2.0"), rel("hue-v1.10.0"), rel("hue-v1.9.0")])
     assert r == {"latest": "1.10.0", "url": REPO_URL + "hue-v1.10.0"}
 
 
@@ -104,7 +111,9 @@ def test_pick_skips_release_with_bad_url():
 
 
 # ---------------------------------------------------------------- 网址校验
-@pytest.mark.parametrize("url", [REPO_URL + "hue-v1.0.0", "https://github.com/Denvolatos/lightroom-mcp-win/releases/latest"])
+@pytest.mark.parametrize("url", [REPO_URL + "hue-v1.0.0", OLD_REPO_URL + "hue-v1.0.0",
+                                 "https://github.com/Denvolatos/lightroom-mcp-win/releases/latest",
+                                 "https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases/latest"])
 def test_url_ok(url):
     assert uc.valid_release_url(url)
 
@@ -127,12 +136,37 @@ def test_url_ok(url):
     "https://api.github.com/Denvolatos/lightroom-mcp-win/releases/1",
     "https://github.com/denvolatos/lightroom-mcp-win/releases/tag/x",
     "https://github.com/Denvolatos/lightroom-mcp-win/releases/" + "a" * 400,
+    # 新仓库名的同类伪装
+    "https://github.com/Denvolatos/lightroom-mcp-latos-hue", "https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases/",
+    "https://github.com/Denvolatos/lightroom-mcp-latos-hue-x/releases/tag/x",
+    "https://github.com/Denvolatos/lightroom-mcp-latos-hue/issues/1",
+    "https://github.com/Other/lightroom-mcp-latos-hue/releases/tag/x",
+    "https://github.com/denvolatos/lightroom-mcp-latos-hue/releases/tag/x",
+    "https://github.com.evil.com/Denvolatos/lightroom-mcp-latos-hue/releases/tag/x",
+    "https://evil.com/Denvolatos/lightroom-mcp-latos-hue/releases/tag/x",
+    "https://user@github.com/Denvolatos/lightroom-mcp-latos-hue/releases/tag/x",
+    "https://github.com:444/Denvolatos/lightroom-mcp-latos-hue/releases/tag/x",
+    "https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases/../../evil",
+    "https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases/" + "a" * 400,
+    "https://github.com/Denvolatos/lightroom-mcp-other/releases/tag/x",
 ])
 def test_url_rejected(url):
     assert not uc.valid_release_url(url)
 
 
 # ---------------------------------------------------------------- 后台检查、缓存
+def test_old_lrmcp_tag_is_not_an_update(tmp_path):
+    """历史 v0.15.0 数字比软件当前版本 1.0.1 小，不能被当成更新。"""
+    c, _, jobs = make(tmp_path, Net(body(rel("v0.15.0"), rel("hue-v1.0.0"), rel("v1.0.1"))), current="1.0.1")
+    c.start_background()
+    run_jobs(jobs)
+    assert c.state()["state"] == uc.LATEST
+    c, _, jobs = make(tmp_path / "b", Net(body(rel("v0.15.0"), rel("hue-v1.0.0"), rel("v1.0.2"))), current="1.0.1")
+    c.start_background()
+    run_jobs(jobs)
+    assert c.state()["state"] == uc.AVAILABLE and c.state()["latest"] == "1.0.2"
+
+
 def test_no_hue_release_means_latest_no_error(tmp_path):
     c, net, jobs = make(tmp_path, Net(body(rel("v0.15.0"), rel("v0.14.0"))))
     c.start_background()
@@ -145,7 +179,7 @@ def test_no_hue_release_means_latest_no_error(tmp_path):
 
 def test_new_version_available_and_open_page(tmp_path):
     opened = []
-    c, net, jobs = make(tmp_path, Net(body(rel("hue-v0.16.0"), rel("v0.99.0"))), opened=opened)
+    c, net, jobs = make(tmp_path, Net(body(rel("hue-v0.16.0"), rel("v0.10.0"))), opened=opened)
     c.start_background()
     run_jobs(jobs)
     s = c.state()
@@ -277,7 +311,56 @@ def test_oversized_response_rejected_by_default_fetcher(monkeypatch):
 
 
 def test_request_url_is_fixed_github_api():
-    assert uc.RELEASES_URL.startswith("https://api.github.com/repos/Denvolatos/lightroom-mcp-win/releases")
+    assert uc.RELEASES_URL == "https://api.github.com/repos/Denvolatos/lightroom-mcp-latos-hue/releases?per_page=30"
+
+
+def test_pick_accepts_new_and_old_repo_urls():
+    assert uc.pick_latest([rel("hue-v1.0.1", html_url=REPO_URL + "hue-v1.0.1")])["latest"] == "1.0.1"
+    assert uc.pick_latest([rel("hue-v1.0.1", html_url=OLD_REPO_URL + "hue-v1.0.1")])["latest"] == "1.0.1"
+
+
+def _serve(routes):
+    """起一个只监听 127.0.0.1 的假服务器；routes: path -> (status, headers, body)。返回 (server, base_url)。"""
+    import http.server
+    import threading
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            status, headers, data = routes[self.path]
+            self.send_response(status)
+            for k, v in headers.items():
+                self.send_header(k, v)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_port}"
+
+
+@pytest.mark.parametrize("code", [301, 302])
+def test_http_get_follows_rename_redirect_and_parses_json(code):
+    payload = json.dumps([{"tag_name": "hue-v1.0.1", "html_url": REPO_URL + "hue-v1.0.1"}]).encode()
+    srv, base = _serve({"/old": (code, {"Location": "/new"}, b""), "/new": (200, {}, payload)})
+    try:
+        data = uc.http_get(base + "/old")
+    finally:
+        srv.shutdown()
+    assert uc.pick_latest(json.loads(data))["latest"] == "1.0.1"
+
+
+def test_http_get_size_limit_still_applies_after_redirect():
+    srv, base = _serve({"/old": (301, {"Location": "/new"}, b""), "/new": (200, {}, b"x" * 5000)})
+    try:
+        with pytest.raises(ValueError):
+            uc.http_get(base + "/old", max_bytes=1000)
+        assert uc.http_get(base + "/old", max_bytes=5000) == b"x" * 5000
+    finally:
+        srv.shutdown()
 
 
 # ---------------------------------------------------------------- 开关
@@ -383,7 +466,7 @@ def test_update_check_updates(tmp_path):
 
 
 def test_app_version():
-    assert st.APP_VERSION == "1.0.0"
+    assert st.APP_VERSION == "1.0.1"
 
 
 # ---------------------------------------------------------------- Api

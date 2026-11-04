@@ -35,7 +35,7 @@ STUB = """<script>
     preview_state: ()=>Promise.resolve({type:'preview', state:'none', message:'Lightroom 中未选中照片'}), set_preview_edge: ()=>Promise.resolve({ok:true}),
     autolaunch_state: ()=>Promise.resolve({state:'idle', message:''}),
     get_settings: ()=>Promise.resolve({settings, lightroom_detected:'', providers, current_provider:'claude', edges:[768,1024,1536,2048],
-      about:{app_version:'0.15.0', lightroom_version:'15.0.0', plugin_version:'0.15.0', data_dir:'~/LrMcp', project_url:'https://github.com/Denvolatos/lightroom-mcp-win'}}),
+      about:{app_version:'0.15.0', lightroom_version:'15.0.0', plugin_version:'0.15.0', data_dir:'~/LrMcp', project_url:'https://github.com/Denvolatos/lightroom-mcp-latos-hue'}}),
     update_state: ()=>Promise.resolve(JSON.parse(JSON.stringify(cur))),
     check_update_now: ()=>{ window.__CALLS__.push('check_update_now'); setTimeout(()=>{ cur = final; }, 800); cur = U.checking; return Promise.resolve(JSON.parse(JSON.stringify(cur))); },
     open_update_page: ()=>{ window.__CALLS__.push('open_update_page'); return Promise.resolve({ok:true}); },

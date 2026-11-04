@@ -4,8 +4,8 @@
 
 - 只做一次匿名 GET：api.github.com 上本仓库的 releases 列表（限制响应大小、超时 8 秒）；不带令牌、不带任何用户数据；
 - **标签约定**：本仓库的 releases 有两条版本线——Lightroom 插件/服务端（LrMCP）用 `v0.14.0` 这样的标签，
-  软件（Latos Hue）用独立前缀 `hue-v`（如 `hue-v1.0.0`）。这里只认 `hue-v` 开头、非草稿、非预发布的 release，
-  按 x.y.z 数字取最大者；`v` 开头的标签（插件的）和其他格式一律忽略。以后做安装包/发布时必须遵守这个标签约定；
+  软件曾用独立前缀 `hue-v`（如 `hue-v1.0.0`）。1.0.1 起软件与 LrMCP 统一版本、统一发布，标签用 `v1.0.1` 这样的 `v` 前缀。
+  这里认 `hue-v` 与 `v` 开头、非草稿、非预发布的 release，按 x.y.z 数字取最大者（历史的 `v0.x.0` 数字更小，不会被当成更新）；其他格式一律忽略；
 - 结果缓存 24 小时在 ~/LrMcp/app_update_check.json（服务端自己的是 update_check.json，互不覆盖）；
 - 任何失败（断网、限流、格式异常、响应过大）都静默：后台检查失败不留痕迹，手动检查只显示“暂时无法检查”；
 - “查看新版本”只用系统浏览器打开**自己缓存的** release 网页；地址必须是本仓库 releases 下的 https://github.com 链接，
@@ -22,15 +22,18 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import urlsplit
 
-REPO = "Denvolatos/lightroom-mcp-win"
+REPO = "Denvolatos/lightroom-mcp-latos-hue"   # 查询用的现名（1.0.1 起）
+# 发布页地址同时认现名和旧名：仓库改名后 GitHub 会跳转，API 返回新名，用户手里也可能还有旧链接；旧名永久保留
+ACCEPTED_REPOS = (REPO, "Denvolatos/lightroom-mcp-win")
 RELEASES_URL = f"https://api.github.com/repos/{REPO}/releases?per_page=30"
-TAG_PREFIX = "hue-v"                       # 软件的发布标签前缀；不带前缀的 v 标签是插件/服务端的，不看
+TAG_PREFIXES = ("hue-v", "v")              # 1.0.1 起统一发布用 v 前缀；hue-v 是 1.0.0 的历史标签
+TAG_PREFIX = TAG_PREFIXES[0]
 CACHE_FILE = Path.home() / "LrMcp" / "app_update_check.json"
 CHECK_EVERY_SECONDS = 24 * 3600
 TIMEOUT_SECONDS = 8.0
 MAX_BYTES = 1_000_000                      # 响应超过这么大就当格式异常拒绝
-_VERSION = re.compile(rf"^(?:{re.escape(TAG_PREFIX)})?(\d{{1,4}})\.(\d{{1,5}})\.(\d{{1,5}})$")
-_PAGE_PREFIX = f"/{REPO}/releases/"
+_VERSION = re.compile(rf"^(?:{'|'.join(re.escape(x) for x in TAG_PREFIXES)})?(\d{{1,4}})\.(\d{{1,5}})\.(\d{{1,5}})$")
+_PAGE_PREFIXES = tuple(f"/{r}/releases/" for r in ACCEPTED_REPOS)
 
 IDLE, CHECKING, LATEST, AVAILABLE, UNAVAILABLE = "idle", "checking", "latest", "available", "unavailable"
 MSG_CHECKING = "检查中…"
@@ -47,14 +50,14 @@ def parse_version(text) -> tuple[int, int, int] | None:
 
 
 def release_version(tag) -> tuple[int, int, int] | None:
-    """release 标签 -> 版本号。只认 `hue-v` 前缀。"""
-    if not isinstance(tag, str) or not tag.strip().startswith(TAG_PREFIX):
+    """release 标签 -> 版本号。认 `v`（1.0.1 起统一）与 `hue-v`（历史）前缀，其他一律 None。"""
+    if not isinstance(tag, str) or not tag.strip().startswith(TAG_PREFIXES):
         return None
     return parse_version(tag)
 
 
 def valid_release_url(url) -> bool:
-    """只接受本仓库 releases 下的 https://github.com 网页链接（拒绝其他域名、其他协议、带账号/端口、含 .. 或控制字符的）。"""
+    """只接受本仓库（现名或旧名）releases 下的 https://github.com 网页链接（拒绝其他域名、其他协议、带账号/端口、含 .. 或控制字符的）。"""
     if not isinstance(url, str) or not url or len(url) > 300 or any(ord(c) < 33 or ord(c) == 127 for c in url):
         return False
     try:
@@ -64,7 +67,8 @@ def valid_release_url(url) -> bool:
         return False
     if u.scheme != "https" or u.netloc != "github.com" or u.username or u.password or port is not None:
         return False
-    if not u.path.startswith(_PAGE_PREFIX) or len(u.path) == len(_PAGE_PREFIX) or ".." in u.path.split("/"):
+    prefix = next((p for p in _PAGE_PREFIXES if u.path.startswith(p)), None)
+    if prefix is None or len(u.path) == len(prefix) or ".." in u.path.split("/"):
         return False
     return True
 

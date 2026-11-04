@@ -722,7 +722,7 @@ photo_id 逐字取自第 ③ 项；按从好到坏排列；score 1–10；stars 
 
 ### 做了什么
 - **原则（用户已定）：只检查，用户点了才去看；绝不自动下载、自动安装、自动替换文件。**
-- **标签约定（做安装包/发布时必须遵守）：** 本仓库 releases 有两条版本线——Lightroom 插件/服务端（LrMCP）标签 `v0.14.0`；软件（Latos Hue）标签 `hue-v1.0.0`（独立前缀 `hue-v`）。`update_check.pick_latest` 只认 `hue-v` 前缀、`draft`/`prerelease` 都为假、`html_url` 合规的条目，按 x.y.z 数字取最大；`v` 前缀、缺段、带后缀（`-rc1`）的一律忽略。发软件版本时不要用 `v` 前缀，也不要把软件版本做成预发布（会被忽略）。
+- **标签约定（1.0.1 起已改：今后统一发布用 `v` 前缀如 `v1.0.1`，软件与 LrMCP 同一个版本号、同一个发布、两个安装包；`update_check` 同时认 `v` 与历史的 `hue-v`，取数字最大者；下面是 1.0.0 时的原始约定，仅作历史）：** 本仓库 releases 有两条版本线——Lightroom 插件/服务端（LrMCP）标签 `v0.14.0`；软件（Latos Hue）标签 `hue-v1.0.0`（独立前缀 `hue-v`）。`update_check.pick_latest` 只认 `hue-v` 前缀、`draft`/`prerelease` 都为假、`html_url` 合规的条目，按 x.y.z 数字取最大；`v` 前缀、缺段、带后缀（`-rc1`）的一律忽略。发软件版本时不要用 `v` 前缀，也不要把软件版本做成预发布（会被忽略）。
 - **逻辑（`app/update_check.py`，新文件）：** `AppUpdateChecker(current, enabled, http_get, open_url, spawn, clock, cache_file)`，HTTP、浏览器、起线程、时钟全部可注入。
   - 请求：一次匿名 GET `https://api.github.com/repos/Denvolatos/lightroom-mcp-win/releases?per_page=30`，超时 8 秒，响应超 1 MB 就拒绝（`http_get` 多读 1 字节判断），UA 只有 `LatosHue/<版本>`，不带令牌/Cookie/用户数据。
   - 缓存：`~/LrMcp/app_update_check.json`（服务端的是 `update_check.json`，互不覆盖），内容 `{checked_at, latest, url}`；24 小时内不再请求；读缓存时重新校验每个字段，坏文件/未来时间/不合规网址一律当没有缓存。失败不写缓存（下次启动再试）。
@@ -832,3 +832,13 @@ photo_id 逐字取自第 ③ 项；按从好到坏排列；score 1–10；stars 
 - **声明同步：** `THIRD_PARTY_NOTICES.md` B 表移除被排除的包（setuptools、packaging、wheel、pefile、altgraph、Pygments、pytest、pywin32-ctypes）和 PyInstaller 的 Python 模块（只保留 bootloader 与运行时钩子），`licenses/` 删掉对应文件夹；A 表（`lrmcp.exe`，由 `build.ps1` 打包，没有排除这些）保持不变。
 - **安装包带许可证：** `installer/latoshue.iss` 把 `LICENSE`（装成 `LICENSE.txt`）、`THIRD_PARTY_NOTICES.md`、`licenses\` 装到 `{app}`；它们在程序目录里，卸载时随程序目录一起删。
 
+
+
+# 1.0.1：仓库改名为 lightroom-mcp-latos-hue（2026-11-04）
+
+- **原因：** GitHub 仓库名不能含括号，改名为 `Denvolatos/lightroom-mcp-latos-hue`。改名后旧地址会自动跳转，但 API 返回的 release `html_url` 变成新名字，1.0.0 的 `valid_release_url` 只认旧名，会把它丢弃、永远没有更新提示。
+- **做法：** `update_check.REPO` 改为新名（查询用）；`ACCEPTED_REPOS = (新名, 旧名)`，`valid_release_url` 对两个精确前缀都接受，其余校验（https、host 恰为 github.com、无账号/端口、禁 `..`、长度）不变。旧名永久保留在接受清单里。
+- **跳转：** `http_get` 用 urllib 默认行为，会跟随 301/302；测试里用本机假服务器验证了跳转后仍能解析 JSON、响应大小限制仍然生效。
+- **用户可见链接**（README、README.en、AI_GUIDE、llms.txt、issue 模板配置、`PROJECT_URL`、安装包 `AppPublisherURL`）已改成新地址；CHANGELOG/DEV_NOTES/docs/release 里描述过去发布的文字保持原样。
+- **版本统一（追加）：** 项目所有者决定“一个产品、一个版本号、一个发布”：服务端 `__version__`、插件 `Version.lua`/`Info.lua` 都升到 1.0.1，与 Latos Hue 同号，今后每次发布 `v*` 标签、两个安装包（`LatosHue-Setup-X.exe`、`LrMCP-Setup-vX.exe`）。`update_check` 的标签前缀改为 `("hue-v", "v")`；历史 `v0.x.0` 数字小于 1.0.1，不会被当成更新。
+- **待办（下次发布时）：** `server/lightroom_mcp/update.py` 的 `LATEST_URL` / `RELEASES_PAGE` 以及 `server/pyproject.toml` 的 Homepage/Issues 仍是旧地址（已发布的 0.15.0 带旧地址，靠 GitHub 跳转仍可用；1.0.1 这次也没动它），下次发布时改成 `lightroom-mcp-latos-hue`。

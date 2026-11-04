@@ -38,7 +38,7 @@ STUB = """<script>
     choose_lightroom_path: ()=>Promise.resolve({ok:true, path:'D:\\\\Adobe\\\\Lightroom Classic\\\\Lightroom.exe'}),
     get_settings: ()=>Promise.resolve({settings: Object.assign({auto_launch_lightroom: scen.indexOf('autolr')===0, lightroom_path: scen==='autolr_set'?'D:\\\\Adobe\\\\Lightroom Classic\\\\Lightroom.exe':''}, settings),
       lightroom_detected: scen==='autolr_none' ? '' : 'C:\\\\Program Files\\\\Adobe\\\\Adobe Lightroom Classic\\\\Lightroom.exe', providers, current_provider:'claude', edges:[768,1024,1536,2048],
-      about:{app_version:'0.7.0', lightroom_version:'15.0.0', plugin_version:'0.15.0', data_dir:'~/LrMcp', project_url:'https://github.com/Denvolatos/lightroom-mcp-win'}}),
+      about:{app_version:'0.7.0', lightroom_version:'15.0.0', plugin_version:'0.15.0', data_dir:'~/LrMcp', project_url:'https://github.com/Denvolatos/lightroom-mcp-latos-hue'}}),
     choose_folder: ()=>Promise.resolve({ok:true, path:'D:\\\\修图素材'}),
     check_folder: p=>Promise.resolve(p.indexOf('Windows')>=0 ? {ok:false, message:'不能使用系统或程序目录，请选择其他位置。'} : {ok:true, exists:true}),
     save_settings: (c, create)=>{ window.__CALLS__.push(c);
