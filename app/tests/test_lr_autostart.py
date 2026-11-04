@@ -320,6 +320,16 @@ class FakeWindow:
         return self.result
 
 
+def test_api_choose_path_file_filter_is_valid_for_pywebview(api, tmp_path):
+    """真机教训：文件类型字符串格式不对时 pywebview 会抛错，被吞掉后表现为“点了没反应”。"""
+    from webview.util import parse_file_type
+    win = FakeWindow((make_exe(tmp_path / "L"),))
+    api._window = win
+    api.choose_lightroom_path()
+    for ft in win.calls[0][1]["file_types"]:
+        parse_file_type(ft)
+
+
 def test_api_choose_path_then_save_and_clear(api, tmp_path):
     exe = make_exe(tmp_path / "L")
     api._window = FakeWindow((exe,))

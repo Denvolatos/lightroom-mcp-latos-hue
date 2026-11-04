@@ -407,7 +407,7 @@ class Api:
         fd = getattr(webview, "FileDialog", None)
         kind = getattr(fd, "OPEN", None) or webview.OPEN_DIALOG
         try:
-            res = self._window.create_file_dialog(kind, allow_multiple=False, file_types=("Lightroom 程序 (Lightroom.exe)",))
+            res = self._window.create_file_dialog(kind, allow_multiple=False, file_types=("Lightroom 程序 (*.exe)",))
         except Exception:
             res = None
         if not res:
