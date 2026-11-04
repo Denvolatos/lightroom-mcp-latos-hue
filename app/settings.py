@@ -33,7 +33,8 @@ EXPORT_EDGE_RANGE = (256, 20000)         # 长边像素；0 表示原始尺寸
 
 
 def default_base_folder() -> str:
-    return str(Path.home() / "Pictures" / "修图助手")
+    # A new user chooses the location; do not silently put photo copies on C:.
+    return ""
 
 
 def defaults() -> dict:

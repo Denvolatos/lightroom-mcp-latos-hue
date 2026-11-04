@@ -153,12 +153,13 @@ def test_prepare_without_scan(env):
     assert not env[0].prepare("")["can_start"]
 
 
-def test_default_base_reported(env):
+def test_unset_base_blocks_import(env):
     svc = env[0]
     svc.settings.data["base_folder"] = st.default_base_folder()
     scan(svc, env[3])
     r = svc.prepare("")
-    assert r["base_is_default"] and r["base"] == st.default_base_folder()
+    assert not r["can_start"] and r["base"] == "" and "base" in r["errors"]
+    assert not svc.library()["exists"]
 
 
 def test_scan_cancel(env):

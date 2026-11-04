@@ -119,7 +119,7 @@ class ImportService:
             ok_rel, why_rel = imp.check_folders(source, base, self.data_dir)
             if not ok_rel:
                 errors["base"] = why_rel
-        folder = Path(base) / cat if (ok_cat and cat) else Path(base)
+        folder = str(Path(base) / cat) if (base and ok_cat and cat) else base
         free = self._free(base) if v["ok"] else None
         needed = scan["total_size"]
         shortfall = 0
@@ -129,7 +129,7 @@ class ImportService:
         if free is None and v["ok"]:
             errors["space"] = "无法读取目标磁盘的剩余空间，暂不能开始。"
         return {"ok": not errors, "can_start": not errors, "errors": errors, "found": found, "source": source,
-                "base": base, "base_exists": base_exists, "base_is_default": base == appsettings.default_base_folder(),
+                "base": base, "base_exists": base_exists, "base_is_default": False,
                 "category": cat, "target": str(folder), "free": free, "free_text": imp.fmt_size(free) if free is not None else "未知",
                 "needed_text": imp.fmt_size(needed), "shortfall": shortfall, "lr_connected": bool(self.lr.connected)}
 
@@ -258,6 +258,8 @@ class ImportService:
     # ---- 软件文件夹（只读） -----------------------------------------
     def library(self, limit: int = 300) -> dict:
         base = self.settings.data["base_folder"]
+        if not base:
+            return {"exists": False, "total": 0, "groups": [], "shown": 0, "more": False, "base": ""}
         tree = imp.library_tree(base, limit=max(1, min(int(limit), 2000)))
         tree["base"] = str(base)
         return tree

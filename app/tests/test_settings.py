@@ -1,5 +1,6 @@
 """设置读写与校验、AI 来源选择、设置对话框用到的后端接口。"""
 import json
+from pathlib import Path
 
 import pytest
 
@@ -16,7 +17,7 @@ def store(tmp_path):
 def test_defaults_when_file_missing(store):
     d = st.defaults()
     assert store.data == d
-    assert d["base_folder"].endswith("Pictures\\修图助手") or d["base_folder"].endswith("Pictures/修图助手")
+    assert d["base_folder"] == ""
     assert d["provider"] == "claude" and d["confirm_default"] is True and d["preview_edge"] == 1024
 
 
@@ -43,6 +44,41 @@ def test_unknown_fields_are_kept_and_valid_ones_loaded(tmp_path):
     assert s.data["future_flag"] == {"a": 1}
     s.update({"preview_edge": 768})
     assert json.loads(p.read_text(encoding="utf-8"))["future_flag"] == {"a": 1}      # 保存时未知字段仍在
+
+
+def test_existing_photo_folder_is_preserved(tmp_path):
+    folder = tmp_path / "existing-photos"
+    folder.mkdir()
+    config = tmp_path / "settings.json"
+    config.write_text(json.dumps({"base_folder": str(folder)}), encoding="utf-8")
+    assert st.SettingsStore(config, restrict=lambda p: None).data["base_folder"] == str(folder)
+
+
+def test_webview_cache_uses_selected_folder_and_is_cleaned(tmp_path, monkeypatch):
+    import main
+
+    class FakeApi:
+        def __init__(self):
+            self._settings = type("Settings", (), {"data": {"base_folder": str(tmp_path)}})()
+            self.closed = False
+        def _start_background(self):
+            pass
+        def _shutdown(self):
+            self.closed = True
+
+    api = FakeApi()
+    paths = []
+    monkeypatch.setattr(main, "Api", lambda: api)
+    monkeypatch.setattr(main.webview, "create_window", lambda *a, **k: object())
+    def start(_callback, *, storage_path, icon):
+        cache = Path(storage_path)
+        assert cache.parent == tmp_path and cache.name.startswith(".latoshue-webview-")
+        assert cache.is_dir()
+        (cache / "temporary").write_text("cache", encoding="utf-8")
+        paths.append(cache)
+    monkeypatch.setattr(main.webview, "start", start)
+    main.main()
+    assert api.closed and len(paths) == 1 and not paths[0].exists()
 
 
 def test_atomic_write_roundtrip_and_restrict_called(tmp_path):
