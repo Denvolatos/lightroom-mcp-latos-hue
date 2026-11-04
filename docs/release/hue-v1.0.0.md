@@ -31,6 +31,7 @@ Latos Hue（修图助手）是一个 Windows 桌面软件：在一个窗口里�
 - 安装包**没有代码签名**，Windows SmartScreen 可能提示"未知发布者"，可点"更多信息"→"仍要运行"。
 - 下列情况尚未在真机上充分验证：Windows 125% / 150% 缩放下的外观；100 张以上的大批量导入和真实存储卡；原始尺寸的 16 位 TIFF 导出。
 - 导出只有 JPEG 和 TIFF，没有 PNG；没有 Mac 版；"多版本"对比页暂未提供。
+- 只在 Windows 11 + Lightroom Classic 15.x 上测过。软件自动启动 Lightroom 后，插件偶尔连接较慢；超过两分钟还没连上时，软件会提示你到 Lightroom 的「文件 → 增效工具管理器」里检查 LrMCP。
 
 ### 校验信息
 | 项目 | 值 |
@@ -73,6 +74,7 @@ Original photos are processed on your computer only. When you retouch, a preview
 - The installer is **not code-signed**; Windows SmartScreen may show "unknown publisher" (click "More info", then "Run anyway").
 - Not yet verified well enough on real machines: the look at 125% / 150% scaling; bulk imports of 100+ photos and real memory cards; full-size 16-bit TIFF export.
 - Export is JPEG and TIFF only (no PNG); no Mac version; the "multiple versions" comparison page is not available yet.
+- Tested only on Windows 11 with Lightroom Classic 15.x. After the app starts Lightroom automatically, the plug-in can occasionally be slow to connect; if it has not connected after two minutes, the app tells you to check LrMCP in Lightroom's File > Plug-in Manager.
 
 ### Checksums
 | Item | Value |
