@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Denvolatos and contributors
 """自动启动 Lightroom：路径校验与探测、是否已在运行、STARTUPINFO 参数、启动流程的各种结果、设置校验、Api 不接受页面传来的路径。
 全部使用假对象：不会真的启动 Lightroom，也不会弹出任何窗口。"""
+import os
 import subprocess
 import types
 
@@ -431,3 +432,23 @@ def test_timeout_message_is_specific():
     al.run()
     assert ev[-1]["state"] == la.TIMEOUT and ev[-1]["message"] == m
     assert la.CONNECT_TIMEOUT == 120.0
+
+
+def test_clean_environment_drops_own_dirs_and_packager_vars():
+    own = r"C:\Apps\Latos Hue\_internal"
+    env = {"Path": os.pathsep.join([own, r"C:\APPS\LATOS HUE", r"C:\Windows\System32", r"C:\Apps\Latos Hue Other"]),
+           "_MEIPASS2": own, "_PYI_APPLICATION_HOME_DIR": own, "PYTHONHOME": "x", "PYTHONPATH": "y", "TEMP": "t"}
+    out = la.clean_environment(env, own_dirs=[own, r"C:\Apps\Latos Hue"])
+    assert out["Path"].split(os.pathsep) == [r"C:\Windows\System32", r"C:\Apps\Latos Hue Other"]   # 同名前缀的别的目录保留
+    assert "_MEIPASS2" not in out and "_PYI_APPLICATION_HOME_DIR" not in out and "PYTHONHOME" not in out and "PYTHONPATH" not in out
+    assert out["TEMP"] == "t" and env["Path"].startswith(own)                                          # 不改原字典
+
+
+def test_launch_passes_a_clean_environment(tmp_path):
+    exe = make_exe(tmp_path / "L")
+    seen = {}
+
+    def popen(args, **kw):
+        seen.update(kw)
+    assert la.launch_minimized(exe, popen) is True
+    assert isinstance(seen["env"], dict) and "env" in seen
