@@ -688,3 +688,32 @@ photo_id 逐字取自第 ③ 项；按从好到坏排列；score 1–10；stars 
 ### 真机未验证
 - **首次连不上的原因仍未查明**（曾有一次自动拉起后 5 分钟没连上，期间通道不停重建，同样流程再试 12 秒就连上）。宽限期只减少无意义的换端口并让提示更可排查，不保证修复。若再复现，先看 Lightroom 增效工具管理器里 LrMCP 的状态。
 - 90 秒宽限与真实插件加载耗时的关系待真机观察。
+
+
+## 第十五阶段：环境检查向导（0.14.0）
+
+### 做了什么
+- **检查逻辑（`app/wizard.py`，新文件）：** `WizardChecker`，所有系统访问都可注入（读设置、`find_lightroom`、`is_running`、`Backend.status()`、AI 来源状态、`AutoLaunch.state()`、`isdir`、起线程、时钟）。四项按 文件夹 → Lightroom → 插件 → AI 的顺序，状态 `ready` / `todo` / `wait`：
+  - 文件夹：`base_folder` 为空或不是字符串 → todo（按钮 `choose_folder`）；设了但磁盘上不存在 → todo（“找不到了”，可能是移动硬盘没接）；存在 → ready。
+  - Lightroom：在运行（`tasklist`）**或插件已连上**（连上了就一定在运行，查进程偶尔会失败）→ ready；自动启动正在进行（`starting` / `already_running`）→ wait；`find_lightroom`（含用户自选路径）找到但没运行 → todo（“请先打开 Lightroom”，并说明设置里有自动启动开关；向导不替用户打开）；没找到 → todo（按钮 `choose_lightroom`，也可手动打开）。
+  - 插件：Lightroom 不是 ready → wait（“等待 Lightroom”）；已连上 → ready（带插件版本）；连接状态 `connecting`（刚启动 25 秒内）或自动启动进行中 → wait；否则 todo，给出增效工具管理器的排查步骤。
+  - AI：取设置里选中的来源（`available_providers`，与设置对话框同一套文案）。`available` → ready（`unknown` 登录状态也算，提示照样显示）；否则 todo，文案取 `reason` + `next_step`，没有 `next_step` 时提示去设置换来源。不弹终端、不替用户登录。
+  - 任何一项检查出异常只让那一项变 todo（“请点重新检查”），后面依赖它的项变 wait。
+- **不阻塞：** `state(refresh)` 立刻返回上一次结果；没有结果时返回四项“检查中…”占位；检查在后台线程里做，进行中不重复起；结果超过 5 秒、或 `invalidate()` 后，下一次取状态时顺带在后台重查；起线程失败不会卡在“检查中”。`claude auth status` 之类的子进程调用（Claude 缓存 `AUTH_CACHE_SECONDS`，Codex 缓存 30 秒）都只在这个后台线程里发生，页面轮询（600 ms）只读缓存。
+- **自动弹出（`wizard.decide`，纯函数）：** 没选文件夹（文件夹项 todo）→ 必弹，不管 `wizard_done`；否则 `wizard_done` 为假且有任一项 todo → 弹；全部 ready 且 `wizard_done` 为假 → 不弹、`mark_done`（页面调用 `wizard_done(True)`）。wait 不算 todo。`state()` 把 `auto_open` / `mark_done` / `wizard_done` 一并返回。
+- **接口（`Api`）：** `wizard_state(refresh=False)`、`wizard_done(flag)`（只接受布尔，只改 `wizard_done` 一项设置）、`wizard_pick_folder()`、`wizard_pick_lightroom()`（后两者不收任何参数：路径只来自系统对话框里的点选，分别复用 `choose_folder` + `settings.update` 和 `choose_lightroom_path` + `save_settings(lightroom_path_choice="pending")`，经过原有校验；选完 `invalidate`，选文件夹后还刷新图库）。
+- **设置：** `wizard_done`（布尔，默认 False；`sanitize` 把非布尔值改回 False，`update` 拒绝非布尔值；旧文件缺这一项照常读取）。`APP_VERSION` 升到 0.14.0。
+- **界面（`app/web/index.html`）：** 新对话框 `#wmask`（沿用 `dialog wide` 的样式）：四行清单（图标 + 标题 + 状态 + 说明 + 提示 + 按钮）、底部“以后不再自动显示”勾选、“重新检查”（检查中禁用并显示“检查中…”，清单半透明）、全部就绪时的绿色提示与“完成”。右上角 × 与点遮罩都只是关闭（勾选了“以后不再自动显示”才记为已完成）。设置里“环境检查”一栏的按钮随时打开。启动时 `wizardStartup()`：主界面准备好之后取状态，按 `auto_open` 弹出；“等待”项还在时每 3 秒再看一次，最多约 50 秒（否则插件有问题的人在 25 秒连接宽限内不会被提醒）。**去掉了**原来“没有工作文件夹就直接 `openSettings()`”的那一行。所有文字用 `textContent` 写入。
+- 测试（`app/tests/test_wizard.py`，60 个）：四项在各状态下的判定与文案、依赖关系（wait）、自动启动进行中、`decide` 的全部分支（含没选文件夹必弹）、重新检查不阻塞（真线程 + 卡住的 AI 状态、重复点击不重复起、过期重查、起线程失败）、`wizard_done` 的校验、旧设置文件加载、`Api` 的方法签名/只接受布尔/选文件夹与选 Lightroom 的路径只来自（假的）对话框。测试里没有任何真实窗口、真实 Lightroom、真实 AI 或真实照片目录。
+- 界面截图：`app/tests/ui_wizard_check.py`（无头 Edge + 假 `pywebview.api`；`todo` 场景靠启动时自动弹出，等于验证了自动弹出路径）。`wizard_todo` / `partial` / `ready` / `checking` / `narrow` / `settings`，均为假数据。无头 Edge 窗口最小约 500 px 宽，`narrow` 取 520 px：对话框不溢出（说明文字自动折行）；软件自己的最小窗口宽度是 1100 px。
+
+### 真机未验证
+1. 真实窗口里向导的外观（字体渲染、对话框与遮罩层级、与设置对话框叠放时的顺序）和自动弹出的时机（是否在启动界面消失、主界面出现之后才弹；弹出时是否抢焦点）。
+2. 各状态在真机上的判定：`tasklist` 判断 Lightroom 是否在运行；用户自选 Lightroom 路径后判定；插件版本是否带出；插件没装/没启用时是否确实走到“需要处理”（而不是一直“等待”）；Claude / Codex 未安装、未登录时的文案；Codex 来源下的判定。
+3. “选择文件夹”“选择 Lightroom 程序”在真实窗口里弹出系统对话框、选完后清单自动刷新、图库随之重新读取。
+4. 已有老用户（设置文件里没有 `wizard_done`，且工作文件夹已选）第一次升级后的体验：若一切就绪应静默记为已完成；若有项目需要处理会弹一次。
+5. 首次启动时 `get_settings(False)` 之后立刻触发后台检查，是否拖慢启动界面交接（理论上检查在后台线程，不应有影响）。
+
+### 建议的下一步
+- 用户清掉 `~/LrMcp/app_settings.json` 里的 `wizard_done`（或新建一份设置）试第一次打开；再分别关掉 Lightroom、在增效工具管理器里停用 LrMCP，看清单能否给出正确的下一步。
+
