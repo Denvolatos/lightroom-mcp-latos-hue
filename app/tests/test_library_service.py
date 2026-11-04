@@ -189,8 +189,7 @@ def test_apply_prepare_builds_a_confirmation_list_without_writing(env):
     s, lr, _, applied, _ = env
     pid = save_preset(s)
     lr.photo["settings"].update({"Exposure2012": 0.2, "Highlights2012": 0.0})
-    s.presets.save("强", "", ["tone"], {"Exposure2012": 1.0, "Highlights2012": -40.0}, overwrite=False)
-    pid = s.presets.list()[-1]["id"]
+    pid = s.presets.save("强", "", ["tone"], {"Exposure2012": 1.0, "Highlights2012": -40.0}, overwrite=False)["id"]
     r = s.apply_prepare("mine", pid, 50)
     assert r["ok"] and r["token"] and "强度 50%" in r["title"] and r["photo"] == "one.ARW"
     got = {i["key"]: (i["current"], i["new"]) for i in r["items"]}
