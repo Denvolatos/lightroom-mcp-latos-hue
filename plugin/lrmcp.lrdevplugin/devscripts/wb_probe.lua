@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script: measure white balance writes on ONE RAW and ONE JPEG of the TEST catalog, then restore everything.
 -- Reports: slider range behaviour, JPEG semantics, how long Temperature/Tint take to appear, and whether the
 -- restore brings back ALL simple settings.

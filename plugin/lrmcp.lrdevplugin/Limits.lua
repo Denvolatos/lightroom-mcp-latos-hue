@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- What the plug-in may change (v1.1) and how far: { minimum, maximum, largest change in one call }.
 -- Keep it in sync with server/lightroom_mcp/edits.py (a unit test compares the two files).
 -- Anything not listed here cannot be written. Tone curve, masks, crop, presets: not allowed.

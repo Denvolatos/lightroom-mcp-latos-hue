@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script: compile every plug-in file (syntax check) and test the Lua JSON encoder. Changes nothing.
 local ctx = ...
 local import = ctx.import

@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script: how does cropping behave through applyDevelopSettings? TEST catalog, DSC08238.ARW, then restore.
 local ctx = ...
 local import = ctx.import

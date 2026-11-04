@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- The whitelist of commands the Python server may ask for. v1.0: all read-only.
 -- Every command returns a table (encoded to JSON by Bridge.lua) or raises fail("message") for the user.
 -- Nothing here accepts a file path from the request; previews are written to a fixed folder.

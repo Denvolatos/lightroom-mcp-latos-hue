@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- LrMCP: lets Claude / Codex look at photos (read-only in v1.0). Not an Adobe product.
 return {
 	LrSdkVersion = 15.0,

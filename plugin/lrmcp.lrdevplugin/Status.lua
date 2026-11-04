@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Menu item: Library > Plug-in Extras > "LrMCP: Status". Shows which AI sessions' servers are connected.
 local LrDate = import "LrDate"
 local LrDialogs = import "LrDialogs"

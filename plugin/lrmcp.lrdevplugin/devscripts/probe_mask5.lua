@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script: does the SELECTED photo accept a mask later (async), or never? TEST catalog; clears afterwards.
 local ctx = ...
 local import = ctx.import

@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Menu item: "LrMCP: Socket test (experiment 3)".
 -- Opens two LrSocket servers (one "receive", one "send", ports chosen by the OS),
 -- writes the ports to ~/LrMcp/sock_ports, then answers a Python client:

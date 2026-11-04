@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script: batch 2 (sharpening, noise reduction, vignette, grain) on the TEST catalog.
 -- For each key: current value, then nominal min / max / one step beyond each end as seen by getDevelopSettings(),
 -- then the original is written back. At the end ALL simple settings are compared with the start.

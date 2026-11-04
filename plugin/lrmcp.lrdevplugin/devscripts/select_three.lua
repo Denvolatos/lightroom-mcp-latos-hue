@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script: select three photos of the TEST catalog (two RAW, one JPEG). Changes only Lightroom's selection.
 local ctx = ...
 local import = ctx.import

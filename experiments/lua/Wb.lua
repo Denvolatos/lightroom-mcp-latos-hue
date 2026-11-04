@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Menu item: "LrMCP: White balance test (experiment 4c)".
 -- Select the TEST photo (DSC08238.ARW). Finds out whether writing WhiteBalance="As Shot" alone restores the
 -- rendering (the Temperature/Tint values stay stale), by exporting a 1024px preview after each state and

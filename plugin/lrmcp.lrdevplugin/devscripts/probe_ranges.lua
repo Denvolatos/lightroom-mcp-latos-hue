@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script: measure the real range of the develop sliders and what Lightroom does with out-of-range values.
 -- Works only on the TEST catalog's selected photo. For each key it tries the nominal minimum, maximum and a value
 -- beyond each end, reads back what Lightroom stored, then restores the original value. Ends by comparing all simple

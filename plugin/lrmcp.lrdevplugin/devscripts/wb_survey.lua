@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script (READ ONLY): what white balance values does Lightroom report for each photo of the TEST catalog?
 local ctx = ...
 local import = ctx.import

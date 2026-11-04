@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script (READ ONLY): which develop presets exist and what kind of settings do they carry?
 -- Output is ASCII only (counts and key names).
 local ctx = ...

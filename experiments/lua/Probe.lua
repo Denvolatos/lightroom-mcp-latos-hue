@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Menu item: "LrMCP: WB keys probe (experiment 4d)".
 -- For every selected photo in the 'ceshi' test folder (max 8): read WhiteBalance/Temperature/Tint,
 -- do a NO-OP write (Exposure2012 = its current value), read again. Changes no values; tells us whether a

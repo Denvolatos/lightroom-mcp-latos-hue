@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script (READ ONLY): which preset folders does Lightroom have, where do they live, and how many presets are in each?
 -- Tells Adobe's built-in presets (inside the program) from user presets (inside the user's own settings folder).
 local ctx = ...

@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script: write a mask to the ACTIVE photo by making another photo active for a moment. TEST catalog; clears afterwards.
 local ctx = ...
 local import = ctx.import

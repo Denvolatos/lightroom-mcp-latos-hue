@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script (READ ONLY): what do mask settings inside presets look like? ASCII output, truncated.
 local ctx = ...
 local import = ctx.import

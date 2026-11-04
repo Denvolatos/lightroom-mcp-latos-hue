@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script (port of experiment 4e): for every photo of the TEST catalog (path contains "ceshi", max 8):
 -- save all simple develop settings, make a REAL tiny change (Exposure2012 +0.01), revert it exactly, then report
 -- which keys appeared/changed (Temperature/Tint?) and 1024px preview sizes before/after.

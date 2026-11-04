@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script: which TEST photos accept a mask written through applyDevelopSettings, and what do they have in common?
 local ctx = ...
 local import = ctx.import

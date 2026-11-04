@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Menu item: "LrMCP: Prepare WB probe (experiment 4e)".
 -- For every selected photo in the 'ceshi' test folder (max 8): save all simple develop settings, make a REAL tiny
 -- change (Exposure2012 +0.01), revert it exactly, then log which keys appeared/changed (Temperature/Tint?)
