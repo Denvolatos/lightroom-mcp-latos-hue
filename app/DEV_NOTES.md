@@ -651,3 +651,27 @@ photo_id 逐字取自第 ③ 项；按从好到坏排列；score 1–10；stars 
 2. 验收通过后：去掉实验性标记或改为"测试版"，把第 9 节未勾选项逐项勾上。
 3. 若 `lr_get_preview` 图片 Codex 读不了：Codex 下禁用 AI 挑片并给出"当前 AI 来源暂不支持此功能"，或改走文件路径方式（需评估隐私）。
 4. 处理 `ConfirmHub` 401 响应未读请求体导致的偶发连接中止。
+
+## 第十三阶段：自动启动 Lightroom + 启动界面（0.13.0）
+
+### 做了什么
+- **自动启动（`app/lr_autostart.py`，新文件）：** 纯函数 + 一个 `AutoLaunch` 流程类，所有系统访问（`tasklist`、注册表、`Popen`、时钟、sleep）都可注入。`valid_lightroom_path`：字符串、`X:\` 本机盘符（拒绝 `\` 网络路径与 `C:file`）、文件真实存在、文件名恰为 Lightroom.exe（大小写不敏感）；带参数的串（`... --evil`、`& calc`）因文件不存在被拒。`find_lightroom`：自选路径 → 注册表 `App Paths\Lightroom.exe` → `ProgramFiles / ProgramW6432 / ProgramFiles(x86)` 下 `Adobe\Adobe Lightroom Classic*`、`Adobe\Lightroom Classic*`。`is_running`：`tasklist /FI "IMAGENAME eq Lightroom.exe" /NH /FO CSV`，`CREATE_NO_WINDOW`；查询失败按"没在运行"（Lightroom 自己是单实例，最坏只是再次启动把已有窗口带出来）。`launch_minimized`：`Popen([exe], startupinfo=STARTUPINFO(wShowWindow=SW_SHOWMINNOACTIVE), 不带参数, 不用 shell, stdio 全部 DEVNULL)`，入口再校验一次路径。
+- **流程：** 开关必须是真布尔 `True` 才生效；已在运行 → 状态"已经在运行，正在连接"；没找到 → `not_found`；启动失败 → `failed`；之后每 2 秒查一次连接，120 秒超时 → `timeout`。连接判定用 `Backend.status()["connected"]`（窗口通道 + 助手通道都通才算，与顶栏一致）。状态经 `lr_launch` 事件推给页面，页面刚加载时用 `autolaunch_state()` 补取。任何异常落到 `failed`，推送出错不影响流程；软件退出只 `stop()` 停止等待，**不会关闭 Lightroom**。在 `Api._start_background` 最前面启动（只起后台线程，不阻塞）。
+- **设置：** `auto_launch_lightroom`（布尔，默认 False）、`lightroom_path`（字符串，默认空 = 自动查找；非空必须通过路径校验，读取时无效值回退空串）。`Api.save_settings` 会**丢弃页面传来的 `lightroom_path`**；只接受 `lightroom_path_choice`：`"pending"`（用刚才 `choose_lightroom_path()` 文件对话框点选并通过校验的那个，保存前只暂存）或 `"clear"`。重新读取设置会丢弃暂存。
+- **界面：** 设置新增"Lightroom"一栏（开关 + 位置 + "选择文件"/"自动查找"，下方说明已自动找到的路径或没找到的提示）；顶栏在未连接时显示自动启动的进度/提示（正在启动 / 没找到 / 失败 / 超时），连上后恢复。
+- **启动界面（`app/splash.py`，新文件）：** 选择了 pywebview 无边框小窗口（`frameless`、`easy_drag`、`on_top`、不可缩放），内容是内嵌 HTML（丝带 PNG 以 data 地址内嵌，不读其他文件，出现最快）。`main.setup_windows()`：**先创建主窗口（`hidden=True`，保证它是 pywebview 的 master，启动窗口关闭不会让程序退出）再创建启动窗口**；页面启动完成（`get_settings` 返回或失败）后调用 `Api.ui_ready()` → `SplashController.finish()`：显示主窗口并销毁启动窗口，只执行一次。保险：20 秒看门狗；创建启动窗口出任何错 → 退回"直接显示主窗口"；主窗口 closed 事件也触发收尾；窗口调用（`evaluate_js` 改文字、`show`、`destroy`）全部在后台线程里，pywebview 的窗口调用在页面没加载好时会阻塞，不能占着主流程；改文字用单个工作线程排队。圆角：`SetWindowRgn(CreateRoundRectRgn)` 尽力而为，失败忽略。进度文字：检查环境（HTML 初始）→ 启动后台服务 → 载入界面（开了自动启动则为"正在连接 Lightroom…"）。**启动界面不等待 Lightroom 连上**（最长 120 秒），只等主界面就绪；连接进度显示在主界面顶栏。`LRAPP_NO_SPLASH=1` 关闭。
+- **图标：** 素材来自 `Lightroom-MCP/图标/` 的丝带版：`app/web/assets/latos-hue-ribbon.ico`（256 px 多尺寸）、`latos-hue-ribbon-192.png`（由 1024 px 丝带图缩小，约 20 KB）。`webview.start(icon=ico)`：pywebview 文档写"仅 GTK/QT"，但 6.2.1 的 winforms 实现里确实读取该图标给窗体，因此一并设置，真机效果待确认。
+
+### 测试
+- `python -m pytest app/tests -q -rs`：**710 passed、1 skipped**（跳过的是 `test_importer.py:79` 的符号链接用例，需要管理员权限，一直如此）；`server/tests`（lupa 经 PYTHONPATH）：**413 passed、0 skipped**。新增 65 个：`test_lr_autostart.py`（50：路径校验含网络路径/命令行拼接/非 exe/文件夹同名、三路探测与注册表异常、tasklist 解析与隐藏窗口参数、STARTUPINFO 参数与 Popen 参数、非法路径绝不调用 Popen、各状态流程与超时与异常不外抛与停止不关 LR、设置校验、Api 忽略页面传来的路径、choose/保存/清除）、`test_splash.py`（15：内容与转义、交接只一次、看门狗、窗口调用报错/阻塞时仍能回到主界面、创建顺序与失败回退、`ui_ready`）。**测试里没有弹出任何窗口，没有启动 Lightroom，没有碰真实照片目录。**
+- 界面：`ui_settings_check.py` 新增 6 个场景、新增 `ui_splash_check.py`（均为无头 Edge + 假 `pywebview.api`），截图 `app/docs/splash.png`、`settings_autolr.png`、`lr_launch_starting.png`、`lr_launch_notfound.png`（测试数据）。
+
+### 真机未验证清单
+1. **真实启动 Lightroom 最小化：** 是否确实最小化到任务栏、不抢焦点、不弹黑窗；Lightroom 启动到插件连上的实际耗时（120 秒够不够）；已运行时不重复启动；软件退出后 Lightroom 仍在。
+2. **Lightroom 路径探测：** 本机 `C:\Program Files\Adobe\` 下没有 Lightroom（开发时查过），实际安装位置待确认；注册表 App Paths 是否有该项未知；选择文件对话框真窗口。
+3. **启动界面真窗口表现：** 出现时机（WebView2 创建窗口本身有空白期，启动窗口是第二个窗口，会略晚于主窗口的创建）、圆角（`SetWindowRgn` 与高 DPI 缩放）、进度文字更新、主窗口 `hidden=True` 时页面是否正常加载（pywebview 文档示例如此，未实测）、交接是否闪烁、看门狗 20 秒是否合适。
+4. **窗口与任务栏图标**是否生效（`start(icon=...)` 在 Windows 上的行为）。
+
+### 建议的下一步
+- 用户开窗口试：开关打开后重启软件，观察 Lightroom 是否最小化启动、顶栏提示是否合适；关掉 Lightroom 后再开软件试"已运行/没运行"两种情况；试"选择文件"。
+- 若启动界面交接有闪烁或主窗口 `hidden` 加载不正常，可改为"主窗口始终可见、启动界面叠在上面"，或把启动 HTML 作为主窗口里的遮罩。
