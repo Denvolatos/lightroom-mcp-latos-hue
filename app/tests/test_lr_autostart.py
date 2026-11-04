@@ -452,3 +452,52 @@ def test_launch_passes_a_clean_environment(tmp_path):
         seen.update(kw)
     assert la.launch_minimized(exe, popen) is True
     assert isinstance(seen["env"], dict) and "env" in seen
+
+
+class FakeKernel32:
+    def __init__(self, ok=True):
+        self.calls, self.ok = [], ok
+
+    def SetDllDirectoryW(self, value):
+        self.calls.append(value)
+        return self.ok
+
+
+def test_dll_directory_is_cleared_only_while_the_child_is_created_and_then_restored():
+    k = FakeKernel32()
+    order = []
+    with la.no_inherited_dll_directory(kernel32=k, frozen=True, restore_dir=r"C:\App\_internal"):
+        order.append(list(k.calls))                              # 创建子进程的这一刻：已经清空
+    assert order == [[None]] and k.calls == [None, r"C:\App\_internal"]
+
+
+def test_dll_directory_is_restored_even_if_creating_the_child_fails():
+    k = FakeKernel32()
+    with pytest.raises(OSError):
+        with la.no_inherited_dll_directory(kernel32=k, frozen=True, restore_dir="X"):
+            raise OSError("boom")
+    assert k.calls == [None, "X"]
+
+
+def test_dll_directory_untouched_when_not_frozen_or_clearing_failed():
+    k = FakeKernel32()
+    with la.no_inherited_dll_directory(kernel32=k, frozen=False):
+        pass
+    assert k.calls == []
+    k2 = FakeKernel32(ok=False)                                   # 清空没成功：不要"恢复"成别的值
+    with la.no_inherited_dll_directory(kernel32=k2, frozen=True, restore_dir="X"):
+        pass
+    assert k2.calls == [None]
+
+
+def test_launch_minimized_clears_dll_directory_around_popen(tmp_path, monkeypatch):
+    exe = make_exe(tmp_path / "L")
+    k = FakeKernel32()
+    seen = []
+    real = la.no_inherited_dll_directory
+    monkeypatch.setattr(la, "no_inherited_dll_directory", lambda: real(kernel32=k, frozen=True, restore_dir="R"))
+
+    def popen(args, **kw):
+        seen.append(list(k.calls))
+    assert la.launch_minimized(exe, popen) is True
+    assert seen == [[None]] and k.calls == [None, "R"]

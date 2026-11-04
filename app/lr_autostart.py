@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 import glob
 import os
 import re
@@ -149,15 +150,54 @@ def clean_environment(env=None, own_dirs=None) -> dict:
     return env
 
 
+_DLL_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def no_inherited_dll_directory(kernel32=None, frozen=None, restore_dir=None):
+    """启动子进程期间，临时撤掉本进程的"附加 DLL 目录"（SetDllDirectory）。
+    真机教训（1.0.2 仍未修好的真正原因）：打包后的软件启动时用 SetDllDirectory 把自己的 _internal 目录加进 DLL 搜索路径，
+    Windows 会把这个路径带给它创建的子进程（子进程的 DllPath 字段）。Lightroom 因此从软件目录里加载了 VCRUNTIME140.dll，
+    把文件占住，覆盖安装/卸载就报"拒绝访问"。所以在创建 Lightroom 进程的这一瞬间先清空，创建完立刻恢复（本进程自己
+    以后还要按需加载 DLL）。只在打包后的 Windows 程序里生效；失败一律忽略。"""
+    frozen = bool(getattr(sys, "frozen", False)) if frozen is None else frozen
+    if not frozen:
+        yield
+        return
+    try:
+        if kernel32 is None:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+    except Exception:                                  # noqa: BLE001 - 不是 Windows：什么都不做
+        yield
+        return
+    restore = restore_dir or getattr(sys, "_MEIPASS", None) or os.path.dirname(sys.executable)
+    with _DLL_LOCK:
+        reset = False
+        try:
+            reset = bool(kernel32.SetDllDirectoryW(None))
+        except Exception:                              # noqa: BLE001
+            reset = False
+        try:
+            yield
+        finally:
+            if reset:
+                try:
+                    kernel32.SetDllDirectoryW(restore)
+                except Exception:                      # noqa: BLE001
+                    pass
+
+
 def launch_minimized(exe: str, popen=subprocess.Popen, env=None) -> bool:
     """最小化、不抢焦点地启动 exe；启动后不等待、不接管（软件退出时 Lightroom 继续运行）。路径不合法直接拒绝。"""
     ok = valid_lightroom_path(exe)
     if not ok:
         return False
     try:
-        popen([ok], startupinfo=build_startupinfo(), creationflags=_no_window_flags(),
-              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True,
-              cwd=str(Path(ok).parent), env=clean_environment() if env is None else env)
+        with no_inherited_dll_directory():
+            popen([ok], startupinfo=build_startupinfo(), creationflags=_no_window_flags(),
+                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True,
+                  cwd=str(Path(ok).parent), env=clean_environment() if env is None else env)
     except (OSError, ValueError, subprocess.SubprocessError):
         return False
     return True
