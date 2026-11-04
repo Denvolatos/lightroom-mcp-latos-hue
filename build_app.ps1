@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 # Build Latos Hue (the desktop app) as a Python-free program folder: build\app_dist\LatosHue\
 # Usage (Windows PowerShell, from the repository root):  powershell -ExecutionPolicy Bypass -File build_app.ps1
 # Needs the conda environment "lrmcp" (pywebview, mcp, pillow, pytest, pyinstaller).

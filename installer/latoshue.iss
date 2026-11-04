@@ -1,4 +1,6 @@
-﻿; Inno Setup script for Latos Hue (the desktop app). Build with build_app.ps1 -Installer (it passes /DAppVer=x.y.z).
+﻿; SPDX-License-Identifier: AGPL-3.0-only
+; Copyright (C) 2026 Denvolatos and contributors
+; Inno Setup script for Latos Hue (the desktop app). Build with build_app.ps1 -Installer (it passes /DAppVer=x.y.z).
 ; Per-user install, no administrator rights. It installs the app folder (build\app_dist\LatosHue) and the Lightroom plug-in
 ; (staged by build_app.ps1 in build\stage_app\LrMcp.lrplugin, without the development helpers). It does NOT register anything
 ; with Claude Code / Codex: Latos Hue starts the AI itself.

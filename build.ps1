@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 # Build the release: tests -> lrmcp.exe (PyInstaller) -> staged plug-in -> installer (Inno Setup).
 # Usage (Windows PowerShell, from the repository root):  powershell -ExecutionPolicy Bypass -File build.ps1
 # Needs the conda environment "lrmcp" (mcp, pillow, pytest, pyinstaller) and Inno Setup 6.
