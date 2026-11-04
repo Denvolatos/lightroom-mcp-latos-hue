@@ -849,3 +849,10 @@ photo_id 逐字取自第 ③ 项；按从好到坏排列；score 1–10；stars 
 - **修复：** `app/lr_autostart.py` 拉起 Lightroom 时用 `clean_environment()` 给它干净的环境变量，不再传软件自己的目录。
 - **排查方法：** PowerShell 执行 `(Get-Process Lightroom).Modules | Where-Object FileName -like '<软件安装目录>*'`，看 Lightroom 的已加载模块里是否有来自软件安装目录的文件；有就说明又泄漏了。
 - **真机待验证：** 1.0.2 装好后让软件自动启动 Lightroom，再查 Lightroom 的 Modules，不应再有软件目录里的文件。
+
+# 1.0.3：真正根因是 DllPath 继承，不是环境变量（2026-11-04）
+
+- **更正 1.0.2 的结论：** 1.0.2 认为是环境变量（PATH 等）把软件目录带给了 Lightroom，`clean_environment()` 只清了环境变量，真机上 Lightroom 仍然占着软件目录里的 `VCRUNTIME140.dll` / `VCRUNTIME140_1.dll`。真正原因：打包后的软件启动时用 `SetDllDirectory` 把自己的 `_internal` 目录加进进程的 DLL 搜索路径，Windows 创建子进程时会把它带给子进程（子进程 PEB 里 `RTL_USER_PROCESS_PARAMETERS.DllPath` = `D:\Latos Hue\_internal`），Lightroom 因此优先从那里加载运行库。
+- **修复：** `app/lr_autostart.py` 新增 `no_inherited_dll_directory()`，创建 Lightroom 进程的瞬间临时 `SetDllDirectoryW(NULL)`，创建完恢复。环境变量清理保留（无害）。
+- **排查方法：** 简单的：`(Get-Process Lightroom).Modules | ? FileName -like '<安装目录>*'`，有输出就说明 Lightroom 占着软件目录里的文件。要看根因：用 PowerShell P/Invoke（`NtQueryInformationProcess` + `ReadProcessMemory`）读目标进程 PEB 里 `RTL_USER_PROCESS_PARAMETERS` 的 `DllPath` 字段，看里面是不是软件目录。
+- **真机待验证：** 1.0.3 装好后让软件自动启动 Lightroom，再查 Lightroom 的 Modules，不应再有软件目录里的文件。
