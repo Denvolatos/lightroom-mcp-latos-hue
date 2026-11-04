@@ -59,12 +59,12 @@ def run_jobs(jobs):
 
 # ---------------------------------------------------------------- 版本解析与比较
 @pytest.mark.parametrize("text,want", [("hue-v1.2.3", (1, 2, 3)), ("1.2.3", (1, 2, 3)), (" 0.15.0 ", (0, 15, 0)),
-                                       ("hue-v0.0.0", (0, 0, 0))])
+                                       ("hue-v0.0.0", (0, 0, 0)), ("v1.0.1", (1, 0, 1)), ("v0.15.0", (0, 15, 0))])
 def test_parse_version_ok(text, want):
     assert uc.parse_version(text) == want
 
 
-@pytest.mark.parametrize("text", ["v1.2.3", "hue-v1.2", "hue-v1.2.3.4", "hue-v1.2.3-beta", "hue-vx.y.z", "HUE-V1.2.3", "", "hue-v",
+@pytest.mark.parametrize("text", ["vv1.2.3", "v1.2", "v1.0.1-rc1", "hue-v1.2", "hue-v1.2.3.4", "hue-v1.2.3-beta", "hue-vx.y.z", "HUE-V1.2.3", "", "hue-v",
                                   "1.2.3\n4", "hue-v1.2.3 rc1", None, 5, [], {"a": 1}, "hue-v-1.2.3", "hue-v99999.1.1"])
 def test_parse_version_bad_never_raises(text):
     assert uc.parse_version(text) is None
@@ -72,7 +72,8 @@ def test_parse_version_bad_never_raises(text):
 
 def test_release_version_requires_prefix():
     assert uc.release_version("hue-v1.0.0") == (1, 0, 0)
-    assert uc.release_version("v0.14.0") is None and uc.release_version("1.0.0") is None
+    assert uc.release_version("v1.0.1") == (1, 0, 1) and uc.release_version("v0.14.0") == (0, 14, 0)
+    assert uc.release_version("1.0.0") is None and uc.release_version("V1.0.1") is None and uc.release_version("xv1.0.1") is None
     assert uc.release_version(None) is None
 
 
@@ -84,9 +85,14 @@ def test_is_newer_numeric_not_lexicographic():
 
 
 # ---------------------------------------------------------------- 挑选 release
-def test_pick_only_hue_prefix_ignores_plugin_tags():
-    assert uc.pick_latest([rel("v0.15.0"), rel("v9.9.9"), rel("1.2.3")]) is None
-    r = uc.pick_latest([rel("v9.9.9"), rel("hue-v1.0.0"), rel("hue-v1.2.0"), rel("hue-v1.10.0"), rel("hue-v1.9.0")])
+def test_pick_accepts_both_prefixes_and_ignores_junk_tags():
+    assert uc.pick_latest([rel("1.2.3"), rel("release-1.0.1"), rel("V1.0.1"), rel("foo")]) is None
+    assert uc.pick_latest([rel("hue-v1.0.0"), rel("v1.0.1")])["latest"] == "1.0.1"          # 两种前缀并存取最大
+    assert uc.pick_latest([rel("v1.0.1"), rel("hue-v1.0.0")])["latest"] == "1.0.1"
+    assert uc.pick_latest([rel("v0.15.0"), rel("hue-v1.0.0")])["latest"] == "1.0.0"
+    assert uc.pick_latest([rel("v1.0.2"), rel("hue-v1.5.0")])["latest"] == "1.5.0"
+    assert uc.pick_latest([rel("v0.15.0"), rel("v0.14.0")])["latest"] == "0.15.0"
+    r = uc.pick_latest([rel("hue-v1.0.0"), rel("hue-v1.2.0"), rel("hue-v1.10.0"), rel("hue-v1.9.0")])
     assert r == {"latest": "1.10.0", "url": REPO_URL + "hue-v1.10.0"}
 
 
@@ -149,6 +155,18 @@ def test_url_rejected(url):
 
 
 # ---------------------------------------------------------------- 后台检查、缓存
+def test_old_lrmcp_tag_is_not_an_update(tmp_path):
+    """历史 v0.15.0 数字比软件当前版本 1.0.1 小，不能被当成更新。"""
+    c, _, jobs = make(tmp_path, Net(body(rel("v0.15.0"), rel("hue-v1.0.0"), rel("v1.0.1"))), current="1.0.1")
+    c.start_background()
+    run_jobs(jobs)
+    assert c.state()["state"] == uc.LATEST
+    c, _, jobs = make(tmp_path / "b", Net(body(rel("v0.15.0"), rel("hue-v1.0.0"), rel("v1.0.2"))), current="1.0.1")
+    c.start_background()
+    run_jobs(jobs)
+    assert c.state()["state"] == uc.AVAILABLE and c.state()["latest"] == "1.0.2"
+
+
 def test_no_hue_release_means_latest_no_error(tmp_path):
     c, net, jobs = make(tmp_path, Net(body(rel("v0.15.0"), rel("v0.14.0"))))
     c.start_background()
@@ -161,7 +179,7 @@ def test_no_hue_release_means_latest_no_error(tmp_path):
 
 def test_new_version_available_and_open_page(tmp_path):
     opened = []
-    c, net, jobs = make(tmp_path, Net(body(rel("hue-v0.16.0"), rel("v0.99.0"))), opened=opened)
+    c, net, jobs = make(tmp_path, Net(body(rel("hue-v0.16.0"), rel("v0.10.0"))), opened=opened)
     c.start_background()
     run_jobs(jobs)
     s = c.state()
@@ -448,7 +466,7 @@ def test_update_check_updates(tmp_path):
 
 
 def test_app_version():
-    assert st.APP_VERSION == "1.0.0"
+    assert st.APP_VERSION == "1.0.1"
 
 
 # ---------------------------------------------------------------- Api
