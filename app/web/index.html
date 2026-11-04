@@ -410,6 +410,15 @@
           <span class="ferr" id="e_folder"></span></div>
       </div>
       <div class="sgroup">
+        <h4>Lightroom</h4>
+        <div class="srow"><span class="lab">自动启动 Lightroom</span>
+          <span class="inline"><button class="switch" id="s_autolr" aria-label="打开软件时自动启动 Lightroom"></button><span id="s_autolr_t">关</span></span>
+          <span class="sub">打开软件时自动在后台启动 Lightroom（最小化，不会抢走你当前的窗口）。Lightroom 已经开着就不会重复启动；关闭本软件时也不会关闭 Lightroom。</span></div>
+        <div class="srow"><span class="lab">Lightroom 的位置</span>
+          <span class="inline"><input type="text" id="s_lrpath" readonly><button class="btn small" id="s_lrpick">选择文件</button><button class="btn small" id="s_lrclear">自动查找</button></span>
+          <span class="sub" id="s_lrnote"></span><span class="ferr" id="e_lrpath"></span></div>
+      </div>
+      <div class="sgroup">
         <h4>AI 来源</h4>
         <div class="srow"><label for="s_provider">使用的来源</label><select id="s_provider"></select>
           <span class="sub" id="s_pstate"></span><span class="sub bad" id="s_pexp" style="display:none"></span><span class="sub" id="s_ppriv" style="display:none"></span><span class="sub" id="s_pnote">切换来源后，下一次“新对话”生效。</span>
@@ -808,8 +817,15 @@ let cur = null, busy = false;
 let confirmDefault = true;   // 设置里的“逐项确认默认值”，新对话开始时套用   // cur = 正在流式显示的那条 AI 消息
 let photoName = null;           // 真实模式：Lightroom 当前选中的照片
 const DOTCLR = {connected:'var(--ok)', connecting:'var(--warn)', disconnected:'var(--bad)'};
-function showStatus(s){ $('#lrstat').textContent = s.text; $('#lrdot').style.background = DOTCLR[s.state]||'var(--bad)';
-  $('#lrhint').textContent = s.state==='connected' ? '' : s.hint; $('#lrhint').title = s.hint; }
+let LRL = {state:'idle', message:''}, LASTST = null;   // LRL：软件自动启动 Lightroom 的进度（lr_launch 事件）
+function showStatus(s){ LASTST = s;
+  let text = s.text, hint = s.state==='connected' ? '' : s.hint, dot = DOTCLR[s.state]||'var(--bad)';
+  if (s.state!=='connected' && ['starting','already_running','not_found','failed','timeout'].indexOf(LRL.state)>=0){
+    hint = LRL.message;
+    if (LRL.state==='starting'){ text = '正在启动 Lightroom…'; dot = 'var(--warn)'; hint = '请稍候，Lightroom 启动需要一会儿。'; } }
+  $('#lrstat').textContent = text; $('#lrdot').style.background = dot;
+  $('#lrhint').textContent = hint; $('#lrhint').title = hint; }
+function onLrLaunch(ev){ LRL = ev; if (LASTST) showStatus(LASTST); else { $('#lrstat').textContent = ev.state==='starting' ? '正在启动 Lightroom…' : $('#lrstat').textContent; $('#lrhint').textContent = ev.message; } }
 function setBusy(b){ busy=b; $('#send').disabled=b; $('#inp').disabled=b; $('#stop').style.display=b?'':'none'; $('#newchat').disabled=b; }
 async function newChat(){
   if (!REAL() || busy) return;
@@ -837,6 +853,7 @@ window.onClaudeEvent = function(ev){
   else if (ev.type==='error'){ cur=null; say(ev.message,'err'); }
   else if (ev.type==='adjust'){ rows=ev.rows; renderParams(); renderStage(); }
   else if (ev.type==='status'){ showStatus(ev); }
+  else if (ev.type==='lr_launch'){ onLrLaunch(ev); }
   else if (ev.type==='photo'){ photoName=ev.name; renderStage(); loadLib('f'); }
   else if (ev.type==='preview'){ pv=ev; renderStage(); }
   else if (ev.type==='connecting'){ cur=null; note(ev.message); }
@@ -1509,6 +1526,22 @@ $('#s_confirm').onclick=()=>setConfirmUI(!setConfirm);
 let setNotes = true;
 function setNotesUI(v){ setNotes=!!v; $('#s_notes').classList.toggle('on', setNotes); $('#s_notes_t').textContent = setNotes ? '开' : '关'; }
 $('#s_notes').onclick=()=>setNotesUI(!setNotes);
+let setAutoLr = false, lrChoice = null;     // lrChoice：null 不变 / 'pending' 用刚选的文件 / 'clear' 改回自动查找
+function setAutoLrUI(v){ setAutoLr=!!v; $('#s_autolr').classList.toggle('on', setAutoLr); $('#s_autolr_t').textContent = setAutoLr ? '开' : '关'; }
+$('#s_autolr').onclick=()=>setAutoLrUI(!setAutoLr);
+function showLrPath(picked){
+  const saved = (SET && SET.settings.lightroom_path) || '', det = (SET && SET.lightroom_detected) || '';
+  const shown = lrChoice==='clear' ? '' : (picked || saved);
+  $('#s_lrpath').value = shown; $('#s_lrpath').placeholder = '自动查找';
+  $('#s_lrnote').textContent = shown ? '已指定上面这个 Lightroom 程序。' :
+    (det ? '已自动找到：' + det : '没有自动找到 Lightroom。你可以点“选择文件”，选中 Lightroom 安装目录里的 Lightroom.exe；找不到时，打开软件后请手动打开 Lightroom。');
+}
+$('#s_lrpick').onclick=async()=>{
+  $('#e_lrpath').textContent='';
+  const r = await window.pywebview.api.choose_lightroom_path();
+  if (r.ok){ lrChoice='pending'; showLrPath(r.path); } else if (r.message){ $('#e_lrpath').textContent = r.message; $('#e_lrpath').style.color=''; }
+};
+$('#s_lrclear').onclick=()=>{ lrChoice='clear'; showLrPath(''); };
 function showProviderState(){
   const p = SET.providers.find(x=>x.id===$('#s_provider').value) || SET.providers[0];
   const st = $('#s_pstate'); st.className = 'sub ' + (p.selectable ? (p.available ? 'ok' : 'bad') : '');
@@ -1527,11 +1560,12 @@ function fillSettings(r){
   sel.value = s.provider;
   const ed = $('#s_edge'); ed.innerHTML=''; r.edges.forEach(e=>{ const o=document.createElement('option'); o.value=e; o.textContent='长边 '+e+' px'; ed.appendChild(o); }); ed.value = s.preview_edge;
   setConfirmUI(s.confirm_default); setNotesUI(s.ai_use_notes!==false); showProviderState();
+  setAutoLrUI(s.auto_launch_lightroom===true); lrChoice=null; showLrPath('');
   const a = r.about;
   $('#a_app').textContent = a.app_version; $('#a_lr').textContent = a.lightroom_version || '未连接，无法读取';
   $('#a_plugin').textContent = a.plugin_version || '未连接，无法读取'; $('#a_data').textContent = a.data_dir; $('#a_url').textContent = a.project_url;
 }
-function clearSettingsErrors(){ ['folder','provider','edge'].forEach(k=>{ $('#e_'+k).textContent=''; }); $('#s_msg').textContent=''; $('#s_msg').className='msg-line'; }
+function clearSettingsErrors(){ ['folder','provider','edge','lrpath'].forEach(k=>{ $('#e_'+k).textContent=''; }); $('#s_msg').textContent=''; $('#s_msg').className='msg-line'; }
 async function openSettings(){
   if (!REAL()) return;
   clearSettingsErrors(); $('#smask').classList.add('show');
@@ -1549,11 +1583,13 @@ $('#s_pick').onclick=async()=>{
   $('#e_folder').textContent = v.ok ? (v.exists ? '' : '该文件夹尚不存在，保存时将询问是否创建。') : v.message;
   $('#e_folder').style.color = v.ok ? 'var(--muted)' : '';
 };
-const FIELD_KEYS = {base_folder:'folder', provider:'provider', preview_edge:'edge'};
+const FIELD_KEYS = {base_folder:'folder', provider:'provider', preview_edge:'edge', lightroom_path:'lrpath'};
 async function saveSettings(createMissing=false){
   clearSettingsErrors();
   const changes = {base_folder: $('#s_folder').value, provider: $('#s_provider').value,
-                   confirm_default: setConfirm, ai_use_notes: setNotes, preview_edge: parseInt($('#s_edge').value,10)};
+                   confirm_default: setConfirm, ai_use_notes: setNotes, preview_edge: parseInt($('#s_edge').value,10),
+                   auto_launch_lightroom: setAutoLr};
+  if (lrChoice) changes.lightroom_path_choice = lrChoice;
   const r = await window.pywebview.api.save_settings(changes, createMissing);
   if (r.ok){
     SET.settings = r.settings; confirmDefault = r.settings.confirm_default;
@@ -1578,6 +1614,7 @@ if (location.hash !== '#demo') window.addEventListener('pywebviewready', ()=>{
   window.pywebview.api.get_settings(false).then(r=>{ confirmDefault=r.settings.confirm_default; setAsk(confirmDefault);
     $('#edge').value=String(r.settings.preview_edge); }).catch(()=>{});
   const poll=()=>window.pywebview.api.status().then(s=>{ showStatus(s); if (s.photo && s.photo.name && s.photo.name!==photoName){ photoName=s.photo.name; renderStage(); } }).catch(()=>{});
+  window.pywebview.api.autolaunch_state().then(r=>{ if (r && r.state!=='idle') onLrLaunch(r); }).catch(()=>{});
   window.pywebview.api.preview_state().then(r=>{ pv=r; renderStage(); }).catch(()=>{});
   window.pywebview.api.selection_state().then(r=>{ SEL = r; updatePickBtn(); }).catch(()=>{});
   poll(); setInterval(poll, 3000); renderParams(); renderStage(); loadGallery(); loadLib();

@@ -13,6 +13,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from lr_autostart import valid_lightroom_path
+
 SCHEMA_VERSION = 1
 SETTINGS_FILE = Path.home() / "LrMcp" / "app_settings.json"
 APP_VERSION = "0.12.0"                  # 桌面软件 Latos Hue 的版本（开发中，尚未发布；首个发布版本为 1.0.0）
@@ -38,7 +40,8 @@ def defaults() -> dict:
     return {"schema": SCHEMA_VERSION, "base_folder": default_base_folder(), "provider": DEFAULT_PROVIDER,
             "confirm_default": True, "preview_edge": 1024,
             "export_last_folder": "", "export_format": "jpeg", "export_size": 0, "export_quality": 92,
-            "export_bit_depth": 16, "export_metadata": "minimal", "ai_use_notes": True}
+            "export_bit_depth": 16, "export_metadata": "minimal", "ai_use_notes": True,
+            "auto_launch_lightroom": False, "lightroom_path": ""}
 
 
 # ---------------------------------------------------------------- 文件夹校验
@@ -143,6 +146,13 @@ def _clean_int(v, lo=None, hi=None, allowed=None, zero_ok=False):
     return v if lo <= v <= hi else None
 
 
+def clean_lightroom_path(v) -> str:
+    """用户自选的 Lightroom 路径：空串表示自动探测；非空必须是本机真实存在的 Lightroom.exe，否则回退空串。"""
+    if not isinstance(v, str) or not v.strip():
+        return ""
+    return valid_lightroom_path(v) or ""
+
+
 def clean_export_field(key: str, v):
     """导出相关字段的单项校验：合法返回规范值，不合法返回 None（export_size 的合法值 0 也会返回 0，故用 is None 判断）。"""
     if key == "export_format":
@@ -181,6 +191,9 @@ def sanitize(data) -> dict:
     out["confirm_default"] = out["confirm_default"] if isinstance(out.get("confirm_default"), bool) else d["confirm_default"]
     out["preview_edge"] = _clean_edge(out.get("preview_edge")) or d["preview_edge"]
     out["ai_use_notes"] = out["ai_use_notes"] if isinstance(out.get("ai_use_notes"), bool) else d["ai_use_notes"]
+    out["auto_launch_lightroom"] = (out["auto_launch_lightroom"] if isinstance(out.get("auto_launch_lightroom"), bool)
+                                    else d["auto_launch_lightroom"])
+    out["lightroom_path"] = clean_lightroom_path(out.get("lightroom_path"))
     for k in EXPORT_FIELD_LABELS:
         c = clean_export_field(k, out.get(k))
         out[k] = d[k] if c is None else c
@@ -266,6 +279,20 @@ class SettingsStore:
                 new["ai_use_notes"] = changes["ai_use_notes"]
             else:
                 errors["ai_use_notes"] = "请选择开或关。"
+        if "auto_launch_lightroom" in changes:
+            if isinstance(changes["auto_launch_lightroom"], bool):
+                new["auto_launch_lightroom"] = changes["auto_launch_lightroom"]
+            else:
+                errors["auto_launch_lightroom"] = "请选择开或关。"
+        if "lightroom_path" in changes:
+            lp = changes["lightroom_path"]
+            ok = valid_lightroom_path(lp) if isinstance(lp, str) else None
+            if isinstance(lp, str) and not lp.strip():
+                new["lightroom_path"] = ""
+            elif ok:
+                new["lightroom_path"] = ok
+            else:
+                errors["lightroom_path"] = "请选择名为 Lightroom.exe 的程序文件（本机磁盘上）。"
         for k, label in EXPORT_FIELD_LABELS.items():
             if k in changes:
                 c = clean_export_field(k, changes[k])

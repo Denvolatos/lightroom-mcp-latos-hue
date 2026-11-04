@@ -13,6 +13,7 @@ import webview
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from adjustments import AdjustmentTracker  # noqa: E402
+import lr_autostart  # noqa: E402
 from backend import Backend  # noqa: E402
 from confirm_hub import ConfirmHub  # noqa: E402
 from lr_service import LrService  # noqa: E402
@@ -73,6 +74,10 @@ class Api:
                                  status_fn=lambda: self._provider.status(), ready_fn=lambda: self._backend.wait_ready(),
                                  acquire_fn=self._pick_acquire, release_fn=self._pick_release)
         self._apply = ApplyService(self._lr, self._pick.ranking, self._emit)
+        # 自动启动 Lightroom（设置里的开关，默认关）：只在软件启动时跑一次；连上与否沿用 Backend 的真实连接判定
+        self._autolaunch = lr_autostart.AutoLaunch(lambda: self._settings.data,
+                                                   lambda: bool(self._backend.status().get("connected")), self._emit)
+        self._pending_lr_path = ""               # 用户在文件对话框里点选、尚未保存的 Lightroom 路径
         self._ctx_pending = True                 # 新对话的第一条消息带上"经验库"资料块（见 send / reset）
         self._lib = LibraryService(self._lr, libstore.PresetStore(), libstore.NoteStore(), libstore.FavStore(), self._emit,
                                    on_applied=self._lib_applied, photo_fn=lambda: self._backend.photo,
@@ -83,6 +88,8 @@ class Api:
 
     def _start_background(self) -> None:
         """窗口一出现就预热：Bridge、常驻 claude（含 lightroom_mcp 与确认服务）同时启动，之后每条消息零启动开销。"""
+        self._autolaunch.start()                 # 开关为开且 Lightroom 没在运行时，后台最小化启动它（不阻塞界面）
+
         def warm() -> None:
             self._lr.start()
         threading.Thread(target=warm, daemon=True).start()
@@ -148,6 +155,7 @@ class Api:
         self._pick.store = self._preview.server.store
 
     def _shutdown(self) -> None:
+        self._autolaunch.stop()                  # 只停止等待；不会关闭用户的 Lightroom
         self._backend.stop()
         self._preview.stop()
         self._photolib.stop()
@@ -326,7 +334,9 @@ class Api:
     def get_settings(self, include_status: bool = True) -> dict:
         """当前设置、AI 来源列表（含状态）、关于信息。include_status=False（启动时）不做登录检测，只取设置值。"""
         cur = self._provider.status() if include_status else {"available": True, "state": "unknown", "reason": "", "next_step": ""}
-        return {"settings": dict(self._settings.data),
+        self._pending_lr_path = ""
+        detected = lr_autostart.find_lightroom(self._settings.data.get("lightroom_path") or "") if include_status else None
+        return {"lightroom_detected": detected or "", "settings": dict(self._settings.data),
                 "providers": available_providers(cur if self._provider.id == "claude" or not include_status else None,
                                                  cur if self._provider.id == "codex" or not include_status else None),
                 "current_provider": self._provider.id, "edges": list(appsettings.EDGE_CHOICES),
@@ -362,10 +372,41 @@ class Api:
         """保存设置。逐项确认默认值、预览清晰度立即生效；AI 来源在下一次新对话生效；文件夹仅保存（导入功能后续使用）。"""
         if not isinstance(changes, dict):
             return {"ok": False, "errors": {"_": "设置内容无效。"}, "needs_create": False}
+        # Lightroom 路径不接受页面直接传入：只能是用户刚在文件对话框里点选的那个（pending），或清除
+        choice = changes.get("lightroom_path_choice")
+        changes = {k: v for k, v in changes.items() if k not in ("lightroom_path", "lightroom_path_choice")}
+        if choice == "clear":
+            changes["lightroom_path"] = ""
+        elif choice == "pending" and self._pending_lr_path:
+            changes["lightroom_path"] = self._pending_lr_path
         r = self._settings.update(changes, selectable=is_selectable, create_missing=bool(create_missing))
-        if r["ok"] and "preview_edge" in changes:
-            self._preview.set_edge(r["settings"]["preview_edge"])
+        if r["ok"]:
+            self._pending_lr_path = ""
+            if "preview_edge" in changes:
+                self._preview.set_edge(r["settings"]["preview_edge"])
         return r
+
+    def choose_lightroom_path(self) -> dict:
+        """弹出系统文件选择窗口，让用户点选 Lightroom.exe。路径只来自这次点击，校验通过后暂存，点"保存"才写入设置。"""
+        if self._window is None:
+            return {"ok": False, "path": "", "message": ""}
+        fd = getattr(webview, "FileDialog", None)
+        kind = getattr(fd, "OPEN", None) or webview.OPEN_DIALOG
+        try:
+            res = self._window.create_file_dialog(kind, allow_multiple=False, file_types=("Lightroom 程序 (Lightroom.exe)",))
+        except Exception:
+            res = None
+        if not res:
+            return {"ok": False, "path": "", "message": "", "cancelled": True}
+        ok = lr_autostart.valid_lightroom_path(str(res if isinstance(res, str) else res[0]))
+        if not ok:
+            return {"ok": False, "path": "", "message": "请选择名为 Lightroom.exe 的程序文件（本机磁盘上）。"}
+        self._pending_lr_path = ok
+        return {"ok": True, "path": ok, "message": ""}
+
+    def autolaunch_state(self) -> dict:
+        """自动启动 Lightroom 的当前状态（页面刚加载时取一次，之后靠 lr_launch 事件更新）。"""
+        return self._autolaunch.state()
 
     # ---- 导入 ------------------------------------------------------
     def choose_source_folder(self) -> dict:
