@@ -743,3 +743,35 @@ photo_id 逐字取自第 ③ 项；按从好到坏排列；score 1–10；stars 
 
 ### 建议的下一步
 - 做安装包/发布流程时按上面的标签约定打 `hue-v` 标签；发布后在旧版本软件里点“检查更新”验证整条链路。
+
+## 第十七阶段：免 Python 打包（0.16.0）
+
+### 做了什么
+- **目标：** 朋友不装 Python 也能用。本阶段只产出程序目录并验证，不做安装包（Inno Setup）、卸载、插件安装。
+- **方案：** PyInstaller onedir，一个 spec（`app/latoshue.spec`，`.gitignore` 忽略 `*.spec`，所以是 `git add -f` 进库的）里两个 EXE 共用一个 COLLECT：`LatosHue.exe`（`console=False`，界面）和 `latoshue-helper.exe`（`console=True`，辅助进程）。入口都是 `app/run_latoshue.py`。构建：`powershell -ExecutionPolicy Bypass -File build_app.ps1`（先跑 app 测试，`-SkipTests` 跳过；输出 `build\app_dist\LatosHue\`，不碰 `build\dist`、`build\release_dist`；最后自动跑 `--selftest`）。
+- **为什么两个 exe：** 窗口版没有控制台，作为 MCP stdio 子进程时 stdin/stdout 可能是 None 或不可靠；控制台版 exe 有真正的标准输入输出。辅助进程由 claude / codex 启动（软件只把命令写进配置），claude 以隐藏方式拉起，实测 `latoshue-helper.exe` 用管道启动时握手正常。依赖只存一份（共用 `_internal`），额外体积很小。
+- **辅助命令集中：** `app/frozen.py`：`helper_command(name)`：开发 `[sys.executable, 脚本]`，冻结 `[同目录 latoshue-helper.exe, 子命令]`。`claude_bridge.lightroom_server_config` / `permission_server_config`、`codex_provider.build_command` 都改用它。冻结后 lr_launcher 的配置不再带 `PYTHONPATH`，也不再回退到 `build\dist\lrmcp\lrmcp.exe`。
+- **资源与路径：** `frozen.web_dir()`：冻结用 `sys._MEIPASS`（onedir 下是 `_internal`），开发用 `app/web`；`main.WEB`、`splash.ASSETS` 改用它。server 包（`lightroom_mcp`）和 `providers` 用 `collect_submodules` 收进去，spec 的 `pathex` 加了 `server/`。`lr_service` / `lr_launcher` 里把 `../server` 加进 `sys.path` 的代码保留，冻结后只是指向不存在的目录，无害。
+- **自检：** `--selftest`（两个 exe 都有）：导入 26 个模块（含 webview）、web/ 与 ico/png 在、`lightroom_mcp` 可导入、三个辅助命令指向的 exe 存在、`~/LrMcp/app_state` 可写；结果写 stdout（若有）并写 `LATOSHUE_SELFTEST_OUT`（默认 `%TEMP%\latoshue_selftest.txt`）；通过退出码 0，失败 1，未知参数 2。
+- **收集 pywebview：** spec 里对 `webview`、`clr_loader`、`pythonnet` 用 `collect_all`，一次构建就通过自检（实测，未去掉任何一项验证是否多余）。
+
+### 实测（本机，没有开任何窗口、没有碰 Lightroom）
+- 构建成功，目录约 76 MB。
+- `LatosHue.exe --selftest` 与 `latoshue-helper.exe --selftest` 在 PATH 只含 `C:\Windows\System32;C:\Windows`（找不到 python）时均通过。
+- 辅助进程冒烟（`LRAPP_BRIDGE_STATE` 指向临时文件，同样精简 PATH）：`--lr-launcher` 完成 initialize + tools/list，列出 22 个工具（含 lr_status、lr_get_develop），状态文件写出、退出后清除，`~/LrMcp/servers` 没有残留公告；`--permission-server` 列出 `approve`，缺少窗口环境变量时按预期返回 deny；`--codex-proxy` 列出 15 个允许的工具，没有确认通道时写入工具被拒绝（它自己再用 helper exe 拉起 lr_launcher，链路通）。
+- 控制台把 UTF-8 输出显示成乱码是控制台代码页问题（文件里是 UTF-8），不影响判断。
+
+### 坑
+- 子进程路径：冻结后 `sys.executable` 是 `LatosHue.exe` 自己，辅助 exe 靠“同目录”约定找；以后做安装包两个 exe 必须装在同一目录。
+- `.gitignore` 忽略 `*.spec`，所以 spec 要 `git add -f`。
+- 窗口版 exe 没有 stdout：任何需要输出的新子命令都放进控制台版，别指望 LatosHue.exe 打印。
+- 不要在 build 时往 `build\dist` 输出（可能有正在运行的 lrmcp.exe 占用文件）。
+
+### 真机/沙盒未验证清单
+1. **真窗口启动**：`LatosHue.exe` 不带参数打开界面、启动界面、任务栏图标、关闭后进程是否退干净（本阶段按规定没有启动界面）。
+2. **WebView2**：没装 WebView2 运行库的机器（旧 Win10）表现；pythonnet/clr_loader 在别的机器上是否都能加载；`storage_path` 临时目录行为。
+3. **杀毒误报**：PyInstaller 未签名的 exe 容易被 Defender / 国产杀毒报毒或拦截，未测；可能需要代码签名。
+4. **冻结后 claude 真连接 lr_launcher 的完整链路**：真实 claude 命令行读 `--mcp-config` 拉起 `latoshue-helper.exe`、插件连上、窗口借用通道、逐项确认弹卡片、撤销；Codex 同理。
+5. 冻结后的 `运行时 PATH` 中 `claude` / `codex` 的查找、`LOCALAPPDATA` 下 Codex 目录。
+6. 程序放在带空格或中文的路径下（如 `C:\Program Files\...`）时命令行引用是否正确。
+7. 安装到只读目录时，自检/日志是否仍只写 `~/LrMcp`。

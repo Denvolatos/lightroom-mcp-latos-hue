@@ -3,7 +3,14 @@
 桌面软件 **Latos Hue**（修图助手）的版本记录。版本号规则：开发阶段按 `0.x.0` 记录，**首个公开发布的版本为 1.0.0**。
 本文件记录的是软件本身；Lightroom 插件与服务端（LrMCP）有自己的版本线，见仓库根目录的 `CHANGELOG.md`（当前 0.15.0）。
 
-> 下面 0.1.0–0.15.0 都是开发中的内部版本，全部完成于 2026-11-03，**尚未发布**。每一项的详细过程、实测数字和未解决项见 `app/DEV_NOTES.md`。
+> 下面 0.1.0–0.16.0 都是开发中的内部版本，全部完成于 2026-11-03，**尚未发布**。每一项的详细过程、实测数字和未解决项见 `app/DEV_NOTES.md`。
+
+## 0.16.0 — 免 Python 打包
+- **不用装 Python 就能运行：** 新增 `build_app.ps1`，把软件打成一个程序目录 `build\app_dist\LatosHue\`（约 76 MB，里面有 `LatosHue.exe` 窗口版和 `latoshue-helper.exe` 辅助版，WebView2 运行库仍用系统自带的）。这一步只做打包并验证能运行，安装包、卸载、插件安装是下一步。
+- **辅助进程改成“冻结感知”：** 给 Claude 当 MCP 服务的 lr_launcher、逐项确认用的 permission_server、给 Codex 用的 codex_proxy，以前都是 `python 脚本` 方式启动；现在统一经 `app/frozen.py` 的 `helper_command`，开发时仍是 `python 脚本`，打包后是 `latoshue-helper.exe --lr-launcher / --permission-server / --codex-proxy`。
+- **统一入口 `app/run_latoshue.py`：** 无参数打开界面；上面三个子命令；`--selftest` 不开窗口，检查模块、资源、server 包、辅助程序、数据目录，通过退出码 0。`python app/main.py` 和 `运行模板.bat` 照旧。
+- 用户数据仍在 `~/LrMcp/`，没有变化。
+- 测试：新增 17 个（命令构造的开发/冻结两种分支、资源路径、入口分发、冻结后配置里不再出现 python 或 .py、自检）。
 
 ## 0.15.0 — 检查更新
 - **只检查，不替你更新：** 软件启动后在后台悄悄看一眼 GitHub 上有没有新版本；有的话，顶栏出现“有新版本 x.y.z”和“查看新版本”按钮，点了才会用你的默认浏览器打开发布页。**不会自动下载、不会自动安装、不会替换任何文件。**
