@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """``lrmcp register`` / ``lrmcp unregister``: add or remove this server in Claude Code and Codex.
 
 Uses their own command line tools (``claude mcp ...``, ``codex mcp ...``), so we never edit their config files by

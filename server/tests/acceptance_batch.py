@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """0.10 acceptance check: BATCH changes against a REAL Lightroom (test catalog only).
 
 SAFETY: only on the test catalog (path contains "ceshi") with 2 to 4 photos selected (at least one RAW/DNG and one JPEG

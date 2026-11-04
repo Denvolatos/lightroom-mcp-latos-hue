@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Run a Lua test script inside Lightroom through dev_bridge.py and print its result.
 
 Usage: python -I dev_run.py <name.lua> [timeout_seconds]

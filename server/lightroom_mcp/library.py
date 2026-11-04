@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Library browsing for the desktop app (v0.15): list the photos of a catalog folder, fetch thumbnails, select photos in Lightroom.
 
 This is NOT an MCP tool and is not registered in ``tools.py``: only the desktop app on this computer may use it, an AI assistant

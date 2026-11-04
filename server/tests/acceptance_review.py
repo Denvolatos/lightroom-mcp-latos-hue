@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """0.12 acceptance check: review, before/after previews, restore conflict protection and reuse of an edit, against a REAL
 Lightroom (test catalog only).
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Self check (``lrmcp doctor`` and the ``lr_doctor`` tool). Every result says what is wrong and what to do."""
 from __future__ import annotations
 

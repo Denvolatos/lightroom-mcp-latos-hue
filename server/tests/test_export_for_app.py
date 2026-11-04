@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """EditService.export_photo_for_app (v0.15): TIFF/JPEG export for the desktop app only. Not an MCP tool; lr_export is unchanged."""
 import asyncio
 import urllib.parse

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """LibraryService (v0.15): list folder photos, thumbnails, select photos. For the desktop app only; not MCP tools."""
 import asyncio
 import base64

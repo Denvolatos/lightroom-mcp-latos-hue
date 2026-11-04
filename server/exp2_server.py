@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Experiment 2: tiny local HTTP server to test LrHttp from the Lightroom plug-in.
 
 Standard library only. Binds 127.0.0.1 only, checks Host / Origin / Bearer token.

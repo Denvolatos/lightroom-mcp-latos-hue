@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """EditService.import_photo (v0.15): for the desktop app only. It is not an MCP tool; the AI cannot call it."""
 import asyncio
 import urllib.parse

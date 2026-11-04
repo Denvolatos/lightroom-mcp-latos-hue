@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Changing develop settings safely (v1.1): what may be changed, backups of the old values, restore.
 
 Rules (each one was measured on Lightroom Classic 15.2, see docs/实验记录.md):

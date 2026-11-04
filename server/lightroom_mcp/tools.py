@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """The MCP server: read-only tools to look at photos, and (v1.1) a small, guarded set of tools to change sliders."""
 from __future__ import annotations
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Run the plug-in's real Commands.lua (v1.1 write logic) against a fake Lightroom SDK, in a Lua 5.1 interpreter.
 Skipped when the optional package ``lupa`` is not installed."""
 import json

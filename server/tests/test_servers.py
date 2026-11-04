@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Several lrmcp servers at once (0.3.0): each takes the first free port and announces itself to the plug-in."""
 import socket
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Local HTTP queue between the MCP tools and the Lightroom plug-in.
 
 The plug-in polls ``GET /poll`` and answers with ``POST /result?id=N``. Everything is local and authenticated:

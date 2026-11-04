@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """0.9 acceptance check: develop presets against a REAL Lightroom (test catalog only).
 
 SAFETY: only on the test catalog (path contains "ceshi") with exactly one photo selected. Presets are applied and then

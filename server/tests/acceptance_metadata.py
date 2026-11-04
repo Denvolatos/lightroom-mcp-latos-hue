@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """0.11 acceptance check: catalog information (rating, flag, colour label, title, caption, keywords) against a REAL
 Lightroom (test catalog only).
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """0.13 acceptance check: EXPORT, named VERSIONS, side-by-side COMPARE and region analysis against a REAL Lightroom (test catalog).
 
 SAFETY: only on the test catalog (path contains "ceshi") with exactly one photo selected. Exports go to ~/LrMcp/exports and to a
