@@ -1,16 +1,21 @@
 # Build Latos Hue (the desktop app) as a Python-free program folder: build\app_dist\LatosHue\
 # Usage (Windows PowerShell, from the repository root):  powershell -ExecutionPolicy Bypass -File build_app.ps1
-# Needs the conda environment "lrmcp" (pywebview, mcp, pillow, pytest, pyinstaller). No installer yet (next step).
-param([switch]$SkipTests)
+# Needs the conda environment "lrmcp" (pywebview, mcp, pillow, pytest, pyinstaller).
+# With -Installer it also stages the plug-in and builds build\installer\LatosHue-Setup-<version>.exe (needs Inno Setup 6).
+param([switch]$SkipTests, [switch]$Installer)
 
 $ErrorActionPreference = "Stop"
 $repo = $PSScriptRoot
 $py = Join-Path $env:USERPROFILE "miniconda3\envs\lrmcp\python.exe"
 if (-not (Test-Path $py)) { throw "missing: $py" }
 
+$iscc = Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"
+if ($Installer -and -not (Test-Path $iscc)) { throw "missing: $iscc" }
+
 $settings = Get-Content (Join-Path $repo "app\settings.py") -Raw
 if ($settings -notmatch 'APP_VERSION\s*=\s*"([^"]+)"') { throw "cannot read app version" }
-Write-Host "== Latos Hue $($Matches[1]) =="
+$version = $Matches[1]
+Write-Host "== Latos Hue $version =="
 
 if (-not $SkipTests) {
     Write-Host "-- unit tests (app)"
@@ -41,3 +46,20 @@ if ($p.ExitCode -ne 0) { throw "self test failed (exit $($p.ExitCode))" }
 
 $mb = [math]::Round((Get-ChildItem $out -Recurse -File | Measure-Object Length -Sum).Sum / 1MB, 1)
 Write-Host ("done: {0} ({1} MB)" -f $out, $mb)
+
+if ($Installer) {
+    Write-Host "-- stage plug-in (without development helpers)"
+    $stage = Join-Path $repo "build\stage_app\LrMcp.lrplugin"   # not build\stage: that one belongs to build.ps1 (LrMCP server installer)
+    if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+    New-Item -ItemType Directory -Force $stage | Out-Null
+    $devOnly = @("DevRun.lua", "devscripts")
+    Get-ChildItem (Join-Path $repo "plugin\lrmcp.lrdevplugin") | Where-Object { $devOnly -notcontains $_.Name } |
+        Copy-Item -Destination $stage -Recurse
+
+    Write-Host "-- installer"
+    & $iscc "/DAppVer=$version" (Join-Path $repo "installer\latoshue.iss")
+    if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+    $setup = Join-Path $repo "build\installer\LatosHue-Setup-$version.exe"
+    if (-not (Test-Path $setup)) { throw "missing: $setup" }
+    Write-Host ("done: {0} ({1} MB)" -f $setup, [math]::Round((Get-Item $setup).Length / 1MB, 1))
+}

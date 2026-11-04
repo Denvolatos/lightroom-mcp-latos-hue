@@ -1,0 +1,18 @@
+﻿Latos Hue (修图助手) is installed. / 已安装完成。
+
+What happens next / 接下来：
+1. If Lightroom Classic is open, restart it (or open File > Plug-in Manager, select LrMCP and click Reload).
+   如果 Lightroom Classic 正开着，请重启它（或在 文件 > 增效工具管理器 里选中 LrMCP 后点“重新载入增效工具”）。
+
+2. Latos Hue uses the Claude (or Codex) command line that is already installed and signed in on this computer.
+   It does not log in for you and does not need to be registered anywhere.
+   Latos Hue 用的是你电脑上已经装好并登录的 Claude（或 Codex）命令行，不会替你登录，也不用另外登记。
+
+3. The first time you open Latos Hue, the "Environment check" tells you what is still missing
+   (photo folder, Lightroom, plug-in, AI assistant) and what to do about it.
+   第一次打开 Latos Hue 时，“环境检查”会告诉你还缺什么（照片文件夹、Lightroom、插件、AI 助手）以及怎么办。
+
+Your photos stay on this computer. While retouching, the preview of the selected photo is sent to the AI service you chose.
+你的照片只在本机处理；修图时，选中照片的预览图会发送给你所选的 AI 服务。
+
+Latos Hue is open source and is not an Adobe product. 开源软件，非 Adobe 官方产品。
