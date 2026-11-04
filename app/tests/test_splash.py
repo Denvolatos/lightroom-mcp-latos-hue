@@ -36,6 +36,11 @@ def test_round_corners_never_raises_with_fake_window():
 
 
 # ---------------------------------------------------------------- 交接
+@pytest.fixture(autouse=True)
+def _no_min_wait(monkeypatch):
+    monkeypatch.setattr(sp, "MIN_SECONDS", 0)          # 其余测试不等最短停留；下面专门测它
+
+
 class FakeWin:
     def __init__(self, name, fail=()):
         self.name, self.fail, self.calls = name, set(fail), []
@@ -227,3 +232,33 @@ def test_api_progress_text_is_forwarded(api):
     assert s.done.wait(5) and sp.TEXT_SERVICES in s.calls[0][1]
     api._splash = None
     api._splash_text("没有启动界面也不报错")
+
+
+def test_min_display_time_delays_handover_but_not_the_caller():
+    now = [100.0]
+    slept = []
+    s, m = FakeWin("splash"), FakeWin("main")
+    c = sp.SplashController(s, m, timer_factory=FakeTimer, min_seconds=3.5, clock=lambda: now[0], sleep=slept.append)
+    c.start()
+    now[0] = 100.8                                    # 主界面 0.8 秒就准备好了
+    assert c.finish() is True
+    c._handover.join(5)
+    assert len(slept) == 1 and abs(slept[0] - 2.7) < 1e-6          # 还要再停 2.7 秒
+    assert [x[0] for x in m.calls] == ["show"] and [x[0] for x in s.calls] == ["destroy"]
+
+
+def test_min_display_time_not_waited_when_already_elapsed_or_no_splash():
+    now = [0.0]
+    slept = []
+    s, m = FakeWin("splash"), FakeWin("main")
+    c = sp.SplashController(s, m, timer_factory=FakeTimer, min_seconds=3.5, clock=lambda: now[0], sleep=slept.append)
+    c.start()
+    now[0] = 25.0                                     # 看门狗到点：早就超过最短停留
+    finish_and_wait(c)
+    assert slept == []
+    c2 = sp.SplashController(None, FakeWin("main"), timer_factory=FakeTimer, min_seconds=3.5,
+                             clock=lambda: 0.0, sleep=slept.append)
+    c2.start()
+    assert c2.finish() is True
+    c2._handover.join(5)
+    assert slept == []                                # 没有启动窗口就不等

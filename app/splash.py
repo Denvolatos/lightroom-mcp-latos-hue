@@ -15,6 +15,7 @@ import html as _html
 import json
 import queue
 import threading
+import time
 from pathlib import Path
 
 import frozen
@@ -25,6 +26,7 @@ ICON_ICO = ASSETS / "latos-hue-ribbon.ico"
 WIDTH, HEIGHT = 460, 280
 TITLE = "Latos Hue 修图助手"
 WATCHDOG_SECONDS = 20.0
+MIN_SECONDS = 3.5                    # 最短停留（从窗口系统启动算起）：主界面加载很快时，也让图标和名称完整露出一下（仪式感）
 CORNER = 32                          # 圆角直径（像素）
 
 # 进度文字（大白话）
@@ -82,9 +84,13 @@ def round_corners(window, size: tuple[int, int] = (WIDTH, HEIGHT)) -> bool:
 class SplashController:
     """管理启动窗口与主窗口的交接。splash 或 main 可以为 None（创建启动窗口失败时）：此时 finish() 只负责显示主窗口。"""
 
-    def __init__(self, splash, main, *, watchdog: float = WATCHDOG_SECONDS, timer_factory=threading.Timer):
+    def __init__(self, splash, main, *, watchdog: float = WATCHDOG_SECONDS, timer_factory=threading.Timer,
+                 min_seconds: float | None = None, clock=time.monotonic, sleep=time.sleep):
         self.splash, self.main = splash, main
         self._done = False
+        self._min = MIN_SECONDS if min_seconds is None else min_seconds
+        self._clock, self._sleep = clock, sleep
+        self._t0 = clock()
         self._lock = threading.Lock()
         self._q: queue.Queue = queue.Queue()
         self._last_text = ""
@@ -99,6 +105,7 @@ class SplashController:
         return self._done
 
     def start(self) -> None:
+        self._t0 = self._clock()
         self._timer.start()
         self._worker.start()
 
@@ -134,6 +141,13 @@ class SplashController:
         self._q.put(None)
 
         def handover() -> None:
+            if self.splash is not None:                # 最短停留：交接在后台线程里等，不阻塞调用者
+                wait = self._min - (self._clock() - self._t0)
+                if wait > 0:
+                    try:
+                        self._sleep(wait)
+                    except Exception:                  # noqa: BLE001
+                        pass
             if self.main is not None:
                 try:
                     self.main.show()
