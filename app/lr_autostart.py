@@ -14,6 +14,7 @@ import glob
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -127,7 +128,28 @@ def build_startupinfo(factory=None):
     return si
 
 
-def launch_minimized(exe: str, popen=subprocess.Popen) -> bool:
+def clean_environment(env=None, own_dirs=None) -> dict:
+    """给 Lightroom 用的干净环境变量：去掉本软件自己的目录和打包工具留下的变量。
+    真机教训：用户选了 D:\Latos Hue 安装后，软件拉起的 Lightroom 把软件目录里的 VCRUNTIME140.dll 加载进了自己的进程，
+    导致覆盖安装时报"拒绝访问"（文件被 Lightroom 占着），也有版本混用的风险。所以子进程看不到软件自己的目录。"""
+    env = dict(os.environ if env is None else env)
+    if own_dirs is None:
+        own_dirs = [d for d in (getattr(sys, "_MEIPASS", None), os.path.dirname(sys.executable)) if d]
+    own = [os.path.normcase(os.path.abspath(d)) for d in own_dirs]
+
+    def is_own(entry: str) -> bool:
+        if not entry.strip():
+            return False
+        e = os.path.normcase(os.path.abspath(entry.strip().strip('"')))
+        return any(e == d or e.startswith(d + os.sep) for d in own)
+    for key in [k for k in env if k.upper() == "PATH"]:
+        env[key] = os.pathsep.join(x for x in env[key].split(os.pathsep) if not is_own(x))
+    for key in [k for k in env if k.upper().startswith(("_PYI", "_MEIPASS")) or k.upper() in ("PYTHONHOME", "PYTHONPATH")]:
+        del env[key]
+    return env
+
+
+def launch_minimized(exe: str, popen=subprocess.Popen, env=None) -> bool:
     """最小化、不抢焦点地启动 exe；启动后不等待、不接管（软件退出时 Lightroom 继续运行）。路径不合法直接拒绝。"""
     ok = valid_lightroom_path(exe)
     if not ok:
@@ -135,7 +157,7 @@ def launch_minimized(exe: str, popen=subprocess.Popen) -> bool:
     try:
         popen([ok], startupinfo=build_startupinfo(), creationflags=_no_window_flags(),
               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True,
-              cwd=str(Path(ok).parent))
+              cwd=str(Path(ok).parent), env=clean_environment() if env is None else env)
     except (OSError, ValueError, subprocess.SubprocessError):
         return False
     return True
