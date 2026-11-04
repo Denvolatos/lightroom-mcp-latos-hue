@@ -186,6 +186,24 @@
   .kv { display: grid; grid-template-columns: 120px 1fr; gap: 4px 8px; margin: 4px 0 8px; font-size: 13px; }
   .kv span:nth-child(odd) { color: var(--muted); } .kv span:nth-child(even) { user-select: text; word-break: break-all; }
   .sfoot { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+  /* ---------- environment wizard (0.14.0) ---------- */
+  .wz-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .wz-head h3 { margin: 0; }
+  .wz-intro { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+  .wz-item { display: grid; grid-template-columns: 22px 1fr; gap: 3px 10px; padding: 11px 0; border-top: 1px solid var(--line); }
+  .wz-item:first-child { border-top: none; }
+  .wz-ic { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #0b1a12; margin-top: 1px; }
+  .wz-item.ready .wz-ic { background: var(--ok); } .wz-item.todo .wz-ic { background: var(--warn); color: #2a1c00; }
+  .wz-item.wait .wz-ic { background: #444a52; color: var(--text); }
+  .wz-item .wz-title { font-weight: 600; } .wz-item .wz-tag { font-size: 12px; margin-left: 8px; font-weight: 400; }
+  .wz-item.ready .wz-tag { color: var(--ok); } .wz-item.todo .wz-tag { color: var(--warn); } .wz-item.wait .wz-tag { color: var(--muted); }
+  .wz-item .wz-text, .wz-item .wz-hint, .wz-item .wz-act { grid-column: 2; }
+  .wz-item .wz-text { font-size: 13px; word-break: break-all; user-select: text; }
+  .wz-item .wz-hint { font-size: 12px; color: var(--muted); line-height: 1.45; user-select: text; }
+  .wz-item .wz-act { justify-self: start; margin-top: 4px; }
+  .wz-list.checking .wz-item { opacity: .6; }
+  .wz-all { color: var(--ok); margin: 8px 0 2px; font-weight: 600; }
+  .wz-never { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; margin-top: 10px; }
   .sfoot .msg-line { flex: 1; font-size: 12px; } .sfoot .msg-line.ok { color: var(--ok); } .sfoot .msg-line.bad { color: var(--bad); }
   /* ---------- import dialog / library ---------- */
   .dialog.imp { width: 600px; max-width: calc(100vw - 40px); max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
@@ -411,6 +429,12 @@
           <span class="ferr" id="e_folder"></span></div>
       </div>
       <div class="sgroup">
+        <h4>环境检查</h4>
+        <div class="srow"><span class="lab">检查是否都准备好</span>
+          <span class="inline"><button class="btn small" id="s_wizard">打开环境检查</button></span>
+          <span class="sub">随时检查照片文件夹、Lightroom、Lightroom 插件和 AI 助手是否都准备好了；只检查，不会改动你的电脑。</span></div>
+      </div>
+      <div class="sgroup">
         <h4>Lightroom</h4>
         <div class="srow"><span class="lab">自动启动 Lightroom</span>
           <span class="inline"><button class="switch" id="s_autolr" aria-label="打开软件时自动启动 Lightroom"></button><span id="s_autolr_t">关</span></span>
@@ -449,6 +473,18 @@
     </div>
     <div class="sfoot"><span class="msg-line" id="s_msg"></span>
       <button class="btn" id="s_cancel">取消</button><button class="btn primary" id="s_save">保存</button></div>
+  </div>
+</div>
+
+<div class="mask" id="wmask">
+  <div class="dialog wide" role="dialog" aria-label="环境检查">
+    <div class="wz-head"><h3>环境检查</h3><button class="btn small" id="w_x" aria-label="关闭">×</button></div>
+    <div class="wz-intro">下面几项都准备好了，就可以开始修图。这里只做检查，需要你动手的地方会告诉你怎么做。</div>
+    <div class="body wz-list" id="w_list"></div>
+    <div class="wz-all" id="w_all" style="display:none">都准备好了，可以开始修图。</div>
+    <label class="wz-never"><input type="checkbox" id="w_never"> 以后不再自动显示</label>
+    <div class="sfoot"><span class="msg-line" id="w_msg"></span>
+      <button class="btn" id="w_re">重新检查</button><button class="btn primary" id="w_done" style="display:none">完成</button></div>
   </div>
 </div>
 
@@ -1609,13 +1645,83 @@ async function saveSettings(createMissing=false){
 }
 $('#s_save').onclick=()=>saveSettings(false);
 
+/* ---- environment wizard (0.14.0)：四项只读检查；页面只能取状态、点按钮，不传路径 ---- */
+const WZ = {st:null, timer:null, busy:false, fresh:false};
+const WZ_ICON = {ready:'✓', todo:'!', wait:'…'}, WZ_TAG = {ready:'已就绪', todo:'需要处理', wait:'等待'};
+const WZ_ACTIONS = {choose_folder:'wizard_pick_folder', choose_lightroom:'wizard_pick_lightroom'};
+function wzMsg(t, bad){ const m=$('#w_msg'); m.textContent=t||''; m.className='msg-line'+(bad?' bad':''); }
+function wzRender(){
+  const st = WZ.st; if (!st) return;
+  const box = $('#w_list'); box.innerHTML=''; box.classList.toggle('checking', !!st.checking);
+  st.items.forEach(it=>{
+    const row=document.createElement('div'); row.className='wz-item '+it.state;
+    const ic=document.createElement('span'); ic.className='wz-ic'; ic.textContent=WZ_ICON[it.state]||'';
+    const head=document.createElement('div'); const tt=document.createElement('span'); tt.className='wz-title'; tt.textContent=it.title;
+    const tag=document.createElement('span'); tag.className='wz-tag'; tag.textContent=WZ_TAG[it.state]||''; head.append(tt, tag);
+    row.append(ic, head);
+    const tx=document.createElement('div'); tx.className='wz-text'; tx.textContent=it.text; row.append(tx);
+    if (it.hint){ const h=document.createElement('div'); h.className='wz-hint'; h.textContent=it.hint; row.append(h); }
+    if (it.action && WZ_ACTIONS[it.action]){
+      const b=document.createElement('button'); b.className='btn small wz-act'; b.textContent=it.action_label; b.disabled=WZ.busy;
+      b.onclick=()=>wzAct(it.action); row.append(b); }
+    box.append(row);
+  });
+  $('#w_all').style.display = (st.ready && !st.checking) ? '' : 'none';
+  $('#w_done').style.display = (st.ready && !st.checking) ? '' : 'none';
+  $('#w_re').disabled = !!st.checking || WZ.busy; $('#w_re').textContent = st.checking ? '检查中…' : '重新检查';
+  if (WZ.fresh){ WZ.fresh=false; $('#w_never').checked = !!st.wizard_done; }
+}
+async function wzLoad(refresh){
+  clearTimeout(WZ.timer);
+  try { WZ.st = await window.pywebview.api.wizard_state(!!refresh); }
+  catch(e){ wzMsg('暂时无法检查，请点“重新检查”。', true); return; }
+  wzRender();
+  if (WZ.st.checking && $('#wmask').classList.contains('show')) WZ.timer = setTimeout(()=>wzLoad(false), 600);
+}
+function openWizard(){
+  if (!REAL()) return;
+  wzMsg(''); WZ.fresh = true; $('#wmask').classList.add('show'); wzLoad(true);
+}
+function closeWizard(){
+  clearTimeout(WZ.timer); $('#wmask').classList.remove('show');
+  if ($('#w_never').checked && !(WZ.st && WZ.st.wizard_done)) window.pywebview.api.wizard_done(true).catch(()=>{});
+}
+async function wzAct(action){
+  if (WZ.busy) return; WZ.busy=true; wzMsg(''); wzRender();
+  try {
+    const r = await window.pywebview.api[WZ_ACTIONS[action]]();
+    if (r && r.message) wzMsg(r.message, true);
+    else if (r && r.ok && action==='choose_folder') loadGallery();
+  } catch(e){ wzMsg('没能完成选择，请再试一次。', true); }
+  WZ.busy=false; wzLoad(true);
+}
+$('#w_x').onclick=closeWizard;
+$('#wmask').onclick=e=>{ if(e.target.id==='wmask') closeWizard(); };
+$('#w_re').onclick=()=>{ wzMsg(''); wzLoad(true); };
+$('#w_done').onclick=()=>{ $('#w_never').checked=true; closeWizard(); };
+$('#s_wizard').onclick=openWizard;
+/* 启动时：没选工作文件夹必弹；第一次打开且有项目需要处理才弹；全部就绪就静默记为已完成。
+   “等待”（Lightroom 正在自动启动、插件正在连接）不算需要处理，所以隔几秒再看，最多约 50 秒。 */
+async function wizardStartup(){
+  for (let i=0; i<17; i++){
+    if ($('#wmask').classList.contains('show')) return;
+    let r; try { r = await window.pywebview.api.wizard_state(false); } catch(e){ return; }
+    if (!r.checking){
+      if (r.auto_open){ openWizard(); return; }
+      if (r.mark_done){ window.pywebview.api.wizard_done(true).catch(()=>{}); return; }
+      if (r.wizard_done || !r.items.some(x=>x.state==='wait')) return;
+    }
+    await new Promise(x=>setTimeout(x, r.checking ? 500 : 3000));
+  }
+}
+
 /* 真实模式：隐藏演示标记，显示 Lightroom 连接状态 */
 if (location.hash !== '#demo') window.addEventListener('pywebviewready', ()=>{
   $('#demobadge').style.display='none';
   $('#newchat').style.display=''; $('#setbtn').style.display='';
   const ready=()=>{ try { window.pywebview.api.ui_ready(); } catch(e){} };   // 告诉软件主界面已准备好：关闭启动界面、显示主窗口
   window.pywebview.api.get_settings(false).then(r=>{ confirmDefault=r.settings.confirm_default; setAsk(confirmDefault);
-    $('#edge').value=String(r.settings.preview_edge); if (!r.settings.base_folder) openSettings(); ready(); }).catch(ready);
+    $('#edge').value=String(r.settings.preview_edge); ready(); wizardStartup(); }).catch(ready);
   const poll=()=>window.pywebview.api.status().then(s=>{ showStatus(s); if (s.photo && s.photo.name && s.photo.name!==photoName){ photoName=s.photo.name; renderStage(); } }).catch(()=>{});
   window.pywebview.api.autolaunch_state().then(r=>{ if (r && r.state!=='idle') onLrLaunch(r); }).catch(()=>{});
   window.pywebview.api.preview_state().then(r=>{ pv=r; renderStage(); }).catch(()=>{});
