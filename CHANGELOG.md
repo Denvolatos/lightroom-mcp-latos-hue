@@ -3,6 +3,10 @@
 Versions: a new feature raises the middle number, a small fix the last one. The server version lives in
 `server/lightroom_mcp/__init__.py`, the plug-in version in `plugin/lrmcp.lrdevplugin/Version.lua` (and `Info.lua`).
 
+## 1.0.3 (2026-11-04) — version sync with Latos Hue 1.0.3
+
+- Version number only: the plug-in and the MCP server move to **1.0.3** to match Latos Hue 1.0.3. The tools and how to use them are unchanged. Latos Hue 1.0.3 is the real fix for the installer "access denied" problem: the 1.0.2 fix did not fully work, because the app handed its own DLL search folder to the Lightroom it started; 1.0.3 removes that folder at the moment Lightroom is launched (see `app/CHANGELOG.md`). After upgrading, reload the plug-in once in Lightroom (File > Plug-in Manager > Reload Plug-in). If you installed Latos Hue 1.0.0 / 1.0.1 / 1.0.2 with auto-start of Lightroom, close Latos Hue and Lightroom before upgrading.
+
 ## 1.0.2 (2026-11-04) — version sync with Latos Hue 1.0.2
 
 - Version number only: the plug-in and the MCP server move to **1.0.2** to match Latos Hue 1.0.2 (which fixes an installer "access denied" problem caused by Lightroom being started with the app's own folder; see `app/CHANGELOG.md`). The tools and how to use them are unchanged. After upgrading, reload the plug-in once in Lightroom (File > Plug-in Manager > Reload Plug-in). If you installed Latos Hue 1.0.0 / 1.0.1 with auto-start of Lightroom, close Latos Hue and Lightroom before upgrading.
