@@ -14,6 +14,7 @@ import webview
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from adjustments import AdjustmentTracker  # noqa: E402
 import lr_autostart  # noqa: E402
+import splash as splashmod  # noqa: E402
 from backend import Backend  # noqa: E402
 from confirm_hub import ConfirmHub  # noqa: E402
 from lr_service import LrService  # noqa: E402
@@ -77,6 +78,7 @@ class Api:
         # 自动启动 Lightroom（设置里的开关，默认关）：只在软件启动时跑一次；连上与否沿用 Backend 的真实连接判定
         self._autolaunch = lr_autostart.AutoLaunch(lambda: self._settings.data,
                                                    lambda: bool(self._backend.status().get("connected")), self._emit)
+        self._splash = None                      # 启动界面控制器（main() 里设置；没有启动界面时为空）
         self._pending_lr_path = ""               # 用户在文件对话框里点选、尚未保存的 Lightroom 路径
         self._ctx_pending = True                 # 新对话的第一条消息带上"经验库"资料块（见 send / reset）
         self._lib = LibraryService(self._lr, libstore.PresetStore(), libstore.NoteStore(), libstore.FavStore(), self._emit,
@@ -88,7 +90,8 @@ class Api:
 
     def _start_background(self) -> None:
         """窗口一出现就预热：Bridge、常驻 claude（含 lightroom_mcp 与确认服务）同时启动，之后每条消息零启动开销。"""
-        self._autolaunch.start()                 # 开关为开且 Lightroom 没在运行时，后台最小化启动它（不阻塞界面）
+        self._splash_text(splashmod.TEXT_SERVICES)
+        launching = self._autolaunch.start()     # 开关为开且 Lightroom 没在运行时，后台最小化启动它（不阻塞界面）
 
         def warm() -> None:
             self._lr.start()
@@ -103,6 +106,17 @@ class Api:
         self._photolib.start()
         self._photolib.refresh()                # 软件启动时读一次图库（之后只在导入完成、加入完成、手动刷新时读）
         self._backend.start()
+        self._splash_text(splashmod.TEXT_CONNECT_LR if launching else splashmod.TEXT_LOADING)
+
+    def _splash_text(self, text: str) -> None:
+        if self._splash is not None:
+            self._splash.set_text(text)
+
+    def ui_ready(self) -> dict:
+        """主界面准备好了（页面在启动完成后调用一次）：关闭启动界面、显示主窗口。"""
+        if self._splash is not None:
+            self._splash.finish()
+        return {"ok": True}
 
     def _provider_env(self) -> dict:
         token = self._hub.begin_session()
@@ -738,18 +752,43 @@ class Api:
         return {"ok": True, "edge": self._preview.set_edge(edge)}
 
 
+def setup_windows(api, create_window=None, use_splash: bool = True):
+    """创建主窗口（先隐藏）和启动窗口，返回启动界面控制器（没有启动界面时为 None，主窗口直接显示）。
+    主窗口先创建，保证它是 pywebview 的主窗口：启动窗口关闭不会让程序退出。创建启动窗口出任何错，都退回"直接显示主窗口"。"""
+    create_window = create_window or webview.create_window
+    api._window = create_window("修图助手", WEB.as_uri(), js_api=api, width=1440, height=860, min_size=(1100, 680),
+                                background_color="#17181b", hidden=use_splash)
+    if not use_splash:
+        return None
+    sp = None
+    try:
+        sp = create_window(splashmod.TITLE, html=splashmod.splash_html(appsettings.APP_VERSION), width=splashmod.WIDTH,
+                           height=splashmod.HEIGHT, resizable=False, frameless=True, easy_drag=True, on_top=True,
+                           background_color="#17181b")
+        sp.events.shown += lambda: splashmod.round_corners(sp)
+    except Exception:                            # noqa: BLE001 - 启动界面出问题不能影响软件本身
+        sp = None
+    ctrl = splashmod.SplashController(sp, api._window)
+    api._splash = ctrl
+    try:
+        api._window.events.closed += ctrl.finish     # 主窗口被关掉时，也要把启动窗口收掉
+    except Exception:                            # noqa: BLE001
+        pass
+    return ctrl
+
+
 def main() -> None:
     api = Api()
-    api._window = webview.create_window(
-        "修图助手",
-        WEB.as_uri(),
-        js_api=api,
-        width=1440,
-        height=860,
-        min_size=(1100, 680),
-        background_color="#17181b",
-    )
-    webview.start(api._start_background)
+    ctrl = setup_windows(api, use_splash=os.environ.get("LRAPP_NO_SPLASH") != "1")
+    icon = str(splashmod.ICON_ICO) if splashmod.ICON_ICO.is_file() else None   # 窗口与任务栏图标（丝带）
+
+    def run() -> None:
+        if ctrl is not None:
+            ctrl.start()
+            if ctrl.splash is None:              # 没能创建启动窗口：直接显示主窗口
+                ctrl.finish()
+        api._start_background()
+    webview.start(run, icon=icon)
     api._shutdown()
 
 
