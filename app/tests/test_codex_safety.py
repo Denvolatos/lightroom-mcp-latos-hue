@@ -20,6 +20,7 @@ def test_command_exposes_only_proxy_and_no_builtin_file_tools(tmp_path):
     assert cmd[-1] == "-" and "hello" not in cmd
     resumed = build_command("codex", "thread-id", tmp_path, "x" * 100000)
     assert resumed[-2:] == ["thread-id", "-"] and len(" ".join(resumed)) < 10000
+    assert "--skip-git-repo-check" in resumed
 
 
 def test_proxy_denies_write_without_valid_confirmation(monkeypatch):
