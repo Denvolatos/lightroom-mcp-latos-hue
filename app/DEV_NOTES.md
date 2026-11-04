@@ -823,3 +823,12 @@ photo_id 逐字取自第 ③ 项；按从好到坏排列；score 1–10；stars 
 - 守卫测试：`app/tests/test_spdx_headers.py`，范围与上面一致；新增文件忘了抬头会测出来。
 - 打包的第三方库清单见 THIRD_PARTY_NOTICES.md B 节；许可证文本副本在 `licenses/`（尚未让安装包带上，待决定）。
 - 待决定：PyInstaller 把自身的 `PyInstaller.*` Python 模块（GPL-2.0-or-later，无 bootloader 例外）和 `_pytest`、`setuptools`、`pygments` 等打进了 PYZ，多半可以在 spec 里 `excludes` 掉，减少需要声明的内容；未改 spec。
+
+# 发布前收尾：打包瘦身与安装包带许可证（1.0.0，2026-11-04）
+
+- **spec 的 `excludes` 增加：** `_pytest`、`PyInstaller`、`setuptools`、`pkg_resources`、`pygments`、`wheel`、`pefile`、`altgraph`、`packaging`。依据：grep `app/` 与 `server/` 的 import，这些只在测试或构建里出现；第三方包里只有 anyio 惰性导入 `_pytest`（try 保护），httpx2 的命令行入口导入 pygments/rich（软件不用）。不要排除 `distutils`：它是 setuptools 的别名，PyInstaller 的预处理钩子会因此报错。
+- **效果：** 程序目录约 76 MB 降到约 70 MB；安装包 `LatosHue-Setup-1.0.0.exe` 约 22.7 MiB（0.17.2 时约 36.6 MiB）。
+- **自检与冒烟（精简 PATH）：** `LatosHue.exe --selftest`、`latoshue-helper.exe --selftest` 通过；辅助进程 `--lr-launcher` initialize + tools/list 得到 22 个 `lr_*` 工具，`--permission-server` 得到 `approve`，`--codex-proxy` 得到 15 个工具。
+- **声明同步：** `THIRD_PARTY_NOTICES.md` B 表移除被排除的包（setuptools、packaging、wheel、pefile、altgraph、Pygments、pytest、pywin32-ctypes）和 PyInstaller 的 Python 模块（只保留 bootloader 与运行时钩子），`licenses/` 删掉对应文件夹；A 表（`lrmcp.exe`，由 `build.ps1` 打包，没有排除这些）保持不变。
+- **安装包带许可证：** `installer/latoshue.iss` 把 `LICENSE`（装成 `LICENSE.txt`）、`THIRD_PARTY_NOTICES.md`、`licenses\` 装到 `{app}`；它们在程序目录里，卸载时随程序目录一起删。
+

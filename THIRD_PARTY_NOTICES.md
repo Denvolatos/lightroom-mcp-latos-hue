@@ -72,23 +72,15 @@ DLLs found in `_internal`, mapped to the installed packages. Version = version i
 | cryptography | 50.0.2 | Apache-2.0 OR BSD-3-Clause (its wheels include OpenSSL) | https://github.com/pyca/cryptography |
 | cffi / pycparser | 2.1.1 / 3.12 | MIT-0 / BSD-3-Clause | https://cffi.readthedocs.io/ , https://github.com/eliben/pycparser |
 | pywin32 | 312 | PSF (metadata says "PSF"; exact SPDX id 待验证) | https://github.com/mhammond/pywin32 |
-| pywin32-ctypes | 0.2.3 | BSD-3-Clause | https://github.com/enthought/pywin32-ctypes |
 | bottle | 0.13.4 | MIT | http://bottlepy.org/ |
 | proxy_tools | 0.1.0 | MIT (metadata only; the package ships no license file) | http://github.com/jtushman/proxy_tools |
-| setuptools | 84.2.1 | MIT | https://github.com/pypa/setuptools |
-| packaging | 26.3 | Apache-2.0 OR BSD-2-Clause | https://github.com/pypa/packaging |
-| wheel | 0.48.0 | MIT | https://github.com/pypa/wheel |
-| pefile | 2024.8.26 | MIT | https://github.com/erocarrera/pefile |
-| altgraph | 0.17.5 | MIT | https://altgraph.readthedocs.io |
-| Pygments | 2.21.0 | BSD-2-Clause | https://pygments.org |
-| pytest (only the `_pytest` modules) | 9.2.0 | MIT | https://docs.pytest.org/ |
-| PyInstaller (its Python modules in the module table, and the bootloader of both .exe files) | 6.22.3 | GPL-2.0-or-later WITH Bootloader-exception; run-time hooks Apache-2.0; `PyInstaller.isolated` also MIT | https://pyinstaller.org |
+| PyInstaller (the bootloader of both .exe files and its run-time hooks; its other Python modules are excluded since 1.0.0) | 6.22.3 | GPL-2.0-or-later WITH Bootloader-exception; run-time hooks Apache-2.0 | https://pyinstaller.org |
 | Python itself (`python312.dll`, standard library) | 3.12.16 | PSF-2.0 | https://www.python.org |
 
-PyInstaller: its `COPYING.txt` gives unlimited permission to embed the compiled bootloader in the programs it builds. That exception
-names `bootloader/` and `PyInstaller/loader`; the other `PyInstaller.*` Python modules in the module table are GPL-2.0-or-later without it.
-GPL-2.0-or-later can be combined with the AGPL-3.0 (through GPL-3.0); the corresponding source of this program is this repository
-(this is our reading, not legal advice, 待验证). Whether those modules need to be bundled at all is 待验证 (see `app/DEV_NOTES.md`).
+PyInstaller: only its compiled bootloader (inside `LatosHue.exe` and `latoshue-helper.exe`) is shipped; its `COPYING.txt` gives unlimited
+permission to embed the bootloader in the programs it builds (GPL-2.0-or-later WITH Bootloader-exception). The other `PyInstaller.*` Python
+modules (GPL-2.0-or-later, no such exception) are excluded from the build since 1.0.0. The bootloader exception is our reading, not legal advice
+(待验证 by a lawyer if it matters to you).
 
 **Native libraries in `_internal`** (license from the conda package metadata of the build environment): OpenSSL 3.5.9
 (`libssl-3-x64.dll`, `libcrypto-3-x64.dll`, Apache-2.0), libffi 3.4.8 (`ffi.dll`, MIT), libexpat 2.9.0 (`libexpat.dll`, MIT), bzip2 1.0.8
