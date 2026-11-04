@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """预设 / 经验 / 收藏真机检查（无窗口；会消耗订阅额度，不属于 pytest）。只用测试资源：
 - 目录路径须含 ceshi，否则立即停止；用开发桥脚本选择测试照片 A（DSC08238.ARW）与 B（目录里第一张 JPG）；
 - A：用 EditService 做一次小调整 → 保存为我的预设 → 还原 A 并核对；

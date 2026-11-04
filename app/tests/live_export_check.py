@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """导出功能真机检查（无窗口、不调用模型，不属于 pytest）。只用测试资源：
 目录路径须含 ceshi，输出文件夹固定为 D:\\ceshi\\export_test2（路径须含 ceshi），否则立即停止。
 导出的是 Lightroom 当前选中的测试照片；不做“原始尺寸”导出。

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Small JSONL Codex CLI stand-in for provider contract tests."""
 import json
 import sys

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """AI 挑片后台：让当前 AI 来源比较 Lightroom 中选中的照片，给出排名、星级与旗标建议，结果先只显示在软件里。
 
 安全约定：

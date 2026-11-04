@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """AI 挑片第 1 步：读取 Lightroom 当前全部选中的照片（只读）。"""
 import backend as be
 from adjustments import AdjustmentTracker

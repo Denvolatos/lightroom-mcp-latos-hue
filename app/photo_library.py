@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """软件内的图库：在软件里浏览、选择照片，Lightroom 只是后台引擎（0.11.0）。
 
 数据来源有两路，按小写规范化后的路径合并：

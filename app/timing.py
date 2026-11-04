@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """一轮对话各阶段的计时（只记事件名与时间，不含对话内容、参数值、口令）。
 
 用法：t = TurnTimer("per_turn"); t.mark("spawn"); t.observe(事件) ...; t.summary() / t.write()

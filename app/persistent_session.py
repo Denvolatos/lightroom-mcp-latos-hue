@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """常驻的 claude 会话（--input-format stream-json）。
 
 软件启动时预热一次：claude 进程、lightroom_mcp 服务、确认服务、插件连接都只在启动（或重建）时建立一次，

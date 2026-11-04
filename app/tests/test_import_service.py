@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """导入流程编排（ImportService）与 Api 接口：假设置、假 Lightroom、假窗口，临时目录。"""
 import os
 import subprocess

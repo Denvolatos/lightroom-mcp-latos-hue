@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """启动界面：内容、交接逻辑（只显示一次、出错也能回到主界面、看门狗兜底）、窗口创建与失败回退、与 Api.ui_ready 的衔接。
 全部使用假窗口对象：不会弹出任何窗口。"""
 import threading

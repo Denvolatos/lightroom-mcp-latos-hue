@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """软件检查更新（0.15.0）：版本解析、只认 hue-v、过滤草稿/预发布、缓存、静默失败、关闭时零请求、
 打开页面的网址校验、接口不暴露参数、旧设置文件兼容。全部用假 HTTP / 假浏览器 / 假线程，不联网、不开窗口。"""
 import inspect

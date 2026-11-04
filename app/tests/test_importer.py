@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """导入：扫描、复制（.part、同名处理、校验）、加入 Lightroom 的重试规则、目录树、各类校验。全部用临时目录与假通道。"""
 import os
 import subprocess

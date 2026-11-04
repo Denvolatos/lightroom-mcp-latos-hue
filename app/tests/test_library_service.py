@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """预设套用（强度插值、确认清单、写入与撤销）、Lightroom 预设、经验接口、"记成经验"解析、收藏一致性、Api 接口形状。"""
 import copy
 import inspect

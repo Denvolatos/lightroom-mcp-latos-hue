@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """由 claude 启动的 lightroom_mcp 服务入口（修图助手专用）。
 
 与 `python -m lightroom_mcp` 的区别只有两点（server/ 的代码不动，这里只是换一个启动方式）：

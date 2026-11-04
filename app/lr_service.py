@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """窗口进程内直接连接 Lightroom 插件：用于撤销、还原到原始状态、读取当前值、显示连接状态。
 
 做法：在窗口进程里启动一个 server 的 Bridge（插件会同时轮询所有已登记的服务），再用 server 自带的 EditService

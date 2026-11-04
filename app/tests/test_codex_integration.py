@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Codex 来源与软件其余功能的集成核对（假 CLI、假 Lightroom，不联网、不调用任何真实模型、不碰 Lightroom）。
 
 覆盖：挑片期间写入一律拒绝（经 Codex 的确认代理）、"逐项确认"开关、来源切换后各功能的通道重绑与进程互不残留、

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """导入功能的后台总管：选来源文件夹 -> 后台扫描 -> 确认信息 -> 后台复制并加入 Lightroom。界面进程里只有一个实例。
 
 路径只来自用户在系统对话框里的这一次选择（Api.choose_source_folder），页面传来的任意路径一律不接受。

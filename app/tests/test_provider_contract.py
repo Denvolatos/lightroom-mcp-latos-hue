@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """AI 来源的契约测试：任何来源实现都应通过。贡献者新增来源时，可直接复用本文件自测。
 
 用法（贡献者）：

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Expose only the Lightroom tools used by the app, with write confirmation enforced here."""
 from __future__ import annotations
 

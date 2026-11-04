@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """窄窗口/多宽度布局自查（无窗口、无 Lightroom、不调用模型，不属于 pytest）。
 临时本机静态服务加载 index.html（注入假的 pywebview.api，只含示例数据），用无头 Edge 按多个宽度截图主界面和几个对话框，
 并用 --dump-dom 检查：页面不横向溢出、按钮文字没被挤成多行、对话框没超出窗口。

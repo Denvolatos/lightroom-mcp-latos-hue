@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """预设 / 经验 / 收藏的后台逻辑（界面左栏三个标签）。
 
 安全约定（与导出、挑片同一风格）：

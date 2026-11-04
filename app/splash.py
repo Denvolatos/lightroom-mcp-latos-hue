@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """启动界面（0.13.0）：软件打开到主界面之前显示的小窗口（圆角深色底 + 丝带图标 + 名称 + 版本号 + 一行进度文字）。
 
 实现方式：pywebview 的无边框小窗口，内容是一段内嵌的 HTML（图标用 data 地址，不读其他文件，出现得最快）；

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """预设、经验、收藏的本机存储与校验（只存本机 ~/LrMcp/knowledge/，不联网、不上传、不预装任何内容）。
 
 - 原子写入（先写临时文件再替换），文件仅当前用户可读写（与 settings.py 同一做法）；

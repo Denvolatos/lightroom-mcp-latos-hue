@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """设置读写与校验、AI 来源选择、设置对话框用到的后端接口。"""
 import json
 from pathlib import Path

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """注册表与 Claude 来源状态检测。"""
 import json
 import subprocess

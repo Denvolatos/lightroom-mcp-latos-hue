@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """中栏的真实预览：缓存、本机图片服务、取图与刷新调度。
 
 - PreviewStore：内存缓存。键 = (照片 id, 长边, 编辑版本)，编辑版本 = 调整参数的哈希；"初始"图固定保留，不被淘汰。

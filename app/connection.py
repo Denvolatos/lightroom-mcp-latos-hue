@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Lightroom 连接状态的判定（纯函数，便于测试）。
 
 数据来源有两处，都来自软件自己的检测，不是界面猜的：

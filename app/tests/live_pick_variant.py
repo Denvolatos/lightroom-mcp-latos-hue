@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """AI 挑片真机变体检查（会消耗订阅额度，不属于 pytest）：只做一次挑片，不写入；核对 AI 没有改动任何星级/旗标。
 用法：python app/tests/live_pick_variant.py <结果 json> <criterion> <count> [自定义文字]
 目录路径须含 ceshi；须事先在 Lightroom 中选好测试照片。

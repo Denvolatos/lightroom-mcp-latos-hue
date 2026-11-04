@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """软件内图库（photo_library）：两路数据合并、缩略图分批与缓存、选中同步、加入 Lightroom、Api 参数校验。
 假 Lightroom、假图片服务、临时目录；不连真实 Lightroom。"""
 import inspect

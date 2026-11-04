@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """AI 来源的统一接口。
 
 软件的界面、确认卡片、"本次调整"表格、预览刷新都只认下面定义的"事件"，不关心背后是哪家 AI。

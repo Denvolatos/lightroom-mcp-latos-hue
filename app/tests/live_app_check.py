@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """真实整体检查（无窗口；会消耗订阅额度，不属于 pytest）。
 用法：python app/tests/live_app_check.py <connect|read|write|all> [输出json]
 - connect：不调用模型。测预热到“已连接”的时间、强制结束 claude 后的自动恢复时间、失效公告清理。

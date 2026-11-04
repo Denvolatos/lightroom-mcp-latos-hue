@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """打包（PyInstaller）感知：资源路径、辅助进程命令、自检。
 
 开发时辅助进程是 `python <脚本>`；打包后没有 python，改成 `latoshue-helper.exe <子命令>`（与 LatosHue.exe 同目录）。

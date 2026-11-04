@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """环境检查向导界面自查（无窗口、无 Lightroom、不调用模型，不属于 pytest）。
 临时本机静态服务加载 index.html（注入假的 pywebview.api），用无头 Edge 截图各状态。截图只含假数据（路径用示例值）。
 用法：python app/tests/ui_wizard_check.py <截图输出目录>

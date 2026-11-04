@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """后台总管：常驻会话预热、连接状态、自动恢复、当前照片跟踪。界面进程里只有一个实例。
 
 巡检线程每 2 秒执行一次 tick()：

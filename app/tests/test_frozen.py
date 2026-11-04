@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """免 Python 打包：辅助进程命令、资源路径、统一入口分发、配置里不再出现 python 脚本（冻结时）。"""
 import sys
 from pathlib import Path

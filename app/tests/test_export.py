@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """导出功能：选项校验、设置字段、ExportService 与 Api 接口（假 Lightroom、临时目录，不碰真实照片）。"""
 import inspect
 import os

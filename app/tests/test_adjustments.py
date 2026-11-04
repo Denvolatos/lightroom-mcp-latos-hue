@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """“本次调整”：事件解析、编辑记录读取、中文参数名、撤销调用（假 EditService）。"""
 import json
 import sys

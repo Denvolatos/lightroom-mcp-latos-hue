@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """逐项确认：窗口进程内的小型本机 HTTP 服务 + 待确认队列。
 
 permission_server（由 claude 启动）把写入请求 POST 到这里；界面弹出确认卡片，用户点击后 answer() 放行或拒绝。

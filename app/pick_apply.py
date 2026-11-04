@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """把 AI 挑片的建议写进 Lightroom（只在用户点击确认清单后才执行）。
 
 约定：

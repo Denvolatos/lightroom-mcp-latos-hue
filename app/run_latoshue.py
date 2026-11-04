@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """PyInstaller 入口（LatosHue.exe / latoshue-helper.exe 共用）。
 
 无参数：启动图形界面。子命令：--lr-launcher / --permission-server / --codex-proxy 是软件自己启动的辅助进程；

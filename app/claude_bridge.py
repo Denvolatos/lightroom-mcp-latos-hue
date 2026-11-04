@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """把修图助手接到本机已登录的 Claude Code 命令行（claude -p）。
 
 本模块不依赖界面：负责 ①拼出“干净”的命令 ②解析 stream-json 事件 ③把错误翻成小白能懂的中文。

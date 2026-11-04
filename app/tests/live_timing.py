@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """真实计时（会消耗订阅额度，不属于 pytest）。
 用法：python app/tests/live_timing.py per_turn|persistent <序列数> [输出json]
 每个序列 2 轮（第 1 轮=冷启动首轮，第 2 轮=后续轮），问题为只读问题。结果只含时间与工具名。

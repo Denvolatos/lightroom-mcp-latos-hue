@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """界面截图自查（无窗口、无 Lightroom、不调用模型，不属于 pytest）。
 用 live_preview_check.py 存下的测试照片预览（initial.jpg / adjusted.jpg）放进真实的 PreviewServer，
 临时本机静态服务加载 index.html（注入假的 pywebview.api），再用无头 Edge 截图。用完全部关闭。

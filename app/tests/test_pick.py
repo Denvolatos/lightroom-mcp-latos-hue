@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """AI 挑片：选项与提示词、JSON 解析与校验、PickService 流程（假来源、假 Lightroom，不调用模型、不碰真实照片）。"""
 import inspect
 import json

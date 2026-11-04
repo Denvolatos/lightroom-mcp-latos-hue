@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """导出功能后台：把 Lightroom 中当前选中的那张照片（含已做的调整）导出为 JPEG 或 TIFF。
 
 安全约定：

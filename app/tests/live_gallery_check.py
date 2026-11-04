@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """软件内图库真机检查（无窗口、不调用模型，不属于 pytest）。只用测试资源：
   目录 = 路径含 ceshi 的测试目录（E:\\ceshi1\\ceshi1.lrcat），软件文件夹 = D:\\ceshi\\app_library_test；写入前核对两个路径都含 ceshi，否则立即停止。
 走后端 PhotoLibrary（Api 的 library_* 只是它的薄封装，由单元测试覆盖），连接真实 Lightroom：

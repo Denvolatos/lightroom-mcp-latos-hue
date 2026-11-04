@@ -1,4 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 # PyInstaller spec for Latos Hue (run through build_app.ps1). Two executables share one dependency folder:
 #   LatosHue.exe          windowed (no console) - the GUI
 #   latoshue-helper.exe   console - helper processes started by the app (--lr-launcher, --permission-server, --codex-proxy)

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """真实预览检查（无窗口、不调用模型，不属于 pytest）。只读为主；写入前确认目录路径含 ceshi。
 用法：python app/tests/live_preview_check.py [输出目录]
 步骤：取初始预览（计时、核对尺寸与信息条）-> 再取一次（缓存命中）-> 曝光 +0.1（只做一次）-> 等“当前”自动刷新（计时）

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Claude Code 命令行来源：对现有会话类的薄封装，不重写已验证的逻辑。
 
 常驻会话（默认）= persistent_session.PersistentSession；每轮新启动（排查用，LRAPP_PER_TURN=1）= claude_bridge.ClaudeSession。

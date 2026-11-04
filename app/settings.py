@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """软件设置：读写 ~/LrMcp/app_settings.json，并校验每个字段。
 
 - 原子写入（先写临时文件再替换），带 schema 版本；

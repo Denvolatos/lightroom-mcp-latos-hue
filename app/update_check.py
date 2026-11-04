@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """软件检查更新（0.15.0）：只检查，用户点了才去浏览器看；绝不自动下载、安装或替换文件。
 
 - 只做一次匿名 GET：api.github.com 上本仓库的 releases 列表（限制响应大小、超时 8 秒）；不带令牌、不带任何用户数据；

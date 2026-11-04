@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """软件内图库界面自查（无窗口、无 Lightroom、不调用模型，不属于 pytest）。
 临时本机静态服务加载 index.html（注入假的 pywebview.api 与假数据），用无头 Edge 截图各状态。
 缩略图用测试照片的缩略图 JPEG（--thumbs 指定目录，默认取脚本参数 2），照片名是测试照片的文件名，不含个人信息。数据只存在于本脚本里。

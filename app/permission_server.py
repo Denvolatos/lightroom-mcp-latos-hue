@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """逐项确认用的极小 MCP 服务（stdio）。
 
 由 claude 的 --permission-prompt-tool 调用：每当一个写入类工具需要许可，claude 会调用本服务的 approve 工具。

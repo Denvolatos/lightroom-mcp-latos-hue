@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """环境检查向导（0.14.0）：用一个清单告诉用户哪项已就绪、哪项没好、下一步怎么办。
 
 - 四项检查，全部只读，不自动修复任何东西：照片工作文件夹 -> Lightroom -> Lightroom 插件 -> AI 来源；

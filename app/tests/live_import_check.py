@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """导入功能真机检查（无窗口、不调用模型，不属于 pytest）。只用测试资源：
   “存储卡” = D:\\ceshi\\sd_sim（从 D:\\ceshi 里复制几张测试照片得到），软件文件夹 = D:\\ceshi\\app_library_test，
   目录 = 路径含 ceshi 的测试目录。写入前核对目录路径和软件文件夹路径都含 ceshi，否则立即停止。

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """环境检查向导（0.14.0）：四项检查的判定与文案、依赖关系、自动弹出条件、不阻塞、接口不暴露路径、旧设置文件兼容。
 全部用假对象：不开窗口、不启动 Lightroom、不连真实 Lightroom/AI、不碰真实照片目录。"""
 import inspect

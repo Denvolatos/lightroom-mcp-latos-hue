@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """预设 / 经验 / 收藏的存储与校验：保存、覆盖、删除、导入导出的各种非法输入、损坏文件、上限、权限做法、资料块拼接。"""
 import json
 import os

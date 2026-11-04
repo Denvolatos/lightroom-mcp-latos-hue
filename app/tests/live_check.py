@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """真实小测试（会消耗订阅额度，不属于 pytest）：python app/tests/live_check.py"""
 import json
 import sys

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """自动启动 Lightroom：路径校验与探测、是否已在运行、STARTUPINFO 参数、启动流程的各种结果、设置校验、Api 不接受页面传来的路径。
 全部使用假对象：不会真的启动 Lightroom，也不会弹出任何窗口。"""
 import subprocess

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """“本次调整”表格的数据：从 claude 的事件流里读出每次写入的参数、改前、改后、状态、依据。
 
 事件来源：tool（含输入参数）与 tool_result（含 edit_id 与改前改后）；必要时用 ~/LrMcp/edits/ 里的记录补全。

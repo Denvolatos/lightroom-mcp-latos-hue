@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """预设 / 收藏 / 经验界面自查（无窗口、无 Lightroom、不调用模型，不属于 pytest）。
 临时本机静态服务加载 index.html（注入假的 pywebview.api 与示例数据），用无头 Edge 截图各场景。示例数据只存在于本脚本里，不属于软件。
 用法：python app/tests/ui_library_check.py <截图输出目录>      截图命名 library_<场景>.png

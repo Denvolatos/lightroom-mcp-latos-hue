@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """导入：扫描来源文件夹 -> 复制到软件文件夹 -> 加入 Lightroom 目录。
 
 原则：来源（例如相机存储卡）里的原片只读，绝不移动、删除、改动；软件文件夹里已有的文件绝不覆盖。

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """AI 挑片界面自查（无窗口、无 Lightroom、不调用模型，不属于 pytest）。
 临时本机静态服务加载 index.html（注入假的 pywebview.api），用无头 Edge 截图各状态。
 缩略图用测试照片（DSC08151.ARW、DSC08205.JPG、DSC08206.ARW 的 256 像素预览），不含个人信息。

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """调整参数的中文名称。找不到的参数显示原名。"""
 from __future__ import annotations
 

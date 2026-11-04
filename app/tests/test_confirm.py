@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """逐项确认：确认卡片内容、允许/拒绝/超时/取消、口令校验、permission_server 的返回格式。全部用假数据，不碰 Lightroom。"""
 import json
 import threading

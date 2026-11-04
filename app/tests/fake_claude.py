@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """假的 claude 常驻进程（测试用）：从标准输入读 stream-json 消息，按消息内容演不同剧情。
 剧情由用户消息文字决定：hello 正常（含一次工具调用）；slow 一直输出直到收到 interrupt；stubborn 忽略 interrupt；
 silent 不回应；die 直接退出。"""

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """启动界面截图自查（无头 Edge，不开任何 GUI 窗口、不连 Lightroom，不属于 pytest）。
 用法：python app/tests/ui_splash_check.py <截图输出目录>
 """

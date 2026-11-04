@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """端口选择与失效公告清理（只在 app/ 内处理，不改 server/ 与 plugin/）。
 
 背景（实测，见 DEV_NOTES）：插件对每个服务端口各有一个轮询任务。服务关闭后，若很快（约 12 秒内）又有新服务占用同一个端口，

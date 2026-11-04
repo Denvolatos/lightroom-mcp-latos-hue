@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """AI 挑片真机检查（无窗口；会消耗订阅额度，不属于 pytest）。只用测试资源：
 - 目录路径须含 ceshi，否则立即停止；
 - 须事先在 Lightroom 里选中 3 张测试照片（开发桥脚本 select_three.lua）；

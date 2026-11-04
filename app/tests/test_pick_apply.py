@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """AI 挑片写入：确认清单、逐张取消、只改星级与旗标、成功/失败/不确定/只读、撤销（假 Lightroom，不碰真实照片）。"""
 import inspect
 import threading

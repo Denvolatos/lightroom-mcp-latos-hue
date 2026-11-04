@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """自动启动 Lightroom（0.13.0）：软件打开时，若设置里开着开关、Lightroom 还没在运行，就在后台把它最小化地启动起来。
 
 - 只会启动固定的 Lightroom.exe：路径必须是本机盘符里真实存在的、文件名为 Lightroom.exe 的文件；
