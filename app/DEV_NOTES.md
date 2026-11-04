@@ -717,3 +717,29 @@ photo_id 逐字取自第 ③ 项；按从好到坏排列；score 1–10；stars 
 ### 建议的下一步
 - 用户清掉 `~/LrMcp/app_settings.json` 里的 `wizard_done`（或新建一份设置）试第一次打开；再分别关掉 Lightroom、在增效工具管理器里停用 LrMCP，看清单能否给出正确的下一步。
 
+
+## 第十六阶段：检查更新（0.15.0）
+
+### 做了什么
+- **原则（用户已定）：只检查，用户点了才去看；绝不自动下载、自动安装、自动替换文件。**
+- **标签约定（做安装包/发布时必须遵守）：** 本仓库 releases 有两条版本线——Lightroom 插件/服务端（LrMCP）标签 `v0.14.0`；软件（Latos Hue）标签 `hue-v1.0.0`（独立前缀 `hue-v`）。`update_check.pick_latest` 只认 `hue-v` 前缀、`draft`/`prerelease` 都为假、`html_url` 合规的条目，按 x.y.z 数字取最大；`v` 前缀、缺段、带后缀（`-rc1`）的一律忽略。发软件版本时不要用 `v` 前缀，也不要把软件版本做成预发布（会被忽略）。
+- **逻辑（`app/update_check.py`，新文件）：** `AppUpdateChecker(current, enabled, http_get, open_url, spawn, clock, cache_file)`，HTTP、浏览器、起线程、时钟全部可注入。
+  - 请求：一次匿名 GET `https://api.github.com/repos/Denvolatos/lightroom-mcp-win/releases?per_page=30`，超时 8 秒，响应超 1 MB 就拒绝（`http_get` 多读 1 字节判断），UA 只有 `LatosHue/<版本>`，不带令牌/Cookie/用户数据。
+  - 缓存：`~/LrMcp/app_update_check.json`（服务端的是 `update_check.json`，互不覆盖），内容 `{checked_at, latest, url}`；24 小时内不再请求；读缓存时重新校验每个字段，坏文件/未来时间/不合规网址一律当没有缓存。失败不写缓存（下次启动再试）。
+  - 状态：`idle`（还不知道/已关闭）/`checking`/`latest`/`available`/`unavailable`。`state()` 只读内存/缓存，从不联网；联网只在后台线程。后台检查失败什么都不留（状态保持 idle）；手动检查失败显示“暂时无法检查（可能没联网）”。
+  - 开关：`start_background()` 在 `check_updates` 不是真布尔 `True` 时什么都不做，也不读缓存（关了就不出现“有新版本”）。**手动 `check_now()` 不受开关限制**（用户主动点的）——这是对“关掉后不发任何网络请求”的解释：指启动时的自动检查。
+  - 打开页面：`open_page()` 不收参数，只打开自己 `available` 状态下缓存的 url，并再次用 `valid_release_url` 校验：必须 `https`、主机恰为 `github.com`、无账号/端口、路径以 `/Denvolatos/lightroom-mcp-win/releases/` 开头且有后续、不含 `..`、无空白/控制字符、长度 ≤300。
+- **接口（`Api`）：** `update_state()`（不联网）、`check_update_now()`（立刻返回“检查中”，后台线程里查）、`open_update_page()`，三个都没有参数。`_start_background` 里调用 `start_background()`；`Api` 构造时不联网。
+- **设置：** `check_updates`（布尔，默认 True；`sanitize` 把非布尔改回 True，`update` 拒绝非布尔；旧文件缺这项照常读取）。`APP_VERSION` 升到 0.15.0。
+- **界面：** 顶栏在 `available` 时显示“有新版本 x.y.z”+“查看新版本”（`#updnote`）；设置新增“更新”一栏的开关；“关于”新增“检查更新”一行（按钮 + 结果文字 + 有新版本时的“查看新版本”）。页面启动后用 `updPoll` 轮询 `update_state`（最多约 20 秒，等后台首次检查完成），手动检查轮询到出结果为止。文字用 `textContent` 写入。
+- 测试：`app/tests/test_update_check.py`（94 个）；`ui_update_check.py`（无头 Edge + 假 `pywebview.api`）出截图 `app/docs/update_available.png` / `update_latest.png` / `update_unavailable.png` / `update_checking.png`（假数据）。版本断言 0.14.0→0.15.0 两处（`test_export.py`、`test_library_service.py`；`test_preview.py` 里的 0.14.0 是插件版本，不动）。
+- 全量：app 881 通过 1 跳过（符号链接用例，一直如此）；server 413 通过 0 跳过。测试没有联网、没有开浏览器、没有弹窗口。
+
+### 真机未验证
+1. **真实联网查询：** 本机到 api.github.com 的实际请求、未登录限流（60 次/小时）时的表现；当前仓库没有 `hue-v` release，所以只验证过“没有软件版本 → 已是最新”的路径（用假数据）。
+2. **浏览器打开：** 点“查看新版本”是否真的用系统默认浏览器打开对应 release 页面（`webbrowser.open`）。
+3. **顶栏提示外观：** 真实窗口里“有新版本”提示的位置、颜色与窄窗口下是否拥挤。
+4. 以后真正发 `hue-v` 版本时，用真实 release 复验一次：标签、`html_url`、草稿/预发布过滤。
+
+### 建议的下一步
+- 做安装包/发布流程时按上面的标签约定打 `hue-v` 标签；发布后在旧版本软件里点“检查更新”验证整条链路。
