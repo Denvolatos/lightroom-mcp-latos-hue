@@ -17,7 +17,9 @@ import queue
 import threading
 from pathlib import Path
 
-ASSETS = Path(__file__).resolve().parent / "web" / "assets"
+import frozen
+
+ASSETS = frozen.web_dir() / "assets"
 ICON_PNG = ASSETS / "latos-hue-ribbon-192.png"
 ICON_ICO = ASSETS / "latos-hue-ribbon.ico"
 WIDTH, HEIGHT = 460, 280

@@ -13,6 +13,7 @@ from pathlib import Path
 import webview
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import frozen  # noqa: E402
 from adjustments import AdjustmentTracker  # noqa: E402
 import lr_autostart  # noqa: E402
 import splash as splashmod  # noqa: E402
@@ -33,7 +34,7 @@ from preview import PreviewManager, PreviewServer, PreviewStore  # noqa: E402
 from photo_library import PhotoLibrary, ThumbStore  # noqa: E402
 from ports import STATE_DIR  # noqa: E402
 
-WEB = Path(__file__).resolve().parent / "web" / "index.html"
+WEB = frozen.web_dir() / "index.html"
 
 
 class Api:

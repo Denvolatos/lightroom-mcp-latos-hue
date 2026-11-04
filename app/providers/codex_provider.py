@@ -10,12 +10,12 @@ import threading
 import time
 from pathlib import Path
 
+from frozen import helper_command
 from claude_bridge import ENABLED_WRITE_TOOLS, MSG_TIMEOUT, READONLY_TOOLS, SYSTEM_PROMPT, TOOL_LABELS, WORKDIR
 from .base import AIProvider, NOT_INSTALLED, NOT_LOGGED_IN, READY, UNKNOWN, make_status
 
 TIMEOUT_SECONDS = 180
 TOOLS = READONLY_TOOLS + ENABLED_WRITE_TOOLS
-PROXY = Path(__file__).resolve().parent.parent / "codex_proxy.py"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
@@ -49,14 +49,15 @@ def check_login(path: str, run=subprocess.run) -> bool | None:
 
 
 def build_command(path: str, thread_id: str | None, workdir: Path, prompt: str) -> list[str]:
+    proxy_command, *proxy_args = helper_command("codex-proxy")
     cmd = [path, "exec", "resume"] if thread_id else [path, "exec"]
     cmd += ["--json", "--ignore-user-config", "--ignore-rules", "--strict-config", "--skip-git-repo-check"]
     for feature in ("shell_tool", "apps", "view_image", "multi_agent", "goals", "hooks",
                     "shell_snapshot", "skill_mcp_dependency_install"):
         cmd += ["--disable", feature]
     cmd += ["-c", 'web_search="disabled"', "-c", 'sandbox_mode="read-only"',
-            "-c", f"mcp_servers.lightroom_mcp.command={json.dumps(sys.executable.replace(os.sep, '/'))}",
-            "-c", f"mcp_servers.lightroom_mcp.args={json.dumps([str(PROXY).replace(os.sep, '/')])}",
+            "-c", f"mcp_servers.lightroom_mcp.command={json.dumps(proxy_command.replace(os.sep, '/'))}",
+            "-c", f"mcp_servers.lightroom_mcp.args={json.dumps([a.replace(os.sep, '/') for a in proxy_args])}",
             "-c", 'mcp_servers.lightroom_mcp.env_vars=["LRAPP_PORT", "LRAPP_TOKEN"]',
             "-c", f"mcp_servers.lightroom_mcp.enabled_tools={json.dumps(TOOLS)}",
             "-c", "mcp_servers.lightroom_mcp.required=true"]

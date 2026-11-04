@@ -15,6 +15,7 @@ import threading
 import time
 from pathlib import Path
 
+from frozen import helper_command, is_frozen
 from timing import TurnTimer
 
 SERVER_NAME = "lightroom_mcp"
@@ -82,20 +83,20 @@ def find_claude() -> str | None:
 def lightroom_server_config(state_file: Path | None = None) -> dict:
     """lightroom_mcp 服务怎么启动：开发时优先用仓库源码（最新、全部工具），没有源码才用打包好的 lrmcp.exe。
     源码方式经 app/lr_launcher.py 启动：端口按“最久未使用”优先，并把“插件是否已连上”写进状态文件（见 lr_launcher.py）。"""
-    if (REPO / "server" / "lightroom_mcp").exists():
-        env = {"PYTHONPATH": str(REPO / "server")}
+    if is_frozen() or (REPO / "server" / "lightroom_mcp").exists():
+        env = {} if is_frozen() else {"PYTHONPATH": str(REPO / "server")}   # 打包后 server 包已在程序里
         if state_file is not None:
             env["LRAPP_BRIDGE_STATE"] = str(state_file)
-        return {"type": "stdio", "command": sys.executable,
-                "args": [str(Path(__file__).resolve().parent / "lr_launcher.py")], "env": env}
+        command, *args = helper_command("lr-launcher")
+        return {"type": "stdio", "command": command, "args": args, "env": env}
     exe = REPO / "build" / "dist" / "lrmcp" / "lrmcp.exe"
     return {"type": "stdio", "command": str(exe), "args": []}
 
 
 def permission_server_config() -> dict:
     """确认服务的启动方式。端口与口令不写进文件，而是用环境变量占位，由窗口进程启动 claude 时传入。"""
-    return {"type": "stdio", "command": sys.executable,
-            "args": [str(Path(__file__).resolve().parent / "permission_server.py")],
+    command, *args = helper_command("permission-server")
+    return {"type": "stdio", "command": command, "args": args,
             "env": {"LRAPP_PORT": "${LRAPP_PORT}", "LRAPP_TOKEN": "${LRAPP_TOKEN}"}}
 
 
