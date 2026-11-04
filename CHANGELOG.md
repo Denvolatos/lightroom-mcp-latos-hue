@@ -3,6 +3,10 @@
 Versions: a new feature raises the middle number, a small fix the last one. The server version lives in
 `server/lightroom_mcp/__init__.py`, the plug-in version in `plugin/lrmcp.lrdevplugin/Version.lua` (and `Info.lua`).
 
+## 1.0.2 (2026-11-04) — version sync with Latos Hue 1.0.2
+
+- Version number only: the plug-in and the MCP server move to **1.0.2** to match Latos Hue 1.0.2 (which fixes an installer "access denied" problem caused by Lightroom being started with the app's own folder; see `app/CHANGELOG.md`). The tools and how to use them are unchanged. After upgrading, reload the plug-in once in Lightroom (File > Plug-in Manager > Reload Plug-in). If you installed Latos Hue 1.0.0 / 1.0.1 with auto-start of Lightroom, close Latos Hue and Lightroom before upgrading.
+
 ## 1.0.1 (2026-11-04) — unified version number
 
 - **One product, one version number.** The plug-in and MCP server (LrMCP) now share the version number of the desktop app Latos Hue: this release moves LrMCP from 0.15.0 to **1.0.1**. From now on every release carries both installers (`LatosHue-Setup-1.0.1.exe` and `LrMCP-Setup-v1.0.1.exe`) under one tag (`v1.0.1`). Nothing else changed in the plug-in or the server; the tools and how to use them are the same as in 0.15.0. After upgrading, reload the plug-in once in Lightroom (File > Plug-in Manager > Reload Plug-in).
