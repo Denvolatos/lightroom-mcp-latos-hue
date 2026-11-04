@@ -812,3 +812,14 @@ photo_id 逐字取自第 ③ 项；按从好到坏排列；score 1–10；stars 
 - **改法（只动 `app/web/index.html` 和 `app/main.py`）：** 顶栏和中间栏工具条允许折行，里面的按钮、标签、状态一律不换行不压扁；状态提示单行缩略（`text-overflow: ellipsis`，原来就有 `title` 放完整内容）；三栏改为 `clamp(220px, 26vw, 340px) / 1fr / clamp(240px, 28vw, 360px)`，≤800px 时左右栏固定 220px；≤900px 时“并排”的两张图上下排；左栏预设切换、图库搜索条、聊天输入条加了 `min-width: 0` 或折行；窗口最小尺寸改为 960×620。
 - **验收：** 新增 `app/tests/ui_layout_check.py`（无头 Edge + 假接口，不进 pytest），主界面在宽度 640、800、960、1100、1280、1440、1920 出图，设置/环境检查/导出/导入对话框在 1100 和 800 宽出图，并用脚本检查“页面横向溢出、按钮换行、控件超出窗口、对话框超出窗口”，全部通过；截图在 `app/docs/layout_*.png`（只含假数据），并逐张人工看过。
 - **真机未验证：** 真实 Windows 缩放 125% / 150% 下的外观，以及 pywebview 的最小尺寸在真机上是否按缩放换算生效；本机无头 Edge 只能按“网页宽度”模拟。
+
+
+# SPDX 许可证抬头（2026-11-04）
+
+- 所有自有源文件开头两行：`SPDX-License-Identifier: AGPL-3.0-only` 和 `Copyright (C) 2026 Denvolatos and contributors`（各语言用自己的注释符：`#`、`--`、`;`、HTML 注释）。
+- **选 "-only" 而非 "-or-later"**：项目对外承诺的是 AGPL-3.0（README、CONTRIBUTING），贡献者同意的也是 3.0，没有人授权"或更新版本"；以后 AGPL 出新版本，是否升级要另行决定。
+- 范围：app/ server/ plugin/ 下的 .py .lua；experiments/ 下的 .lua（都是本项目自己写的 Lightroom 实验脚本）；根目录与 server/ 的 .ps1；installer/ 的 .iss；app/web/index.html（放在 `<!doctype html>` 之后的 HTML 注释里，用无头 Edge 实测 `document.compatMode` 仍是 `CSS1Compat`，没进怪异模式）；app/latoshue.spec；`server/exp2_server.py` 等自有实验脚本。保留 BOM、shebang、编码声明、原有行尾。
+- 不加：.bat（保持纯 ASCII 且很短）、LICENSE、*.md、*.txt（含 installer/*.txt 数据）、图片/图标、build/ 产物、docs/（目前没有 docs/sdk，仓库里没有 Adobe SDK 文件）。
+- 守卫测试：`app/tests/test_spdx_headers.py`，范围与上面一致；新增文件忘了抬头会测出来。
+- 打包的第三方库清单见 THIRD_PARTY_NOTICES.md B 节；许可证文本副本在 `licenses/`（尚未让安装包带上，待决定）。
+- 待决定：PyInstaller 把自身的 `PyInstaller.*` Python 模块（GPL-2.0-or-later，无 bootloader 例外）和 `_pytest`、`setuptools`、`pygments` 等打进了 PYZ，多半可以在 spec 里 `excludes` 掉，减少需要声明的内容；未改 spec。
