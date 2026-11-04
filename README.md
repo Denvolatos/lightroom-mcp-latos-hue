@@ -1,4 +1,84 @@
-# 📸 Lightroom MCP（Windows）
+# 📸 Latos Hue（修图助手）
+
+**一个 Windows 桌面软件：在一个窗口里导入照片、挑片、让 AI 帮你修图、再导出，Adobe Lightroom Classic 在后台当修图引擎。**
+
+![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Latos Hue 1.0.0](https://img.shields.io/badge/Latos%20Hue-1.0.0-brightgreen)
+
+[English](README.en.md) · [更新日志（软件）](app/CHANGELOG.md) · [安全说明](SECURITY.md) · [参与贡献](CONTRIBUTING.md) · [LrMCP（给 AI 客户端用的服务端）](#lrmcp给-ai-客户端直接用的服务端)
+
+> 🤖 **你是 AI 助手，用户让你看这个仓库？** 请读 [`AI_GUIDE.md`](AI_GUIDE.md)（那是 LrMCP 服务端的安装和使用步骤）。
+
+![Latos Hue：图库里按文件夹分组浏览照片（示例照片）](app/docs/gallery_groups.png)
+
+![Latos Hue：AI 挑片，给出排名和星级建议，确认后才写入（示例照片）](app/docs/pick_result.png)
+
+*截图里的照片和文件夹都是测试用的示例。*
+
+## ✨ 能做什么
+
+- **导入：** 从相机存储卡或任意文件夹选照片，复制一份到软件的工作文件夹（原片不动），并加进 Lightroom 目录。
+- **图库选片：** 在软件里按文件夹分组浏览缩略图，搜索、筛选、排序、多选；选中的照片就是 AI 要处理的对象。
+- **AI 挑片：** 选几张照片让 AI 比较，给出排名和星级、旗标建议；先显示在软件里，**你确认后才会写入**。
+- **AI 修图：** 用说话的方式告诉 AI 想要的效果。可以打开"逐项确认"（AI 每改一步都先问你），**每一步都能撤销**，也能一键还原到修图前。
+- **预设、经验、收藏：** 保存你自己的预设，记下 AI 学到的调色经验，收藏喜欢的照片。这些只存在你自己的电脑上。
+- **导出：** 导出 JPEG 或 TIFF（8 位 / 16 位），自己选文件夹和尺寸，不会覆盖已有文件。
+- **省心的小功能：** 可选的自动启动 Lightroom、第一次使用的"环境检查"向导、检查更新（只提示，不自动安装）。
+
+AI 可以用 **Claude**（调用你电脑上已安装并登录的 Claude Code 命令行）或 **Codex**（调用已安装并登录的 Codex 命令行）。
+
+## 📦 安装
+
+**系统要求：** Windows 10 / 11；已安装 **Adobe Lightroom Classic**（在 15.x 上开发和测试）；已安装并登录的 **Claude Code** 或 **Codex** 命令行（至少一个）。
+
+1. 到 [Releases](https://github.com/Denvolatos/lightroom-mcp-win/releases) 下载 `LatosHue-Setup-1.0.0.exe`（发布标签形如 `hue-v1.0.0`），核对页面上的 SHA-256。
+2. **在你自己的资源管理器里双击运行**（不要通过 Claude 桌面版启动，见下面 LrMCP 部分的 MSIX 提醒）。不需要管理员权限，不需要装 Python。
+   安装包没有代码签名，Windows SmartScreen 可能提示"未知发布者"，点"更多信息"→"仍要运行"即可。
+3. 安装程序会自动把 Lightroom 插件装好。**装完请重启 Lightroom。**
+4. 如果提示缺少 Microsoft Edge WebView2 运行库（Windows 11 自带，少数 Windows 10 没有），按提示到微软官方页面下载安装。
+
+卸载时程序和插件会被删除，你的设置和经验笔记默认保留（会问你要不要一起删）；你的照片永远不会被删除。
+
+## 🚀 第一次使用
+
+1. 打开 Latos Hue，会出现"**环境检查**"清单：照片工作文件夹、Lightroom、Lightroom 插件、AI 命令行。哪项没就绪，它会告诉你下一步怎么做（比如"选择文件夹"、"选择 Lightroom 程序"、先在终端里登录 Claude 或 Codex）。随时可以在设置里重新打开。
+2. 在设置里选你用的 AI（Claude 或 Codex）。需要的话打开"自动启动 Lightroom"。
+3. 点"导入"，选一个放着照片的文件夹，确认后照片会复制到你的工作文件夹并加进 Lightroom 目录。
+4. 在左边的图库里点选照片，在右边告诉 AI 你想要的效果，或者选几张照片点"AI 挑片"。
+5. 对结果不满意就点"撤销"；满意了点"导出"。
+
+> 建议先用几张测试照片试一试，再用在重要的作品上；重要作品请先备份 Lightroom 目录（`.lrcat`）。
+
+## 🔒 隐私与数据
+
+- **你的照片原片只在本机处理**，不会被软件上传。
+- **修图和挑片时，选中照片的预览图会发送给你选择的 AI 服务**（Claude 或 Codex 对应的服务商）。除此之外软件不会上传照片。
+- 软件**不保存你的账号，也不代你登录**；登录由你自己在 Claude / Codex 命令行里完成。
+- 设置、预设、收藏和经验笔记都保存在你自己电脑上的 `C:\Users\<你>\LrMcp`。
+- **检查更新**只访问 GitHub 上本项目的发布页，不发送任何个人信息；可以在设置里关掉。
+- 没有任何使用数据统计。
+
+更详细的说明见 [SECURITY.md](SECURITY.md)。
+
+## 🤖 关于 AI 接入的说明
+
+Latos Hue 通过调用**你电脑上已经安装并登录好的** Claude Code 或 Codex 命令行来完成和 AI 的对话。它不绕过任何登录或使用限额，用的就是你自己账号的额度。请自行查阅你所用服务商（Anthropic、OpenAI 等）的使用条款，确认你的用法符合其规定。
+
+## ⚠️ 已知限制
+
+- 只支持 Windows；需要已安装的 Lightroom Classic，以及已安装并登录的 Claude Code 或 Codex 命令行。
+- 安装包没有做代码签名，Windows SmartScreen 可能提示"未知发布者"（见上面的安装步骤）。
+- 下面这些还没有在真机上充分验证：Windows 125% / 150% 缩放下的外观；100 张以上的大批量导入和真实存储卡；原始尺寸的 16 位 TIFF 导出。
+- 导出目前只有 JPEG 和 TIFF，没有 PNG。
+- 没有 Mac 版。中间栏的"多版本"对比页暂未提供。
+- 蒙版（局部调整）不能由 AI 修改。
+
+完整的版本记录和各阶段的"待验证"清单见 [app/CHANGELOG.md](app/CHANGELOG.md)。
+
+---
+
+# LrMCP：给 AI 客户端直接用的服务端
+
+下面是 Latos Hue 背后用的 Lightroom 插件和 MCP 服务（**LrMCP**），它也可以**单独**装在 Claude Code、Codex 等 MCP 客户端里，不用 Latos Hue。版本线独立于 Latos Hue，见 [CHANGELOG.md](CHANGELOG.md)。
 
 **让 Claude / Codex 帮你看 Adobe Lightroom Classic 里的照片。**
 一个 Lightroom 插件加一个小型 MCP 服务：能看到你选中的照片、读取调整参数，并把预览图和直方图数字交给 AI。
@@ -6,13 +86,9 @@
 
 ![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.15.0-orange)
 
-[English](README.en.md) · [更新日志](CHANGELOG.md) · [安全说明](SECURITY.md) · [参与贡献](CONTRIBUTING.md)
-
-> 🤖 **你是 AI 助手，用户让你看这个仓库？** 请读 [`AI_GUIDE.md`](AI_GUIDE.md)，里面有完整的安装和使用步骤。
-
 > ⚠️ **早期版本（0.15.0）**：只在 Windows 11 + Lightroom Classic 15.2 上测过。安装包已发布但尚未在干净电脑上做过安装/卸载测试（待验证）。与 Adobe 无关联。
 
-## ✨ 能做什么
+### ✨ 能做什么
 
 | 工具 | 给 AI 的内容 |
 |---|---|
@@ -37,7 +113,7 @@
 例子：选中一张照片，对 AI 说「看看我选中的这张，曝光有什么问题」。它拿到图片和 `平均亮度 77.6`、`冷暖指数 −9.9%`
 这样的数字，就能有依据地说「偏暗、偏冷」。
 
-### 「修改」是什么意思，怎么保证安全
+#### 「修改」是什么意思，怎么保证安全
 
 - **只改滑块，只改一小张清单**：89 个滑块（曝光、上面列的 10 个全局滑块、24 个 HSL 值、**RAW 照片的色温 / 色调**、**颜色分级**、**相机校准**、**参数曲线**、**锐化 / 降噪 / 暗角 / 颗粒 / 去边**、**裁剪与拉直**），外加 **4 条点曲线**（亮度和红绿蓝）。蒙版不能改（实测通过 SDK 写蒙版不可靠）；预设可以套用（不带蒙版的）；JPEG 没有开尔文值，不能改白平衡。
 - **范围限制**（曝光 ±5，其余 ±100）和**单次限幅**（曝光 ±1，其余 ±30）：跳得太大会被拒绝，并提示 AI 分几步改、每步看一眼预览。
@@ -50,7 +126,7 @@
 
 它会创建的文件：预览图（不会加入你的目录）、口令、日志和保存下来的修改记录，都在 `C:\Users\<你>\LrMcp`。
 
-## 🏗️ 结构
+### 🏗️ 结构
 
 ```
 Claude / Codex ──(MCP, stdio)──▶ lrmcp（Python 服务，本机队列 127.0.0.1:58770）
@@ -62,18 +138,18 @@ Claude / Codex ──(MCP, stdio)──▶ lrmcp（Python 服务，本机队列 
 - 插件只执行固定的白名单命令，不接受请求里的文件路径。写入需要：白名单里的滑块、范围内的值、不超过单次限幅、没开只读开关。
 - 注意：工具返回的图片和照片信息会发给你使用的 AI 服务，见 [SECURITY.md](SECURITY.md)。
 
-## 🧰 需要什么
+### 🧰 需要什么
 
 - Windows、Adobe Lightroom Classic（在 15.2 上开发；SDK 15.x）、Python 3.10+（用 3.12 测试）。
 - Claude Code、Codex 或其他 MCP 客户端（测试过 Claude Code，没测过 Codex）。
 
-## 📦 用安装包安装（免装 Python）
+### 📦 用安装包安装（免装 Python）
 
 1. 到 [Releases](https://github.com/Denvolatos/lightroom-mcp-win/releases/latest) 下载 `LrMCP-Setup-*.exe`，并核对页面上的 SHA-256。
 2. **在你自己的资源管理器里双击运行**（不要通过 Claude 桌面版启动，见下面的 MSIX 提醒）。程序没有代码签名，Windows SmartScreen 会提示"未知发布者"。
 3. 安装完重启 Lightroom 和你的 AI 助手，让它调用 `lr_status`。
 
-## 🚀 从源码安装
+### 🚀 从源码安装
 
 1. **服务**（普通 PowerShell）：
    ```powershell
@@ -93,34 +169,13 @@ Claude / Codex ──(MCP, stdio)──▶ lrmcp（Python 服务，本机队列 
 
 Claude 桌面版暂不自动登记（配置文件位置取决于安装方式），请在 *设置 → 开发者 → 编辑配置* 里手动添加命令。
 
-## 💬 反馈
+### 💬 反馈
 
 遇到问题，或者在别的 AI 应用里跑通了？欢迎 **[提交 issue](../../issues/new/choose)**（问题反馈、兼容性报告、功能建议）
 或到 **[讨论区](../../discussions)** 聊。表单会让你贴上 `lr_doctor` 的输出，大多数问题一看就明白。
 请不要上传照片或 Lightroom 目录。本软件不收集任何使用数据。
 
-## 🔮 即将推出（构想中）
-
-> 这是正在构想的方向，**还没有发布，也没有发布时间**，内容可能调整。
-
-我们想做一个**可视化修图软件**：打开它，修图的所有操作都在一个窗口里完成，不用在多个软件之间来回切换。
-
-![修图助手界面模板（假数据，功能未完成）](docs/images/app-template.png)
-
-*上图只是界面模板，照片和数据都是假的，功能还没做。模板代码在 [`app` 分支](https://github.com/Denvolatos/lightroom-mcp-win/tree/app)。*
-
-想做到的样子：
-
-- **导入：** 从相机 SD 卡选一个文件夹，复制一份到软件自己的文件夹，卡上的原片不动；分类或平铺随你。
-- **三栏界面：** 左边管文件，中间是大图和前后对比，右边是和 AI 的对话，以及"这一轮改了哪些参数"。
-- **AI 挑片：** 选几张照片让 AI 比较，结果先显示在软件里。
-- **"逐步询问"开关：** 初调时让 AI 直接改，细调时每一步先问你。
-- **导出：** 像 Office 的"另存为"，自己选位置和格式。
-- **你自己的预设、收藏和 AI 学到的调色经验**，只保存在你自己的电脑上。
-
-不变的原则：照片不上传，每一步都能撤销，调色的技巧由每个人自己的 AI 去学，我们只做这个"壳子"。怎么连接你的 AI，还在确定中。
-
-## 🗺️ 路线图
+### 🗺️ 路线图
 
 | 版本 | 计划 |
 |---|---|
@@ -136,23 +191,32 @@ Claude 桌面版暂不自动登记（配置文件位置取决于安装方式）�
 
 蒙版、AI 功能取决于 Adobe SDK 能提供什么，暂不承诺。
 
-## 📚 文档
+### 📚 文档
 
 - [`docs/方案.md`](docs/方案.md)：方案与设计
 - [`docs/实验记录.md`](docs/实验记录.md)：在 Lightroom Classic 15.2 上的实测（例如：写入必须放进 `withWriteAccessDo`，快照和撤销不可靠）
 - [`docs/实现记录.md`](docs/实现记录.md)：实现中的发现与验证结果
 
-## 🙏 另见
+### 🙏 另见
 
 其他 Lightroom Classic MCP 项目，参考过思路（没有复制代码）：
 [Automaat/lightroom-mcp](https://github.com/Automaat/lightroom-mcp)（TypeScript，MIT，工具很多，支持 Windows 和 macOS）、
 [noopz/lightroom_mcp](https://github.com/noopz/lightroom_mcp)（Python，Apache-2.0）。
 本项目的目标是：小、对修改很谨慎、用 Python、方便不懂编程的人安装。
 
-## ⚖️ 许可证与声明
+---
 
-本项目的代码以 [GNU AGPL-3.0](LICENSE) 授权。简单说：你可以自由地使用、修改和分享；如果你把修改后的版本分发出去（或通过网络提供给别人使用），必须同样以 AGPL-3.0 公开源码，不能闭源。
+## ⚖️ 许可证
+
+本项目的代码以 [GNU AGPL-3.0](LICENSE)（`AGPL-3.0-only`）授权。简单说：你可以自由地使用、修改和分享；如果你把修改后的版本分发出去（或通过网络提供给别人使用），必须同样以 AGPL-3.0 公开源码，不能闭源。
 从 2026-11-03 的提交起按 AGPL-3.0 授权；此前已发布的 v0.1.0 至 v0.14.0 仍按 MIT 授权。
-第三方依赖见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-Adobe、Lightroom 是 Adobe Inc. 的商标；本项目与 Adobe 无关联，未获其认可或赞助。
-Adobe Lightroom Classic SDK 不在本仓库内，也不要提交。
+第三方依赖及其许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)（Latos Hue 安装包里也带了一份，装在程序目录下）。
+
+**本软件不含任何 Adobe 软件，也不是 Adobe 官方产品。** Adobe、Lightroom 是 Adobe Inc. 的商标；本项目与 Adobe 无关联，未获其认可或赞助。
+Adobe Lightroom Classic SDK 不在本仓库内，也不要提交。你需要自己安装 Lightroom Classic。
+
+## 🙌 贡献与致谢
+
+欢迎提 issue 和 PR，请先看 [CONTRIBUTING.md](CONTRIBUTING.md)（你提交的贡献按 AGPL-3.0 授权）。问题反馈、兼容性报告和功能建议请到 [issues](../../issues/new/choose)，请不要上传照片或 Lightroom 目录。
+
+感谢贡献者 **Galio1991**：还原冲突保护、挑片与修改复用流程（PR #1、#2，按 MIT 许可提交，版权声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)），以及 Latos Hue 的 Codex 接入和多项安全修复（PR #4、#5、#6）。

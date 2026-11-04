@@ -17,6 +17,8 @@ AI client as a local stdio MCP server, restart both. Verify with the tool `lr_st
 
 ## 1. What this is
 
+> This guide covers the **LrMCP server** (for AI clients). If the user wants the **Latos Hue desktop app** (a Windows app with its own window that starts Claude or Codex itself), point them to `LatosHue-Setup-*.exe` on the GitHub Releases page and `README.en.md`; no MCP registration is needed for that.
+
 A small tool that lets an AI "see" and gently adjust the photo a user selected in Adobe Lightroom Classic. Two parts:
 
 - **Lightroom plug-in** (Lua): runs inside Lightroom and only executes a fixed whitelist of commands.

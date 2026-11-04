@@ -1,4 +1,84 @@
-# 📸 Lightroom MCP for Windows
+# 📸 Latos Hue
+
+**A Windows desktop app: import photos, pick the best ones, let an AI retouch them, and export, all in one window. Adobe Lightroom Classic works in the background as the editing engine.**
+
+![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Latos Hue 1.0.0](https://img.shields.io/badge/Latos%20Hue-1.0.0-brightgreen)
+
+[中文说明](README.md) · [Changelog (app)](app/CHANGELOG.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [LrMCP (server for AI clients)](#lrmcp-the-server-for-ai-clients)
+
+> 🤖 **AI assistant reading this for a user?** Read [`AI_GUIDE.md`](AI_GUIDE.md) (it covers installing and using the LrMCP server).
+
+![Latos Hue: browsing photos grouped by folder in the gallery (sample photos)](app/docs/gallery_groups.png)
+
+![Latos Hue: AI photo picking gives a ranking and star suggestions, written only after you confirm (sample photos)](app/docs/pick_result.png)
+
+*The photos and folders in the screenshots are test samples. The interface is in Chinese.*
+
+## ✨ What it does
+
+- **Import:** choose photos from a memory card or any folder; they are copied into the app's work folder (the originals are not touched) and added to your Lightroom catalog.
+- **Gallery:** browse thumbnails grouped by folder, search, filter, sort and multi-select; the selected photos are what the AI works on.
+- **AI photo picking:** select a few photos and let the AI compare them; it suggests a ranking plus star and flag ratings, shown in the app first, and **written only after you confirm**.
+- **AI retouching:** tell the AI the look you want in plain words. You can turn on "confirm each step" (the AI asks before every change), **every step can be undone**, and one click returns the photo to how it was before.
+- **Presets, experience, favourites:** save your own presets, keep notes on the colour experience the AI learned, and mark favourite photos. They live only on your own computer.
+- **Export:** JPEG or TIFF (8 or 16 bit), you choose the folder and size, existing files are never overwritten.
+- **Small conveniences:** optional automatic start of Lightroom, a first-run "environment check" wizard, and an update check (it only tells you, it never installs by itself).
+
+The AI can be **Claude** (the Claude Code command line already installed and signed in on your computer) or **Codex** (the Codex command line, installed and signed in).
+
+## 📦 Install
+
+**Requirements:** Windows 10 / 11; **Adobe Lightroom Classic** installed (developed and tested on 15.x); and the **Claude Code** or **Codex** command line installed and signed in (at least one).
+
+1. Download `LatosHue-Setup-1.0.0.exe` from [Releases](https://github.com/Denvolatos/lightroom-mcp-win/releases) (release tags look like `hue-v1.0.0`) and compare the SHA-256 on the page.
+2. **Double-click it from your own File Explorer** (not from a shell started by Claude Desktop, see the MSIX note in the LrMCP part below). No administrator rights and no Python needed.
+   The installer is not code-signed, so Windows SmartScreen may say "unknown publisher": click "More info", then "Run anyway".
+3. The installer puts the Lightroom plug-in in place for you. **Restart Lightroom after installing.**
+4. If it says the Microsoft Edge WebView2 runtime is missing (Windows 11 has it, a few Windows 10 machines do not), download it from Microsoft's official page as the message suggests.
+
+Uninstalling removes the program and the plug-in; your settings and experience notes are kept by default (it asks whether to delete them too); your photos are never deleted.
+
+## 🚀 First use
+
+1. Open Latos Hue. An "**environment check**" list appears: photo work folder, Lightroom, the Lightroom plug-in, the AI command line. For anything not ready it tells you what to do next (for example "choose a folder", "choose the Lightroom program", or sign in to Claude or Codex in a terminal first). You can reopen it any time from Settings.
+2. In Settings choose your AI (Claude or Codex). Turn on "start Lightroom automatically" if you like.
+3. Click "Import" (导入), pick a folder with photos, confirm; the photos are copied to your work folder and added to the Lightroom catalog.
+4. Click photos in the gallery on the left and tell the AI the look you want on the right, or select several photos and click "AI 挑片" (AI picking).
+5. Not happy? Click "撤销" (undo). Happy? Click "导出" (export).
+
+> Try it on a few test photos first, and back up your Lightroom catalog (`.lrcat`) before using it on important work.
+
+## 🔒 Privacy and data
+
+- **Your original photos are processed on your computer only**; the app does not upload them.
+- **When you retouch or pick photos, a preview of the selected photos is sent to the AI service you chose** (the provider behind Claude or Codex). The app uploads nothing else about your photos.
+- The app **does not store your account and does not sign in for you**; you sign in yourself in the Claude / Codex command line.
+- Settings, presets, favourites and experience notes are stored on your own computer in `C:\Users\<you>\LrMcp`.
+- The **update check** only contacts this project's release page on GitHub and sends no personal information; you can turn it off in Settings.
+- No usage data is collected.
+
+More detail in [SECURITY.md](SECURITY.md).
+
+## 🤖 About the AI connection
+
+Latos Hue talks to the AI by calling the **Claude Code or Codex command line that is already installed and signed in on your computer**. It does not bypass any sign-in or usage limit; it uses your own account's allowance. Please read the terms of use of the provider you choose (Anthropic, OpenAI, ...) yourself and make sure your use complies with them.
+
+## ⚠️ Known limitations
+
+- Windows only; needs Lightroom Classic and a signed-in Claude Code or Codex command line.
+- The installer is not code-signed; Windows SmartScreen may show "unknown publisher" (see the install steps).
+- Not yet verified well enough on real machines: the look at 125% / 150% Windows scaling; bulk imports of more than 100 photos and real memory cards; full-size 16-bit TIFF export.
+- Export is JPEG and TIFF only, no PNG.
+- No Mac version. The "multiple versions" comparison page in the middle column is not available yet.
+- The AI cannot change masks (local adjustments).
+
+The full version history and the per-stage "still to verify" lists are in [app/CHANGELOG.md](app/CHANGELOG.md) (in Chinese).
+
+---
+
+# LrMCP: the server for AI clients
+
+What follows is the Lightroom plug-in and MCP server (**LrMCP**) that Latos Hue is built on. You can also install it **on its own** in Claude Code, Codex or another MCP client, without Latos Hue. Its version line is independent of Latos Hue; see [CHANGELOG.md](CHANGELOG.md).
 
 **Let Claude or Codex look at your photos in Adobe Lightroom Classic.**
 A Lightroom plug-in plus a small MCP server. It can see the photo you selected, read its develop settings, and show
@@ -7,14 +87,10 @@ and save old values for restoration.
 
 ![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![Status: early](https://img.shields.io/badge/status-early%200.15.0-orange)
 
-[中文说明](README.md) · [Changelog](CHANGELOG.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md)
-
-> 🤖 **AI assistant reading this for a user?** Read [`AI_GUIDE.md`](AI_GUIDE.md): it has the whole install and usage procedure.
-
 > ⚠️ **Early version (0.15.0).** Tested only on Windows 11 with Lightroom Classic 15.2. An installer is published, but it has not been install/uninstall-tested on a clean machine yet (待验证).
 > Not affiliated with Adobe.
 
-## ✨ What it does
+### ✨ What it does
 
 | Tool | What it gives the assistant |
 |---|---|
@@ -40,7 +116,7 @@ Example: select a photo and ask *"Look at the selected photo and tell me what is
 The assistant gets the picture and numbers such as `mean brightness 77.6`, `warm/cool index −9.9 %` and can say
 *"a bit dark and cool"* with evidence.
 
-### What changing means, and how it is kept safe
+#### What changing means, and how it is kept safe
 
 - **Only sliders, only a short list**: 89 sliders (exposure, the ten global ones above, 24 HSL values, **temperature / tint of RAW photos**, **colour grading**, **camera calibration**, **parametric curve**, **sharpening / noise reduction / vignettes / grain / defringe**, **crop and straighten**)
   plus **4 point curves** (luminance, red, green, blue). Masks cannot be changed (writing them through the SDK was measured to be unreliable); presets without masks can be applied; JPEGs have no kelvin values, so their white balance cannot be changed.
@@ -60,7 +136,7 @@ The assistant gets the picture and numbers such as `mean brightness 77.6`, `warm
 Files it creates: preview JPEGs (not added to your catalog), a token, a log and the saved change records, all in
 `C:\Users\<you>\LrMcp`.
 
-## 🏗️ How it works
+### 🏗️ How it works
 
 ```
 Claude / Codex ──(MCP, stdio)──▶ lrmcp (Python server, local queue on 127.0.0.1:58770)
@@ -74,18 +150,18 @@ Claude / Codex ──(MCP, stdio)──▶ lrmcp (Python server, local queue on 
   slider, a value in range, a small enough step, and no read-only switch.
 - Note: the images and photo information the tools return go to the AI service you use. See [SECURITY.md](SECURITY.md).
 
-## 🧰 Requirements
+### 🧰 Requirements
 
 - Windows, Adobe Lightroom Classic (developed on 15.2; SDK 15.x), Python 3.10+ (tested with 3.12).
 - Claude Code, Codex, or another MCP client (Claude Code was tested; Codex was not).
 
-## 📦 Install with the installer (no Python needed)
+### 📦 Install with the installer (no Python needed)
 
 1. Download `LrMCP-Setup-*.exe` from [Releases](https://github.com/Denvolatos/lightroom-mcp-win/releases/latest) and compare the SHA-256 on the page.
 2. **Double-click it from your own File Explorer** (not from a shell started by Claude Desktop, see the MSIX note below). It is not code-signed, so Windows SmartScreen shows "unknown publisher".
 3. Restart Lightroom and your AI assistant, then have it call `lr_status`.
 
-## 🚀 Install from source
+### 🚀 Install from source
 
 1. **Server** (normal PowerShell):
    ```powershell
@@ -106,34 +182,13 @@ Claude / Codex ──(MCP, stdio)──▶ lrmcp (Python server, local queue on 
 Claude Desktop is not registered automatically (its config file location depends on how it was installed); add the
 command by hand under *Settings → Developer → Edit Config*.
 
-## 💬 Feedback
+### 💬 Feedback
 
 Found a problem, or got it working in another AI app? **[Open an issue](../../issues/new/choose)** (bug report,
 compatibility report, feature request) or start a **[discussion](../../discussions)**. The forms ask for the output of
 `lr_doctor`, which makes most problems easy to find. Please never attach photos or catalogs. No usage data is collected.
 
-## 🔮 Coming soon (an idea, not released)
-
-> This is a direction we are thinking about. **It is not released and has no date**; details may change.
-
-We would like to build a **visual photo-retouching app**: open it and do all the editing in one window, without switching between several programs.
-
-![Interface template of the retouching app (fake data, features not done)](docs/images/app-template.png)
-
-*The picture above is only an interface template: the photos and data are fake and the features are not built. The template code is on the [`app` branch](https://github.com/Denvolatos/lightroom-mcp-win/tree/app).*
-
-What we have in mind:
-
-- **Import:** pick a folder on the camera's SD card and copy it into the app's own folder; the originals on the card are not touched; sort into folders or keep it flat.
-- **Three columns:** files on the left, the big picture with before/after in the middle, the chat with the AI and "what this round changed" on the right.
-- **Picking photos:** choose a few photos and let the AI compare them; the result is shown in the app first.
-- **A "ask me step by step" switch:** let the AI just edit during the first rough pass, and have it ask before every step during fine work.
-- **Export:** like Office's "Save as": you pick the place and the format.
-- **Your own presets, favourites and the colour experience your AI learned**, kept only on your own computer.
-
-The principles stay: photos are not uploaded, every step can be undone, each person's own AI learns the colour technique, and we only build the "shell". How it connects to your AI is still being decided.
-
-## 🗺️ Roadmap
+### 🗺️ Roadmap
 
 | Version | Plan |
 |---|---|
@@ -149,24 +204,32 @@ Reported by the contributor: on Lightroom Classic 15.0 with an isolated test cat
 
 Masks and AI features depend on what Adobe's SDK offers and are not promised.
 
-## 📚 Docs
+### 📚 Docs
 
 Design notes are in Chinese for now: [`docs/方案.md`](docs/方案.md) (plan), [`docs/实验记录.md`](docs/实验记录.md) (what was
 measured on Lightroom Classic 15.2: e.g. writes need `withWriteAccessDo`, snapshots and undo are unreliable),
 [`docs/实现记录.md`](docs/实现记录.md) (implementation notes).
 
-## 🙏 See also
+### 🙏 See also
 
 Other Lightroom Classic MCP projects, studied for ideas (no code was copied):
 [Automaat/lightroom-mcp](https://github.com/Automaat/lightroom-mcp) (TypeScript, MIT, many tools, Windows and macOS)
 and [noopz/lightroom_mcp](https://github.com/noopz/lightroom_mcp) (Python, Apache-2.0).
 This project aims to be small, careful about changes, Python-based and easy to install for non-programmers.
 
-## ⚖️ License and disclaimer
+---
 
-The code of this project is licensed under the [GNU AGPL-3.0](LICENSE). In short: you may use, change and share it freely; if you
-distribute a modified version (or let others use it over a network) you must publish its source under the AGPL-3.0 as well, not
-keep it closed. The AGPL-3.0 applies from the commits of 2026-11-03 on; the releases v0.1.0 to v0.14.0 published before remain under the MIT license.
-Third-party packages: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-Adobe and Lightroom are trademarks of Adobe Inc.; this project is not affiliated with, endorsed or sponsored by Adobe.
-The Adobe Lightroom Classic SDK is not included and must not be committed.
+## ⚖️ License
+
+The code of this project is licensed under the [GNU AGPL-3.0](LICENSE) (`AGPL-3.0-only`). In short: you may use, change and share it freely; if you distribute a modified version (or let others use it over a network) you must publish its source under the AGPL-3.0 as well, not keep it closed.
+The AGPL-3.0 applies from the commits of 2026-11-03 on; the releases v0.1.0 to v0.14.0 published before remain under the MIT license.
+Third-party packages and their licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) (the Latos Hue installer also puts a copy in the program folder).
+
+**This software contains no Adobe software and is not an Adobe product.** Adobe and Lightroom are trademarks of Adobe Inc.; this project is not affiliated with, endorsed or sponsored by Adobe.
+The Adobe Lightroom Classic SDK is not included in this repository and must not be committed. You need to install Lightroom Classic yourself.
+
+## 🙌 Contributing and thanks
+
+Issues and pull requests are welcome; please read [CONTRIBUTING.md](CONTRIBUTING.md) first (your contributions are licensed under the AGPL-3.0). For bug reports, compatibility reports and feature requests use [issues](../../issues/new/choose); please never attach photos or catalogs.
+
+Thanks to the contributor **Galio1991**: restore conflict protection and the review and edit-reuse workflow (PRs #1 and #2, submitted under the MIT license; the copyright notice is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)), and Latos Hue's Codex support and several security fixes (PRs #4, #5 and #6).
