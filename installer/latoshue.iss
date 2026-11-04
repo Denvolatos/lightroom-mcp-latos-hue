@@ -65,6 +65,10 @@ Name: "desktopicon"; Description: "{cm:DesktopIconTask}"; Flags: unchecked
 [Files]
 ; the app folder (PyInstaller onedir: LatosHue.exe, latoshue-helper.exe and _internal must stay together)
 Source: "..\build\app_dist\LatosHue\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+; licence texts: this project's licence, the third-party notices and copies of the bundled packages' licence files
+Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
+Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\licenses\*"; DestDir: "{app}\licenses"; Flags: recursesubdirs createallsubdirs ignoreversion
 ; the Lightroom plug-in; the old folder is removed in CurStepChanged(ssInstall) first, so an update replaces it completely
 Source: "..\build\stage_app\{#PluginName}\*"; DestDir: "{code:PluginDir}"; Flags: recursesubdirs createallsubdirs ignoreversion; Check: PluginWanted
 

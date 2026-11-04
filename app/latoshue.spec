@@ -26,7 +26,10 @@ a = Analysis(
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
-    excludes=["mcp.cli", "tkinter", "pytest"],
+    # Not needed at run time (checked by grepping app/ and server/ imports and by --selftest + helper smoke test):
+    # PyInstaller's own modules (GPL, no bootloader exception), test frameworks, packaging/build helpers, pygments.
+    excludes=["mcp.cli", "tkinter", "pytest", "_pytest", "PyInstaller", "setuptools", "pkg_resources",
+              "pygments", "wheel", "pefile", "altgraph", "packaging"],
 )
 pyz = PYZ(a.pure)
 
