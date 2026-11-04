@@ -843,7 +843,7 @@ def setup_windows(api, create_window=None, use_splash: bool = True):
         sp = create_window(splashmod.TITLE, html=splashmod.splash_html(appsettings.APP_VERSION), width=splashmod.WIDTH,
                            height=splashmod.HEIGHT, resizable=False, frameless=True, easy_drag=True, on_top=True,
                            background_color="#17181b")
-        sp.events.shown += lambda: splashmod.round_corners(sp)
+        sp.events.shown += lambda: (splashmod.center_window(sp), splashmod.round_corners(sp))
     except Exception:                            # noqa: BLE001 - 启动界面出问题不能影响软件本身
         sp = None
     ctrl = splashmod.SplashController(sp, api._window)

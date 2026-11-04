@@ -83,6 +83,41 @@ def round_corners(window, size: tuple[int, int] = (WIDTH, HEIGHT)) -> bool:
         return False
 
 
+def centered_origin(work: tuple[int, int, int, int], width: int, height: int) -> tuple[int, int]:
+    """窗口（宽 width、高 height）在工作区 work=(左, 上, 右, 下) 里居中时的左上角坐标；窗口比工作区大时贴着左上角。"""
+    left, top, right, bottom = work
+    return left + max(0, (right - left - width) // 2), top + max(0, (bottom - top - height) // 2)
+
+
+def center_window(window) -> bool:
+    """尽力而为：把启动窗口移到它所在显示器工作区的正中央（实际像素坐标，高分屏与缩放下也居中）。任何失败都忽略（窗口留在原位）。"""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT), ("rcWork", wintypes.RECT),
+                        ("dwFlags", wintypes.DWORD)]
+        user32 = ctypes.windll.user32
+        user32.MonitorFromWindow.restype = wintypes.HANDLE
+        user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+        hwnd = int(window.native.Handle.ToInt32())
+        rect = wintypes.RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return False
+        mon = user32.MonitorFromWindow(hwnd, 2)                       # MONITOR_DEFAULTTONEAREST
+        info = MONITORINFO()
+        info.cbSize = ctypes.sizeof(MONITORINFO)
+        if not mon or not user32.GetMonitorInfoW(mon, ctypes.byref(info)):
+            return False
+        w, h = rect.right - rect.left, rect.bottom - rect.top
+        x, y = centered_origin((info.rcWork.left, info.rcWork.top, info.rcWork.right, info.rcWork.bottom), w, h)
+        # SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+        return bool(user32.SetWindowPos(hwnd, 0, x, y, 0, 0, 0x0001 | 0x0004 | 0x0010))
+    except Exception:                                  # noqa: BLE001
+        return False
+
+
 class SplashController:
     """管理启动窗口与主窗口的交接。splash 或 main 可以为 None（创建启动窗口失败时）：此时 finish() 只负责显示主窗口。"""
 

@@ -264,3 +264,15 @@ def test_min_display_time_not_waited_when_already_elapsed_or_no_splash():
     assert c2.finish() is True
     c2._handover.join(5)
     assert slept == []                                # 没有启动窗口就不等
+
+
+def test_centered_origin_centres_in_work_area_and_clamps():
+    assert sp.centered_origin((0, 0, 1920, 1040), 460, 280) == (730, 380)
+    assert sp.centered_origin((1920, 0, 3840, 1080), 460, 280) == (2650, 400)        # 第二块显示器
+    assert sp.centered_origin((0, 0, 300, 200), 460, 280) == (0, 0)                  # 窗口比工作区大：不出现负坐标
+
+
+def test_center_window_never_raises_with_fake_window():
+    class W:
+        native = None
+    assert sp.center_window(W()) is False
