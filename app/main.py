@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from adjustments import AdjustmentTracker  # noqa: E402
 import lr_autostart  # noqa: E402
 import splash as splashmod  # noqa: E402
+import update_check as updatemod  # noqa: E402
 import wizard as wizardmod  # noqa: E402
 from backend import Backend  # noqa: E402
 from confirm_hub import ConfirmHub  # noqa: E402
@@ -86,6 +87,9 @@ class Api:
                                                is_running=lr_autostart.is_running,
                                                get_connection=lambda: self._backend.status(),
                                                get_provider=self._wizard_provider, get_autolaunch=self._autolaunch.state)
+        # 检查更新（0.15.0）：只提示，不下载不安装；启动时在后台查一次（设置可关），页面只能取状态、点按钮，不传地址
+        self._updates = updatemod.AppUpdateChecker(appsettings.APP_VERSION,
+                                                   lambda: self._settings.data.get("check_updates") is True)
         self._splash = None                      # 启动界面控制器（main() 里设置；没有启动界面时为空）
         self._pending_lr_path = ""               # 用户在文件对话框里点选、尚未保存的 Lightroom 路径
         self._ctx_pending = True                 # 新对话的第一条消息带上"经验库"资料块（见 send / reset）
@@ -99,6 +103,7 @@ class Api:
     def _start_background(self) -> None:
         """窗口一出现就预热：Bridge、常驻 claude（含 lightroom_mcp 与确认服务）同时启动，之后每条消息零启动开销。"""
         self._splash_text(splashmod.TEXT_SERVICES)
+        self._updates.start_background()         # 开关为开时后台查一次（24 小时内查过就用缓存）；失败静默
         launching = self._autolaunch.start()     # 开关为开且 Lightroom 没在运行时，后台最小化启动它（不阻塞界面）
 
         def warm() -> None:
@@ -470,6 +475,19 @@ class Api:
             return {"ok": False, "cancelled": False, "message": next(iter(saved["errors"].values()), "设置未保存。")}
         self._wizard.invalidate()
         return {"ok": True, "cancelled": False, "message": ""}
+
+    # ---- 检查更新 --------------------------------------------------
+    def update_state(self) -> dict:
+        """当前的更新状态（只读缓存/内存，不联网）：state 为 idle / checking / latest / available / unavailable。"""
+        return self._updates.state()
+
+    def check_update_now(self) -> dict:
+        """手动检查更新（忽略缓存）：立刻返回“检查中”，结果在后台取到后由 update_state() 读出。不收任何参数。"""
+        return self._updates.check_now()
+
+    def open_update_page(self) -> dict:
+        """用系统浏览器打开新版本的发布页。不收任何地址：只打开本软件自己缓存的、经过校验的本仓库 releases 链接。"""
+        return self._updates.open_page()
 
     def _autolaunch_in_grace(self) -> bool:
         al = getattr(self, "_autolaunch", None)
