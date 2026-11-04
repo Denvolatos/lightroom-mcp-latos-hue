@@ -255,3 +255,47 @@ def test_clean_stale_announcements_removes_only_dead(tmp_path):
     (tmp_path / "notes.txt").write_text("x", encoding="ascii")
     removed = ports.clean_stale_announcements(tmp_path, listening=lambda p: p == 58772)
     assert removed == [58771] and (tmp_path / "58772.txt").exists() and (tmp_path / "notes.txt").exists()
+
+
+def test_grace_holds_lr_restart_then_resumes(tmp_path):
+    b, lr, sess, tracker, events, clock, state = make(tmp_path)
+    hold = {"v": True}
+    b._hold_restart = lambda: hold["v"]
+    clock.t += 40
+    b.tick()
+    clock.t += 40
+    b.tick()
+    assert lr.restarts == 0 and "restart_lr" not in b.events                          # 宽限期内不重建
+    hold["v"] = False
+    clock.t += 2
+    b.tick()
+    assert lr.restarts == 1 and "restart_lr" in b.events                              # 宽限期过后恢复
+
+
+def test_hold_callback_error_keeps_old_behaviour(tmp_path):
+    b, lr, sess, tracker, events, clock, state = make(tmp_path)
+
+    def boom():
+        raise RuntimeError("x")
+    b._hold_restart = boom
+    clock.t += 40
+    b.tick()
+    assert lr.restarts == 1
+
+
+def test_connected_during_grace_needs_no_restart(tmp_path):
+    b, lr, sess, tracker, events, clock, state = make(tmp_path)
+    b._hold_restart = lambda: True
+    lr.connected = True
+    write_side(state, True)
+    clock.t += 100
+    b.tick()
+    assert lr.restarts == 0 and b.status()["connected"]
+
+
+def test_without_hold_callback_behaviour_unchanged(tmp_path):
+    b, lr, sess, tracker, events, clock, state = make(tmp_path)
+    assert b._hold_restart is None
+    clock.t += 40
+    b.tick()
+    assert lr.restarts == 1

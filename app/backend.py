@@ -27,7 +27,8 @@ WAIT_READY_SECONDS = 25         # 发送消息时若尚未连接，最多等多�
 
 class Backend:
     def __init__(self, lr, session, tracker, emit, state_file=None, clock=time.monotonic,
-                 cleaner=clean_stale_announcements, previews=None):
+                 cleaner=clean_stale_announcements, previews=None, hold_restart=None):
+        self._hold_restart = hold_restart           # () -> bool：为真时暂停“换端口重建 Lightroom 通道”（刚自动启动 Lightroom 的宽限期）
         self.previews = previews                    # PreviewManager（可为空）：巡检时顺带请求刷新中栏预览
         self.lr, self.session, self.tracker, self.emit = lr, session, tracker, emit
         self.state_file = state_file
@@ -97,7 +98,8 @@ class Backend:
             self._side_attempts = 0
         # 窗口自己的通道连不上：换端口重新登记
         if not st["app"] and self._down_since is not None:
-            if now - self._down_since > LR_RESTART_SECONDS and now - self._last_lr_restart > LR_RESTART_SECONDS:
+            if (now - self._down_since > LR_RESTART_SECONDS and now - self._last_lr_restart > LR_RESTART_SECONDS
+                    and not self._holding()):
                 self._last_lr_restart = now
                 self.events.append("restart_lr")
                 self.lr.restart()
@@ -113,6 +115,12 @@ class Backend:
             self._last_photo_poll = now
             self.refresh_photo()
         return st
+
+    def _holding(self) -> bool:
+        try:
+            return bool(self._hold_restart and self._hold_restart())
+        except Exception:                           # noqa: BLE001 - 查询出错按“不暂停”，保持原有行为
+            return False
 
     def refresh_photo(self) -> None:
         """一次 list_selected 同时得到“当前这一张”和“全部选中的照片”（没有增加调用次数）。"""

@@ -64,7 +64,8 @@ class Api:
         self._hub.start()
         self._preview = PreviewManager(self._lr, PreviewServer(PreviewStore()), self._emit)
         self._preview.set_edge(self._settings.data["preview_edge"])
-        self._backend = Backend(self._lr, self._session, self._tracker, self._emit, state_file=None, previews=self._preview)
+        self._backend = Backend(self._lr, self._session, self._tracker, self._emit, state_file=None, previews=self._preview,
+                                 hold_restart=self._autolaunch_in_grace)
         self._import = ImportService(self._settings, self._lr, self._emit)
         # 软件内的图库（0.11.0）：缩略图走单独的本机图片服务（只服务缓存里的图、带随机口令）
         self._photolib = PhotoLibrary(self._settings, self._lr, self._emit, PreviewServer(ThumbStore()),
@@ -148,7 +149,8 @@ class Api:
             self._preview = PreviewManager(self._lr, PreviewServer(PreviewStore()), self._emit)
             self._preview.set_edge(self._settings.data["preview_edge"])
             self._backend = Backend(self._lr, self._session, self._tracker, self._emit,
-                                    state_file=None, previews=self._preview)
+                                    state_file=None, previews=self._preview,
+                                 hold_restart=self._autolaunch_in_grace)
             self._rebind_lr_services()
             threading.Thread(target=self._lr.start, daemon=True).start()
             self._preview.server.start()
@@ -417,6 +419,10 @@ class Api:
             return {"ok": False, "path": "", "message": "请选择名为 Lightroom.exe 的程序文件（本机磁盘上）。"}
         self._pending_lr_path = ok
         return {"ok": True, "path": ok, "message": ""}
+
+    def _autolaunch_in_grace(self) -> bool:
+        al = getattr(self, "_autolaunch", None)
+        return bool(al and al.in_grace())
 
     def autolaunch_state(self) -> dict:
         """自动启动 Lightroom 的当前状态（页面刚加载时取一次，之后靠 lr_launch 事件更新）。"""

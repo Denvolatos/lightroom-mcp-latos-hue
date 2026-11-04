@@ -56,7 +56,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     const st = {state:'connecting', text:'Lightroom 正在连接', hint:'正在连接 Lightroom，请稍候。'};
     window.onClaudeEvent({type:'status', ...st});
     const m = {lr_starting:['starting','正在启动 Lightroom…'], lr_notfound:['not_found','没找到 Lightroom，请手动打开。也可以在设置里选择 Lightroom 的位置。'],
-               lr_timeout:['timeout','Lightroom 暂时没有连上，请确认它已打开并启用了 LrMCP 插件。']}[q];
+               lr_timeout:['timeout','Lightroom 已经打开，但插件还没连上。请在 Lightroom 的 文件 → 增效工具管理器 里确认 LrMCP 显示“已安装并正在运行”，必要时点“重新载入增效工具”。']}[q];
     window.onClaudeEvent({type:'lr_launch', state:m[0], message:m[1]});
     return;
   }

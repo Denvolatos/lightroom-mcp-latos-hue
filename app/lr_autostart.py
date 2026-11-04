@@ -20,6 +20,7 @@ EXE_NAME = "Lightroom.exe"
 SW_SHOWMINNOACTIVE = 7                 # 最小化并显示，不激活（不抢焦点）
 CONNECT_TIMEOUT = 120.0                # 启动后最多等多久让插件连上（插件每 2 秒扫描一次，Lightroom 本身启动也要时间）
 POLL_SECONDS = 2.0
+GRACE_SECONDS = 90.0                   # 软件刚启动 Lightroom 后的宽限期：这段时间插件还没加载，软件不会换端口重建通道
 APP_PATHS_KEY = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Lightroom.exe"
 
 # 界面状态
@@ -32,7 +33,7 @@ MESSAGES = {
     ALREADY: "Lightroom 已经在运行，正在连接…",
     NOT_FOUND: "没找到 Lightroom，请手动打开。也可以在设置里选择 Lightroom 的位置。",
     FAILED: "没能自动启动 Lightroom，请手动打开。",
-    TIMEOUT: "Lightroom 暂时没有连上，请确认它已打开并启用了 LrMCP 插件。",
+    TIMEOUT: "Lightroom 已经打开，但插件还没连上。请在 Lightroom 的 文件 → 增效工具管理器 里确认 LrMCP 显示“已安装并正在运行”，必要时点“重新载入增效工具”。",
 }
 
 
@@ -144,13 +145,14 @@ class AutoLaunch:
 
     def __init__(self, get_settings, connected_fn, emit, *, running_fn=is_running, find_fn=find_lightroom,
                  launch_fn=launch_minimized, sleep=time.sleep, clock=time.monotonic,
-                 timeout: float = CONNECT_TIMEOUT, poll: float = POLL_SECONDS):
+                 timeout: float = CONNECT_TIMEOUT, poll: float = POLL_SECONDS, grace: float = GRACE_SECONDS):
         self._settings = get_settings            # () -> 设置字典
         self._connected = connected_fn           # () -> bool：插件是否已连上
         self._emit = emit
         self._running, self._find, self._launch = running_fn, find_fn, launch_fn
         self._sleep, self._clock = sleep, clock
-        self.timeout, self.poll = timeout, poll
+        self.timeout, self.poll, self.grace = timeout, poll, grace
+        self._grace_until: float | None = None   # 宽限期结束时间（None = 没有宽限期）
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -159,6 +161,14 @@ class AutoLaunch:
     def state(self) -> dict:
         with self._lock:
             return dict(self._state)
+
+    def in_grace(self) -> bool:
+        """软件刚自动启动了 Lightroom（或发现它刚开着、正在等插件连上）的前 GRACE_SECONDS 秒内为 True。
+        已连上、失败、超时、没开自动启动时都是 False。Backend 用它暂停“换端口重建通道”。"""
+        with self._lock:
+            if self._state["state"] not in (STARTING, ALREADY) or self._grace_until is None:
+                return False
+            return self._clock() < self._grace_until
 
     def _set(self, state: str) -> None:
         with self._lock:
@@ -178,6 +188,10 @@ class AutoLaunch:
         self._thread.start()
         return True
 
+    def _begin_grace(self) -> None:
+        with self._lock:
+            self._grace_until = self._clock() + self.grace
+
     def stop(self) -> None:
         self._stop.set()                         # 只停止等待；不会去关闭 Lightroom
 
@@ -194,12 +208,14 @@ class AutoLaunch:
         if data.get("auto_launch_lightroom") is not True:
             return IDLE
         if self._running():
+            self._begin_grace()
             self._set(ALREADY)
         else:
             exe = self._find(data.get("lightroom_path") or "")
             if not exe:
                 self._set(NOT_FOUND)
                 return NOT_FOUND
+            self._begin_grace()
             self._set(STARTING)
             if not self._launch(exe):
                 self._set(FAILED)

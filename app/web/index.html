@@ -35,6 +35,7 @@
   .status { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
   .hint { color: var(--muted); font-size: 12px; max-width: 460px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #lrhint { max-width: 560px; white-space: normal; line-height: 1.35; }   /* 顶栏提示允许折成两三行，较长的排查提示才看得全 */
   /* ---------- three columns ---------- */
   .main { flex: 1; min-height: 0; display: grid; grid-template-columns: 340px 1fr 360px; }
   .col { min-height: 0; display: flex; flex-direction: column; background: var(--panel); }

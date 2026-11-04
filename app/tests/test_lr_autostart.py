@@ -357,3 +357,75 @@ def test_api_autolaunch_state_and_no_exposed_paths(api):
     import inspect
     for name in ("choose_lightroom_path", "autolaunch_state"):
         assert not [p for p in inspect.signature(getattr(api, name)).parameters]   # 这两个接口都不收任何参数
+
+
+# ---- 启动宽限期（0.13.1）：刚自动启动 Lightroom 的前 90 秒，软件不换端口重建通道 ----
+def grace_flow(settings, *, running=False, grace=90.0):
+    al, ev, calls = flow(settings, running=running, connect_after=None)
+    al.grace = grace
+    return al, ev, calls
+
+
+def test_grace_constant_is_90_and_shorter_than_timeout():
+    assert la.GRACE_SECONDS == 90.0 and la.GRACE_SECONDS < la.CONNECT_TIMEOUT
+
+
+def test_in_grace_false_before_run_and_when_disabled():
+    al, ev, _ = grace_flow({"auto_launch_lightroom": False})
+    assert al.in_grace() is False
+    al.run()
+    assert al.in_grace() is False
+
+
+def test_in_grace_during_starting_then_expires():
+    clock = Clock()
+    al = la.AutoLaunch(lambda: {"auto_launch_lightroom": True}, lambda: False, lambda e: None,
+                       running_fn=lambda: False, find_fn=lambda c: r"C:\LR\Lightroom.exe", launch_fn=lambda p: True,
+                       sleep=lambda s: None, clock=clock)
+    seen = []
+
+    def sleep(s):
+        seen.append((clock.t, al.in_grace()))
+        clock.t += s
+    al._sleep = sleep
+    assert al.run() == la.TIMEOUT
+    inside = [g for t, g in seen if t < 90.0]
+    outside = [g for t, g in seen if t >= 90.0]
+    assert inside and all(inside) and outside and not any(outside)
+    assert al.in_grace() is False                         # 超时之后不再是宽限期
+
+
+def test_in_grace_when_already_running_and_ends_on_connect():
+    clock = Clock()
+    box = {"c": False}
+    al = la.AutoLaunch(lambda: {"auto_launch_lightroom": True}, lambda: box["c"], lambda e: None,
+                       running_fn=lambda: True, find_fn=lambda c: None, launch_fn=lambda p: True,
+                       sleep=lambda s: None, clock=clock)
+    seen = []
+
+    def sleep(s):
+        seen.append(al.in_grace())
+        clock.t += s
+        if clock.t >= 10:
+            box["c"] = True
+    al._sleep = sleep
+    assert al.run() == la.CONNECTED
+    assert seen and all(seen) and al.in_grace() is False   # 已连上：宽限期结束
+
+
+def test_no_grace_when_not_found_or_failed():
+    al, _, _ = flow({"auto_launch_lightroom": True}, exe=None)
+    al.run()
+    assert al.in_grace() is False
+    al, _, _ = flow({"auto_launch_lightroom": True}, launched=False)
+    al.run()
+    assert al.in_grace() is False
+
+
+def test_timeout_message_is_specific():
+    m = la.MESSAGES[la.TIMEOUT]
+    assert "增效工具管理器" in m and "LrMCP" in m and "重新载入增效工具" in m and "插件还没连上" in m
+    al, ev, _ = flow({"auto_launch_lightroom": True}, connect_after=None)
+    al.run()
+    assert ev[-1]["state"] == la.TIMEOUT and ev[-1]["message"] == m
+    assert la.CONNECT_TIMEOUT == 120.0
