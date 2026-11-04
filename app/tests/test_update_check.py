@@ -383,7 +383,7 @@ def test_update_check_updates(tmp_path):
 
 
 def test_app_version():
-    assert st.APP_VERSION == "0.17.2"
+    assert st.APP_VERSION == "1.0.0"
 
 
 # ---------------------------------------------------------------- Api
