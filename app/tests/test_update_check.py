@@ -422,3 +422,12 @@ def test_api_does_not_touch_network_on_construction(tmp_path, monkeypatch):
     a.update_state()
     a._shutdown()
     assert calls == []
+
+
+def test_default_http_get_is_wired_not_shadowed(monkeypatch, tmp_path):
+    """真机前自查：不注入 http_get 时，默认联网函数必须真的被调用（曾因参数同名遮蔽而恒为 TypeError）。"""
+    calls = []
+    monkeypatch.setattr(uc, "_default_http_get", lambda url, **kw: calls.append((url, kw)) or b"[]")
+    c = uc.AppUpdateChecker("0.15.0", cache_file=tmp_path / "c.json")
+    assert c._get("https://api.github.com/x") == b"[]"
+    assert calls and calls[0][1].get("version") == "0.15.0"

@@ -102,6 +102,9 @@ def http_get(url: str, timeout: float = TIMEOUT_SECONDS, max_bytes: int = MAX_BY
     return data
 
 
+_default_http_get = http_get
+
+
 class AppUpdateChecker:
     """检查更新的状态与缓存。state() 只读内存/缓存、从不联网；联网只发生在后台线程里。
 
@@ -116,7 +119,7 @@ class AppUpdateChecker:
                  clock=time.time, cache_file: Path | None = None):
         self.current = current
         self._enabled = enabled
-        self._get = http_get or (lambda url: http_get(url, version=current))
+        self._get = http_get or (lambda url: _default_http_get(url, version=current))
         self._open = open_url or webbrowser.open
         self._spawn = spawn or self._spawn_thread
         self._clock = clock
