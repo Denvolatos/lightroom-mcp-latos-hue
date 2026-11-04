@@ -206,7 +206,7 @@ def test_api_get_settings_shape(api):
     assert ids == ["claude", "codex", "api"]
     assert [p["selectable"] for p in r["providers"]] == [True, True, False]
     assert set(r["about"]) == {"app_version", "lightroom_version", "plugin_version", "data_dir", "project_url"}
-    assert r["about"]["data_dir"] == "~/LrMcp" and r["about"]["project_url"].endswith("Denvolatos/lightroom-mcp-win")
+    assert r["about"]["data_dir"] == "~/LrMcp" and r["about"]["project_url"].endswith("Denvolatos/lightroom-mcp-latos-hue")
 
 
 def test_api_save_applies_preview_edge_immediately(api):

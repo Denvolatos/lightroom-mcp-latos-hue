@@ -30,7 +30,7 @@ The AI can be **Claude** (the Claude Code command line already installed and sig
 
 **Requirements:** Windows 10 / 11; **Adobe Lightroom Classic** installed (developed and tested on 15.x); and the **Claude Code** or **Codex** command line installed and signed in (at least one).
 
-1. Download `LatosHue-Setup-1.0.0.exe` from [Releases](https://github.com/Denvolatos/lightroom-mcp-win/releases) (release tags look like `hue-v1.0.0`) and compare the SHA-256 on the page.
+1. Download `LatosHue-Setup-1.0.0.exe` from [Releases](https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases) (release tags look like `hue-v1.0.0`) and compare the SHA-256 on the page.
 2. **Double-click it from your own File Explorer** (not from a shell started by Claude Desktop, see the MSIX note in the LrMCP part below). No administrator rights and no Python needed.
    The installer is not code-signed, so Windows SmartScreen may say "unknown publisher": click "More info", then "Run anyway".
 3. The installer puts the Lightroom plug-in in place for you. **Restart Lightroom after installing.**
@@ -157,7 +157,7 @@ Claude / Codex ──(MCP, stdio)──▶ lrmcp (Python server, local queue on 
 
 ### 📦 Install with the installer (no Python needed)
 
-1. Download `LrMCP-Setup-*.exe` from [Releases](https://github.com/Denvolatos/lightroom-mcp-win/releases/latest) and compare the SHA-256 on the page.
+1. Download `LrMCP-Setup-*.exe` from [Releases](https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases/latest) and compare the SHA-256 on the page.
 2. **Double-click it from your own File Explorer** (not from a shell started by Claude Desktop, see the MSIX note below). It is not code-signed, so Windows SmartScreen shows "unknown publisher".
 3. Restart Lightroom and your AI assistant, then have it call `lr_status`.
 

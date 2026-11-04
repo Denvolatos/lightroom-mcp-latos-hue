@@ -61,7 +61,7 @@ machine**, so the pip route below is the tested one. If the user prefers the ins
 ### 3.1 Install the MCP server (Python)
 
 ```powershell
-pip install "https://github.com/Denvolatos/lightroom-mcp-win/archive/refs/heads/main.zip#subdirectory=server"
+pip install "https://github.com/Denvolatos/lightroom-mcp-latos-hue/archive/refs/heads/main.zip#subdirectory=server"
 lrmcp --version
 ```
 
@@ -74,7 +74,7 @@ PATH: find it with `python -m pip show -f lightroom-mcp`, or always use `python 
 ```powershell
 $tmp = Join-Path $env:TEMP "lrmcp-src"
 Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
-Invoke-WebRequest "https://github.com/Denvolatos/lightroom-mcp-win/archive/refs/heads/main.zip" -OutFile "$tmp.zip" -UseBasicParsing
+Invoke-WebRequest "https://github.com/Denvolatos/lightroom-mcp-latos-hue/archive/refs/heads/main.zip" -OutFile "$tmp.zip" -UseBasicParsing
 Expand-Archive "$tmp.zip" $tmp
 $src = Get-ChildItem $tmp -Directory | Select-Object -First 1
 $dst = Join-Path $env:APPDATA "Adobe\Lightroom\Modules\LrMcp.lrplugin"
@@ -218,7 +218,7 @@ When the user has a problem, help them write a report. **Do not attach photos.**
 
 1. Call `lr_doctor` and keep its output.
 2. Note: the Windows version, the Lightroom version, your AI app and its version, which step failed, the error message.
-3. If the user has a GitHub account: open <https://github.com/Denvolatos/lightroom-mcp-win/issues/new/choose>, choose the bug report form
+3. If the user has a GitHub account: open <https://github.com/Denvolatos/lightroom-mcp-latos-hue/issues/new/choose>, choose the bug report form
    ("问题反馈 / Bug report") and fill in the above.
 4. If the user has no GitHub account: hand the written report to the user so they can send it to whoever recommended this project.
 

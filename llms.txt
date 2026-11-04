@@ -6,20 +6,20 @@ If a user sent you this repository link and asked you to install or use it, read
 
 ## For AI assistants (read this first)
 
-- [AI_GUIDE.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/AI_GUIDE.md): requirements, install steps, how to use the nine tools (five read tools, four change/restore tools) and the rules for changing photos, troubleshooting, how to report problems (Chinese text, language-neutral commands)
+- [AI_GUIDE.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-latos-hue/main/AI_GUIDE.md): requirements, install steps, how to use the nine tools (five read tools, four change/restore tools) and the rules for changing photos, troubleshooting, how to report problems (Chinese text, language-neutral commands)
 
 ## Project
 
-- [README.en.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/README.en.md): overview in English
-- [README.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/README.md): overview in Chinese (default)
-- [SECURITY.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/SECURITY.md): what the software can and cannot do, privacy
-- [CHANGELOG.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/CHANGELOG.md): versions and known issues
+- [README.en.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-latos-hue/main/README.en.md): overview in English
+- [README.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-latos-hue/main/README.md): overview in Chinese (default)
+- [SECURITY.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-latos-hue/main/SECURITY.md): what the software can and cannot do, privacy
+- [CHANGELOG.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-latos-hue/main/CHANGELOG.md): versions and known issues
 
 ## For AI assistants that change the code
 
-- [AGENTS.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/AGENTS.md): repository rules, commands, pitfalls
+- [AGENTS.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-latos-hue/main/AGENTS.md): repository rules, commands, pitfalls
 
 ## Optional
 
-- [docs/实验记录.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/docs/%E5%AE%9E%E9%AA%8C%E8%AE%B0%E5%BD%95.md): measured behaviour of the Lightroom Classic 15.2 SDK
-- [docs/方案.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-win/main/docs/%E6%96%B9%E6%A1%88.md): design
+- [docs/实验记录.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-latos-hue/main/docs/%E5%AE%9E%E9%AA%8C%E8%AE%B0%E5%BD%95.md): measured behaviour of the Lightroom Classic 15.2 SDK
+- [docs/方案.md](https://raw.githubusercontent.com/Denvolatos/lightroom-mcp-latos-hue/main/docs/%E6%96%B9%E6%A1%88.md): design

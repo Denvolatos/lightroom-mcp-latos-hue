@@ -30,7 +30,7 @@ AI 可以用 **Claude**（调用你电脑上已安装并登录的 Claude Code �
 
 **系统要求：** Windows 10 / 11；已安装 **Adobe Lightroom Classic**（在 15.x 上开发和测试）；已安装并登录的 **Claude Code** 或 **Codex** 命令行（至少一个）。
 
-1. 到 [Releases](https://github.com/Denvolatos/lightroom-mcp-win/releases) 下载 `LatosHue-Setup-1.0.0.exe`（发布标签形如 `hue-v1.0.0`），核对页面上的 SHA-256。
+1. 到 [Releases](https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases) 下载 `LatosHue-Setup-1.0.0.exe`（发布标签形如 `hue-v1.0.0`），核对页面上的 SHA-256。
 2. **在你自己的资源管理器里双击运行**（不要通过 Claude 桌面版启动，见下面 LrMCP 部分的 MSIX 提醒）。不需要管理员权限，不需要装 Python。
    安装包没有代码签名，Windows SmartScreen 可能提示"未知发布者"，点"更多信息"→"仍要运行"即可。
 3. 安装程序会自动把 Lightroom 插件装好。**装完请重启 Lightroom。**
@@ -145,7 +145,7 @@ Claude / Codex ──(MCP, stdio)──▶ lrmcp（Python 服务，本机队列 
 
 ### 📦 用安装包安装（免装 Python）
 
-1. 到 [Releases](https://github.com/Denvolatos/lightroom-mcp-win/releases/latest) 下载 `LrMCP-Setup-*.exe`，并核对页面上的 SHA-256。
+1. 到 [Releases](https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases/latest) 下载 `LrMCP-Setup-*.exe`，并核对页面上的 SHA-256。
 2. **在你自己的资源管理器里双击运行**（不要通过 Claude 桌面版启动，见下面的 MSIX 提醒）。程序没有代码签名，Windows SmartScreen 会提示"未知发布者"。
 3. 安装完重启 Lightroom 和你的 AI 助手，让它调用 `lr_status`。
 

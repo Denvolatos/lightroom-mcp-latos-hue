@@ -43,7 +43,7 @@ STUB = """<script>
     import_state: ()=>Promise.resolve({stage:'idle'}), library_list: ()=>Promise.resolve({ok:true, exists:false, base:'示例', groups:[], total:0, more:0, shown:0}),
     get_settings: ()=>Promise.resolve({settings:{schema:1, base_folder:'C:\\\\示例', provider:'claude', confirm_default:true, preview_edge:1024, ai_use_notes:true},
       providers:[{id:'claude', name:'Claude Code 命令行', selectable:true, available:true, state:'ready', reason:'已安装并已登录。', next_step:''}], current_provider:'claude', edges:[768,1024,1536,2048],
-      about:{app_version:'0.10.0', lightroom_version:'15.2.0', plugin_version:'0.15.0', data_dir:'~/LrMcp', project_url:'https://github.com/Denvolatos/lightroom-mcp-win'}}),
+      about:{app_version:'0.10.0', lightroom_version:'15.2.0', plugin_version:'0.15.0', data_dir:'~/LrMcp', project_url:'https://github.com/Denvolatos/lightroom-mcp-latos-hue'}}),
     lib_presets: ()=>Promise.resolve({ok:true, presets, max:200}),
     lib_notes: (q,t)=>Promise.resolve({ok:true, notes: notes.filter(n=>(!q||(n.title+n.body).indexOf(q)>=0)&&(!t||n.tags.indexOf(t)>=0)), tags:empty?[]:['风光','天空','人像'], max:300, context:{used:empty?0:1, eligible:empty?0:1, truncated:false}}),
     lib_favs: ()=>Promise.resolve(favs),
