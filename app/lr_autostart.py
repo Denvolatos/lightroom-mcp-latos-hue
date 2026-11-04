@@ -131,7 +131,7 @@ def build_startupinfo(factory=None):
 
 def clean_environment(env=None, own_dirs=None) -> dict:
     """给 Lightroom 用的干净环境变量：去掉本软件自己的目录和打包工具留下的变量。
-    真机教训：用户选了 D:\Latos Hue 安装后，软件拉起的 Lightroom 把软件目录里的 VCRUNTIME140.dll 加载进了自己的进程，
+    真机教训：用户选了 D:/Latos Hue 安装后，软件拉起的 Lightroom 把软件目录里的 VCRUNTIME140.dll 加载进了自己的进程，
     导致覆盖安装时报"拒绝访问"（文件被 Lightroom 占着），也有版本混用的风险。所以子进程看不到软件自己的目录。"""
     env = dict(os.environ if env is None else env)
     if own_dirs is None:
