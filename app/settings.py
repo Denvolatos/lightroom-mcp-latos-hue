@@ -17,7 +17,7 @@ from lr_autostart import valid_lightroom_path
 
 SCHEMA_VERSION = 1
 SETTINGS_FILE = Path.home() / "LrMcp" / "app_settings.json"
-APP_VERSION = "0.13.1"                  # 桌面软件 Latos Hue 的版本（开发中，尚未发布；首个发布版本为 1.0.0）
+APP_VERSION = "0.14.0"                  # 桌面软件 Latos Hue 的版本（开发中，尚未发布；首个发布版本为 1.0.0）
 PROJECT_URL = "https://github.com/Denvolatos/lightroom-mcp-win"
 DATA_DIR_TEXT = "~/LrMcp"
 
@@ -42,7 +42,7 @@ def defaults() -> dict:
             "confirm_default": True, "preview_edge": 1024,
             "export_last_folder": "", "export_format": "jpeg", "export_size": 0, "export_quality": 92,
             "export_bit_depth": 16, "export_metadata": "minimal", "ai_use_notes": True,
-            "auto_launch_lightroom": False, "lightroom_path": ""}
+            "auto_launch_lightroom": False, "lightroom_path": "", "wizard_done": False}
 
 
 # ---------------------------------------------------------------- 文件夹校验
@@ -195,6 +195,7 @@ def sanitize(data) -> dict:
     out["auto_launch_lightroom"] = (out["auto_launch_lightroom"] if isinstance(out.get("auto_launch_lightroom"), bool)
                                     else d["auto_launch_lightroom"])
     out["lightroom_path"] = clean_lightroom_path(out.get("lightroom_path"))
+    out["wizard_done"] = out["wizard_done"] if isinstance(out.get("wizard_done"), bool) else d["wizard_done"]
     for k in EXPORT_FIELD_LABELS:
         c = clean_export_field(k, out.get(k))
         out[k] = d[k] if c is None else c
@@ -285,6 +286,11 @@ class SettingsStore:
                 new["auto_launch_lightroom"] = changes["auto_launch_lightroom"]
             else:
                 errors["auto_launch_lightroom"] = "请选择开或关。"
+        if "wizard_done" in changes:
+            if isinstance(changes["wizard_done"], bool):
+                new["wizard_done"] = changes["wizard_done"]
+            else:
+                errors["wizard_done"] = "请选择是或否。"
         if "lightroom_path" in changes:
             lp = changes["lightroom_path"]
             ok = valid_lightroom_path(lp) if isinstance(lp, str) else None

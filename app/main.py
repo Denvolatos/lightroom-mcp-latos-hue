@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from adjustments import AdjustmentTracker  # noqa: E402
 import lr_autostart  # noqa: E402
 import splash as splashmod  # noqa: E402
+import wizard as wizardmod  # noqa: E402
 from backend import Backend  # noqa: E402
 from confirm_hub import ConfirmHub  # noqa: E402
 from lr_service import LrService  # noqa: E402
@@ -80,6 +81,11 @@ class Api:
         # 自动启动 Lightroom（设置里的开关，默认关）：只在软件启动时跑一次；连上与否沿用 Backend 的真实连接判定
         self._autolaunch = lr_autostart.AutoLaunch(lambda: self._settings.data,
                                                    lambda: bool(self._backend.status().get("connected")), self._emit)
+        # 环境检查向导（0.14.0）：四项只读检查，耗时的在后台线程；页面只能取状态、点按钮，不能传路径
+        self._wizard = wizardmod.WizardChecker(lambda: self._settings.data, find_lightroom=lr_autostart.find_lightroom,
+                                               is_running=lr_autostart.is_running,
+                                               get_connection=lambda: self._backend.status(),
+                                               get_provider=self._wizard_provider, get_autolaunch=self._autolaunch.state)
         self._splash = None                      # 启动界面控制器（main() 里设置；没有启动界面时为空）
         self._pending_lr_path = ""               # 用户在文件对话框里点选、尚未保存的 Lightroom 路径
         self._ctx_pending = True                 # 新对话的第一条消息带上"经验库"资料块（见 send / reset）
@@ -420,6 +426,50 @@ class Api:
             return {"ok": False, "path": "", "message": "请选择名为 Lightroom.exe 的程序文件（本机磁盘上）。"}
         self._pending_lr_path = ok
         return {"ok": True, "path": ok, "message": ""}
+
+    # ---- 环境检查向导 ----------------------------------------------
+    def _wizard_provider(self) -> dict:
+        """设置里选中的 AI 来源的状态（名称 + available/state/reason/next_step）；与 get_settings 用同一套文案。"""
+        want = self._settings.data["provider"]
+        cur = self._provider.status()
+        for p in available_providers(cur if self._provider.id == "claude" else None, cur if self._provider.id == "codex" else None):
+            if p["id"] == want:
+                return p
+        return {"name": "AI 来源", "available": False, "state": "unknown", "reason": "没有找到所选的 AI 来源。", "next_step": ""}
+
+    def wizard_state(self, refresh: bool = False) -> dict:
+        """四项检查的当前结果。立刻返回上一次的结果（checking 为真表示后台正在检查，页面稍后再取）；不收任何路径。"""
+        return self._wizard.state(bool(refresh))
+
+    def wizard_done(self, flag: bool) -> dict:
+        """记下“向导不用再自动弹出”（flag=True）。只改 wizard_done 这一项设置。"""
+        if not isinstance(flag, bool):
+            return {"ok": False, "message": "参数无效。"}
+        r = self._settings.update({"wizard_done": flag}, selectable=is_selectable)
+        return {"ok": r["ok"], "wizard_done": r["settings"].get("wizard_done", False)}
+
+    def wizard_pick_folder(self) -> dict:
+        """向导第 1 项的按钮：弹出系统文件夹对话框，选中后直接保存为照片工作文件夹。路径只来自这次点击。"""
+        r = self.choose_folder(self._settings.data.get("base_folder") or "")
+        if not r.get("ok"):
+            return {"ok": False, "cancelled": True, "message": ""}
+        saved = self._settings.update({"base_folder": r["path"]}, selectable=is_selectable)
+        if not saved["ok"]:
+            return {"ok": False, "cancelled": False, "message": next(iter(saved["errors"].values()), "设置未保存。")}
+        self._wizard.invalidate()
+        self._photolib.refresh()                 # 工作文件夹变了：图库按新文件夹重新读取
+        return {"ok": True, "cancelled": False, "message": ""}
+
+    def wizard_pick_lightroom(self) -> dict:
+        """向导第 2 项的按钮：弹出系统文件选择窗口，选中 Lightroom.exe 后直接保存。路径只来自这次点击。"""
+        r = self.choose_lightroom_path()
+        if not r.get("ok"):
+            return {"ok": False, "cancelled": bool(r.get("cancelled")), "message": r.get("message", "")}
+        saved = self.save_settings({"lightroom_path_choice": "pending"})
+        if not saved["ok"]:
+            return {"ok": False, "cancelled": False, "message": next(iter(saved["errors"].values()), "设置未保存。")}
+        self._wizard.invalidate()
+        return {"ok": True, "cancelled": False, "message": ""}
 
     def _autolaunch_in_grace(self) -> bool:
         al = getattr(self, "_autolaunch", None)
