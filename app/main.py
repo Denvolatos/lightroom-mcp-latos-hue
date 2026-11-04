@@ -832,7 +832,7 @@ def setup_windows(api, create_window=None, use_splash: bool = True):
     """创建主窗口（先隐藏）和启动窗口，返回启动界面控制器（没有启动界面时为 None，主窗口直接显示）。
     主窗口先创建，保证它是 pywebview 的主窗口：启动窗口关闭不会让程序退出。创建启动窗口出任何错，都退回"直接显示主窗口"。"""
     create_window = create_window or webview.create_window
-    api._window = create_window("修图助手", WEB.as_uri(), js_api=api, width=1440, height=860, min_size=(1100, 680),
+    api._window = create_window("修图助手", WEB.as_uri(), js_api=api, width=1440, height=860, min_size=(960, 620),
                                 background_color="#17181b", hidden=use_splash)
     if not use_splash:
         return None

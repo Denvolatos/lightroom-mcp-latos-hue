@@ -20,8 +20,8 @@
   }
   button { font: inherit; color: inherit; cursor: pointer; }
   /* ---------- top bar ---------- */
-  .topbar { height: 48px; flex: none; display: flex; align-items: center; gap: 8px;
-    padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .topbar { min-height: 48px; flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
+    padding: 4px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
   .brand { font-weight: 600; margin-right: 8px; }
   .badge { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: #3b2f12; color: var(--warn); }
   .btn { background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius);
@@ -32,13 +32,23 @@
   .btn.small { padding: 2px 10px; font-size: 12px; }
   .btn:disabled { opacity: .45; cursor: not-allowed; }
   .spacer { flex: 1; }
+  /* 窄窗口：按钮、标签、状态文字一律不换行、不被压扁；放不下时顶栏折成两行，提示文字缩略（完整内容在鼠标悬停提示里） */
+  .topbar > * { flex: none; white-space: nowrap; }
+  .topbar .spacer { flex: 1 1 0; min-width: 0; }
+  .btn, .tab, .seg button, .badge, .status, .switch, .subseg button, .chatbar button { white-space: nowrap; }
+  .subseg button { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .chatbar input { min-width: 0; } .chatbar button { flex: none; }
+  .opts .switch { flex: none; }
+  .galtools { flex-wrap: wrap; } .galtools input[type=text] { flex: 1 1 90px; }
   .status { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
   .upd-note { color: var(--accent); margin-right: 6px; }   /* 有新版本时的温和提示：只提示，点了才去浏览器看 */
   .hint { color: var(--muted); font-size: 12px; max-width: 460px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #lrhint { max-width: 560px; white-space: normal; line-height: 1.35; }   /* 顶栏提示允许折成两三行，较长的排查提示才看得全 */
+  #lrhint { flex: 0 1 auto; min-width: 120px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.35; }   /* 顶栏提示只占一行，放不下就缩略；完整内容放在 title 里 */
+  .topbar > #lrhint { flex: 0 1 auto; }
   /* ---------- three columns ---------- */
-  .main { flex: 1; min-height: 0; display: grid; grid-template-columns: 340px 1fr 360px; }
+  .main { flex: 1; min-height: 0; display: grid; grid-template-columns: clamp(220px, 26vw, 340px) minmax(0, 1fr) clamp(240px, 28vw, 360px); }
+  .main > .col { min-width: 0; overflow: hidden; }
   .col { min-height: 0; display: flex; flex-direction: column; background: var(--panel); }
   .col.left { border-right: 1px solid var(--line); }
   .col.right { border-left: 1px solid var(--line); }
@@ -64,7 +74,7 @@
   .thumb { width: 44px; height: 32px; border-radius: 4px; flex: none; }
   /* ---------- center ---------- */
   .center { background: var(--bg); display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  .viewbar { height: 40px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px;
+  .viewbar { min-height: 40px; flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 4px 12px;
     border-bottom: 1px solid var(--line); background: var(--panel); }
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
   .seg button { border: none; background: var(--panel2); padding: 4px 14px; color: var(--muted); }
@@ -91,6 +101,15 @@
   .infobar { flex: none; padding: 2px 14px 10px; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
   .infobar .line { color: var(--text); opacity: .85; font-variant-numeric: tabular-nums; user-select: text; }
   .seg button:disabled { opacity: .5; cursor: not-allowed; }
+  .viewbar > *, .viewbar label { flex: none; white-space: nowrap; }
+  .viewbar #pvctl { flex-wrap: wrap; row-gap: 4px; }
+  .viewbar .spacer { flex: 1 1 0; min-width: 0; }
+  #cur { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  @media (max-width: 800px) { .main { grid-template-columns: 220px minmax(0, 1fr) 220px; } }
+  @media (max-width: 900px) {
+    .stage.pair { grid-template-columns: minmax(0, 1fr); grid-template-rows: repeat(2, minmax(0, 1fr)); }
+    .viewbar > .why:not(#cur) { display: none; }
+  }
   .viewbar select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; font: inherit; font-size: 12px; }
   /* 仅界面演示用（#demo）：示例画面，非真实照片 */
   .scene { position: absolute; inset: 0; background:
