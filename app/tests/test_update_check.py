@@ -10,7 +10,8 @@ import pytest
 import settings as st
 import update_check as uc
 
-REPO_URL = "https://github.com/Denvolatos/lightroom-mcp-win/releases/tag/"
+REPO_URL = "https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases/tag/"
+OLD_REPO_URL = "https://github.com/Denvolatos/lightroom-mcp-win/releases/tag/"
 
 
 def rel(tag, **kw):
@@ -104,7 +105,9 @@ def test_pick_skips_release_with_bad_url():
 
 
 # ---------------------------------------------------------------- 网址校验
-@pytest.mark.parametrize("url", [REPO_URL + "hue-v1.0.0", "https://github.com/Denvolatos/lightroom-mcp-win/releases/latest"])
+@pytest.mark.parametrize("url", [REPO_URL + "hue-v1.0.0", OLD_REPO_URL + "hue-v1.0.0",
+                                 "https://github.com/Denvolatos/lightroom-mcp-win/releases/latest",
+                                 "https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases/latest"])
 def test_url_ok(url):
     assert uc.valid_release_url(url)
 
@@ -127,6 +130,19 @@ def test_url_ok(url):
     "https://api.github.com/Denvolatos/lightroom-mcp-win/releases/1",
     "https://github.com/denvolatos/lightroom-mcp-win/releases/tag/x",
     "https://github.com/Denvolatos/lightroom-mcp-win/releases/" + "a" * 400,
+    # 新仓库名的同类伪装
+    "https://github.com/Denvolatos/lightroom-mcp-latos-hue", "https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases/",
+    "https://github.com/Denvolatos/lightroom-mcp-latos-hue-x/releases/tag/x",
+    "https://github.com/Denvolatos/lightroom-mcp-latos-hue/issues/1",
+    "https://github.com/Other/lightroom-mcp-latos-hue/releases/tag/x",
+    "https://github.com/denvolatos/lightroom-mcp-latos-hue/releases/tag/x",
+    "https://github.com.evil.com/Denvolatos/lightroom-mcp-latos-hue/releases/tag/x",
+    "https://evil.com/Denvolatos/lightroom-mcp-latos-hue/releases/tag/x",
+    "https://user@github.com/Denvolatos/lightroom-mcp-latos-hue/releases/tag/x",
+    "https://github.com:444/Denvolatos/lightroom-mcp-latos-hue/releases/tag/x",
+    "https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases/../../evil",
+    "https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases/" + "a" * 400,
+    "https://github.com/Denvolatos/lightroom-mcp-other/releases/tag/x",
 ])
 def test_url_rejected(url):
     assert not uc.valid_release_url(url)
@@ -277,7 +293,56 @@ def test_oversized_response_rejected_by_default_fetcher(monkeypatch):
 
 
 def test_request_url_is_fixed_github_api():
-    assert uc.RELEASES_URL.startswith("https://api.github.com/repos/Denvolatos/lightroom-mcp-win/releases")
+    assert uc.RELEASES_URL == "https://api.github.com/repos/Denvolatos/lightroom-mcp-latos-hue/releases?per_page=30"
+
+
+def test_pick_accepts_new_and_old_repo_urls():
+    assert uc.pick_latest([rel("hue-v1.0.1", html_url=REPO_URL + "hue-v1.0.1")])["latest"] == "1.0.1"
+    assert uc.pick_latest([rel("hue-v1.0.1", html_url=OLD_REPO_URL + "hue-v1.0.1")])["latest"] == "1.0.1"
+
+
+def _serve(routes):
+    """起一个只监听 127.0.0.1 的假服务器；routes: path -> (status, headers, body)。返回 (server, base_url)。"""
+    import http.server
+    import threading
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            status, headers, data = routes[self.path]
+            self.send_response(status)
+            for k, v in headers.items():
+                self.send_header(k, v)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_port}"
+
+
+@pytest.mark.parametrize("code", [301, 302])
+def test_http_get_follows_rename_redirect_and_parses_json(code):
+    payload = json.dumps([{"tag_name": "hue-v1.0.1", "html_url": REPO_URL + "hue-v1.0.1"}]).encode()
+    srv, base = _serve({"/old": (code, {"Location": "/new"}, b""), "/new": (200, {}, payload)})
+    try:
+        data = uc.http_get(base + "/old")
+    finally:
+        srv.shutdown()
+    assert uc.pick_latest(json.loads(data))["latest"] == "1.0.1"
+
+
+def test_http_get_size_limit_still_applies_after_redirect():
+    srv, base = _serve({"/old": (301, {"Location": "/new"}, b""), "/new": (200, {}, b"x" * 5000)})
+    try:
+        with pytest.raises(ValueError):
+            uc.http_get(base + "/old", max_bytes=1000)
+        assert uc.http_get(base + "/old", max_bytes=5000) == b"x" * 5000
+    finally:
+        srv.shutdown()
 
 
 # ---------------------------------------------------------------- 开关

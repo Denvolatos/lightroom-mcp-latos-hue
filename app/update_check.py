@@ -22,7 +22,9 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import urlsplit
 
-REPO = "Denvolatos/lightroom-mcp-win"
+REPO = "Denvolatos/lightroom-mcp-latos-hue"   # 查询用的现名（1.0.1 起）
+# 发布页地址同时认现名和旧名：仓库改名后 GitHub 会跳转，API 返回新名，用户手里也可能还有旧链接；旧名永久保留
+ACCEPTED_REPOS = (REPO, "Denvolatos/lightroom-mcp-win")
 RELEASES_URL = f"https://api.github.com/repos/{REPO}/releases?per_page=30"
 TAG_PREFIX = "hue-v"                       # 软件的发布标签前缀；不带前缀的 v 标签是插件/服务端的，不看
 CACHE_FILE = Path.home() / "LrMcp" / "app_update_check.json"
@@ -30,7 +32,7 @@ CHECK_EVERY_SECONDS = 24 * 3600
 TIMEOUT_SECONDS = 8.0
 MAX_BYTES = 1_000_000                      # 响应超过这么大就当格式异常拒绝
 _VERSION = re.compile(rf"^(?:{re.escape(TAG_PREFIX)})?(\d{{1,4}})\.(\d{{1,5}})\.(\d{{1,5}})$")
-_PAGE_PREFIX = f"/{REPO}/releases/"
+_PAGE_PREFIXES = tuple(f"/{r}/releases/" for r in ACCEPTED_REPOS)
 
 IDLE, CHECKING, LATEST, AVAILABLE, UNAVAILABLE = "idle", "checking", "latest", "available", "unavailable"
 MSG_CHECKING = "检查中…"
@@ -54,7 +56,7 @@ def release_version(tag) -> tuple[int, int, int] | None:
 
 
 def valid_release_url(url) -> bool:
-    """只接受本仓库 releases 下的 https://github.com 网页链接（拒绝其他域名、其他协议、带账号/端口、含 .. 或控制字符的）。"""
+    """只接受本仓库（现名或旧名）releases 下的 https://github.com 网页链接（拒绝其他域名、其他协议、带账号/端口、含 .. 或控制字符的）。"""
     if not isinstance(url, str) or not url or len(url) > 300 or any(ord(c) < 33 or ord(c) == 127 for c in url):
         return False
     try:
@@ -64,7 +66,8 @@ def valid_release_url(url) -> bool:
         return False
     if u.scheme != "https" or u.netloc != "github.com" or u.username or u.password or port is not None:
         return False
-    if not u.path.startswith(_PAGE_PREFIX) or len(u.path) == len(_PAGE_PREFIX) or ".." in u.path.split("/"):
+    prefix = next((p for p in _PAGE_PREFIXES if u.path.startswith(p)), None)
+    if prefix is None or len(u.path) == len(prefix) or ".." in u.path.split("/"):
         return False
     return True
 
