@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Update notice: once a day, ask GitHub whether a newer release exists. Nothing is downloaded or installed.
 
 The only request is an anonymous HTTPS GET of the public "latest release" page of this project (no data about the

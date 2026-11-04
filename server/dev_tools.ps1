@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 # Development helpers for running Lua test scripts inside Lightroom through the dev bridge.
 # Usage:  . .\server\dev_tools.ps1 ; Invoke-DevScript select_test_photo.lua
 #

@@ -1,3 +1,5 @@
+; SPDX-License-Identifier: AGPL-3.0-only
+; Copyright (C) 2026 Denvolatos and contributors
 ; Inno Setup script for Lightroom MCP (LrMCP). Build with build.ps1 (it passes /DAppVer=x.y.z).
 ; Per-user install, no administrator rights needed. Run it as a normal user, NOT from a program that Claude
 ; Desktop started: Claude Desktop is an MSIX app and redirects AppData writes of its child processes.

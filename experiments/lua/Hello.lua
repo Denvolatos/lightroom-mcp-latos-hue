@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Menu item: Library > Plug-in Extras > "LrMCP: Hello (experiment 1)".
 -- Read-only: reports version, sandbox facts and the open catalog, then shows
 -- the same text in a dialog and writes it to the log.

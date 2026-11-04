@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 import asyncio
 import copy
 import json
@@ -1005,3 +1007,39 @@ def test_version_folder_names_cannot_escape(env):
     for bad in ("../x", "a/b", "", "short"):
         with pytest.raises(Exception):
             service.versions.save(bad, "n", "x", "", {}, None)
+
+
+# ---- apply_settings (desktop app only: "my presets") ------------------------------------------------------------
+def test_apply_settings_writes_one_undoable_change_past_the_step_limit(env):
+    lr, store, service, _ = env
+    values = lr.photos[A]["values"]
+    result = service.apply_settings({"Exposure2012": 1.5, "Highlights2012": -80, "Saturation": 60,
+                                     "ToneCurvePV2012": [0, 0, 64, 100, 192, 220, 255, 255]}, label="x")
+    assert result["verified"] and result["settings_changed"] == 4
+    assert values["Exposure2012"] == 1.5 and values["Highlights2012"] == -80          # beyond the +-30/+-1 step of set_develop
+    assert values["ToneCurvePV2012"] == [0, 0, 64, 100, 192, 220, 255, 255]
+    assert service.apply_settings({"Exposure2012": 1.5})["settings_changed"] == 0     # already there: nothing written
+    service.restore(result["edit_id"])
+    assert values["Exposure2012"] == 0 and values["Highlights2012"] == 0 and values["ToneCurvePV2012"] == [0, 0, 255, 255]
+
+
+@pytest.mark.parametrize("bad", [
+    {"Look": 1}, {"Exposure2012": 9}, {"Exposure2012": float("nan")}, {"Exposure2012": True}, {"Exposure2012": "1"},
+    {"ToneCurvePV2012": [0, 0, 100]}, {"ToneCurvePV2012": [0, 0, 100, 50, 50, 20, 255, 255]}, {"ToneCurvePV2012": [5, 0, 255, 255]},
+    {"WhiteBalance": "Nonsense"}, {}, None,
+])
+def test_apply_settings_refuses_bad_input_without_writing(env, bad):
+    lr, store, service, _ = env
+    with pytest.raises(EditError):
+        service.apply_settings(bad)
+    assert lr.write_calls == 0
+
+
+def test_apply_settings_respects_read_only_and_skips_unknown_keys(env):
+    lr, store, service, tmp = env
+    del lr.photos[A]["values"]["Dehaze"]
+    result = service.apply_settings({"Dehaze": 10, "Contrast2012": 5})
+    assert result["skipped"] == ["Dehaze"] and result["settings_changed"] == 1
+    (tmp / "readonly").write_text("1")
+    with pytest.raises(ReadOnlyError):
+        service.apply_settings({"Contrast2012": 9})

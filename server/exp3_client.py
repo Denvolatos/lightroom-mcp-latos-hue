@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Experiment 3: Python client for the plug-in's two LrSocket servers.
 
 Waits for ~/LrMcp/sock_ports (written by the plug-in), connects to both ports, then runs:

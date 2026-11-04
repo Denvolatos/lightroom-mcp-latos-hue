@@ -1,0 +1,19 @@
+﻿Latos Hue (修图助手) - please read / 请先看一眼
+================================================
+
+1. This software is open source (AGPL-3.0, the next page shows the full text).
+   本软件是开源软件，许可证是 AGPL-3.0（下一页是全文）。
+
+2. Latos Hue does NOT contain any Adobe software and is NOT an Adobe product. You need your own Lightroom Classic.
+   Latos Hue 不含任何 Adobe 软件，也不是 Adobe 官方产品；Lightroom Classic 需要你自己已经装好。
+
+3. Your photos are processed on this computer only. When you ask the AI to retouch a photo, a preview of the selected
+   photo is sent to the AI service you chose (Claude or Codex). Nothing else is uploaded.
+   你的照片只在本机处理。修图时，选中照片的预览图会发送给你所选的 AI 服务（Claude 或 Codex），除此之外不会上传任何东西。
+
+4. The installer puts a small plug-in into Lightroom's plug-in folder so the two programs can talk to each other
+   (%APPDATA%\Adobe\Lightroom\Modules\LrMcp.lrplugin). It does not change your photos or your catalog.
+   安装程序会把一个小插件放进 Lightroom 的插件文件夹，让两个程序能互相通信；不会改动你的照片和目录。
+
+5. No administrator rights are needed. Nothing starts with Windows, and no system setting is changed.
+   不需要管理员权限；不会开机自启，也不会改动系统设置。

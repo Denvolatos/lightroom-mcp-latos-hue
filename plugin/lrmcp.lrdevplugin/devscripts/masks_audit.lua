@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script: how many mask groups does each TEST photo hold, and what are they? Optionally clears them (CLEAR=true below
 -- only for photos whose groups are all named "LrMCP test"). Written for cleaning up after the mask experiments.
 local ctx = ...

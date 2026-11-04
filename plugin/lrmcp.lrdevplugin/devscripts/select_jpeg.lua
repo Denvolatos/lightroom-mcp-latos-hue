@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script: select one JPEG photo of the TEST catalog (changes only Lightroom's selection, not any photo).
 local ctx = ...
 local import = ctx.import

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Named versions of one photo: "save how this photo looks now under a name, come back to it later".
 
 Local files only, in ``~/LrMcp/knowledge/versions/<photo id>/``: one JSON per version (the whole set of settings this project may

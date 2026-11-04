@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script: can a plain linear-gradient mask be written through applyDevelopSettings (no UI)? TEST catalog only.
 -- Writes one mask, reads it back, clears it, and compares the whole settings snapshot with the start.
 local ctx = ...

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Compile every plug-in Lua file with a Lua 5.1 interpreter (the version Lightroom uses) to catch syntax errors
 before the plug-in is loaded into Lightroom. Needs the optional package ``lupa`` (pip install lupa).
 

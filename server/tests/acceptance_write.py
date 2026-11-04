@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """v1.1 acceptance check for the WRITE tools against a real Lightroom.
 
 SAFETY: runs only when the open catalog's path contains "ceshi" (the test catalog) and exactly one photo is selected.

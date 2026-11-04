@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Run the plug-in's real Bridge.lua (poller + manager) against a fake Lightroom SDK, in a Lua 5.1 interpreter.
 Covers the 0.14 reconnect fix: after a 401 / refused connection the poller re-reads the announcement at once.
 Skipped when the optional package ``lupa`` is not installed."""

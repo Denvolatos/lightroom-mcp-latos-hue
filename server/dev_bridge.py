@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Development bridge (NOT part of the shipped product).
 
 Lets the developer run Lua test scripts inside Lightroom without clicking menus:

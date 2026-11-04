@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script: smoke test of the dev bridge. Read-only.
 local ctx = ...
 local import = ctx.import

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """End-to-end check against a real Lightroom: hosts the bridge in this process, waits for the plug-in to
 connect, then calls every command through the same code path the MCP tools use.
 

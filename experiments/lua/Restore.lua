@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Menu item: "LrMCP: Restore white balance (experiment 4b)".
 -- Select the same TEST photo used in experiment 4. It
 --   1. writes WhiteBalance = "As Shot" back,

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """The new tools through the MCP layer, with a fake bridge: lr_export (what it accepts and what it passes on), lr_save_version,
 lr_list_versions, lr_apply_version, lr_compare."""
 import asyncio

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Changing develop settings safely (v1.1): what may be changed, backups of the old values, restore.
 
 Rules (each one was measured on Lightroom Classic 15.2, see docs/实验记录.md):
@@ -242,6 +244,25 @@ def validate_curve(key: str, value: object) -> list[float]:
         raise EditError(f"{key} 的 y 不能往回走（曲线必须一直向上或持平；不支持反相曲线）。")
     if any(abs(y - x) > MAX_CURVE_DEVIATION for x, y in zip(xs, ys)):
         raise EditError(f"{key} 的每个点离直线（y = x）最多 {MAX_CURVE_DEVIATION:g}，一次改太大了。请先改一部分，用 lr_get_preview 看效果再继续。")
+    return [float(n) for n in flat]
+
+
+def validate_curve_shape(key: str, value: object) -> list[float]:
+    """Like validate_curve but WITHOUT the "how far from the diagonal" limit: for putting a stored curve back (versions, presets)."""
+    flat: list[float] = []
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            if isinstance(item, (list, tuple)):
+                flat.extend(item)
+            else:
+                flat.append(item)
+    if not flat or len(flat) % 2 or len(flat) > 2 * MAX_CURVE_POINTS:
+        raise EditError(f"{key} 必须是 2 到 {MAX_CURVE_POINTS} 个点的列表。")
+    if any(isinstance(n, bool) or not isinstance(n, (int, float)) or not math.isfinite(n) or not 0 <= n <= 255 for n in flat):
+        raise EditError(f"{key} 里的坐标必须是 0 到 255 的数字。")
+    xs, ys = flat[0::2], flat[1::2]
+    if xs[0] != 0 or xs[-1] != 255 or any(b <= a for a, b in zip(xs, xs[1:])) or any(b < a for a, b in zip(ys, ys[1:])):
+        raise EditError(f"{key} 的点必须从 x=0 到 x=255、x 递增、y 不回退。")
     return [float(n) for n in flat]
 
 
@@ -972,6 +993,141 @@ class EditService:
             "curves_changed": [k for k in changed if isinstance(changed[k], (list, dict))],
             "undo": f"lr_restore(edit_id=\"{record['edit_id']}\") 回到切换之前的样子。",
         }
+
+    def apply_settings(self, values: dict, reason: str = "", photo: str = "selected", label: str = "") -> dict:
+        """Desktop app only (NOT an MCP tool): write a set of whitelisted settings to ONE photo as ONE change that lr_restore can undo.
+
+        Used by the app's "my presets": the user clicked a confirmation list, so this is the permission. Like apply_version it is
+        not limited by the per-call step; unlike it, nothing is read from a version file. Keys outside LIMITS / CURVE_KEYS /
+        WhiteBalance are refused, numbers must be finite and inside their range. Keys the photo does not have are skipped.
+        """
+        self.check_writable()
+        if not isinstance(values, dict) or not values:
+            raise EditError("没有要写入的参数。")
+        clean: dict = {}
+        for key, value in values.items():
+            if key in CURVE_KEYS:
+                clean[key] = validate_curve_shape(key, value)
+            elif key == "WhiteBalance":
+                if value not in WB_LABELS:
+                    raise EditError(f"WhiteBalance 的取值无效：{value!r}。")
+                clean[key] = value
+            elif key in LIMITS:
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                    raise EditError(f"{key} 的值必须是有限的数字。")
+                low, high, _ = LIMITS[key]
+                if value < low or value > high:
+                    raise EditError(f"{key} 的取值范围是 {low:g} 到 {high:g}，给的是 {value:g}。")
+                clean[key] = float(value)
+            else:
+                raise EditError(f"不允许修改“{key}”。")
+        photo_id, photo_name = self.photo_id_of(photo)
+        snap = self.call("snapshot", {"photo": photo_id}, timeout=60)
+        current = snap.get("settings", {})
+        target = {k: v for k, v in clean.items() if k in current}
+        changed = {k: v for k, v in target.items() if not self._same(current.get(k), v)}
+        skipped = sorted(k for k in clean if k not in current)
+        if not changed:
+            return {"photo": photo_name, "photo_id": photo_id, "settings_changed": 0, "skipped": skipped,
+                    "note": "这张照片现在已经是这个样子，没有做任何改动。"}
+        record = {
+            "edit_id": self.store.new_id(), "kind": "set", "status": "pending", "generic": True,
+            "created": time.strftime("%Y-%m-%d %H:%M:%S"), "created_ns": _now_ns(),
+            "photo_id": photo_id, "photo_name": photo_name, "reason": str(reason)[:500] or str(label)[:200],
+            "requested": {"settings": str(label)[:100] or "settings"}, "before": {},
+            "snapshot": current,  # the whole state is on disk BEFORE anything is written
+        }
+        self.store.save(record)
+        try:
+            data = self._write_generic(photo_id, record["edit_id"], changed)
+        except BridgeTimeout as e:
+            record.update(status="uncertain", error=str(e))
+            self.store.save(record)
+            raise
+        except Exception as e:
+            record.update(status="failed", error=str(e))
+            record.pop("snapshot", None)
+            self.store.save(record)
+            raise
+        record.update(status="applied", before={k: current[k] for k in changed}, after=dict(changed), changed_keys=sorted(changed),
+                      new_keys=[], verified=bool(data.get("verified")))
+        record.pop("snapshot", None)
+        self.store.save(record)
+        rows = [{"parameter": k, "before": current[k], "after": changed[k]} for k in sorted(changed)]
+        return {
+            "edit_id": record["edit_id"], "photo": photo_name, "photo_id": photo_id, "verified": record["verified"],
+            "settings_changed": len(changed), "changes": rows, "skipped": skipped,
+            "undo": f"lr_restore(edit_id=\"{record['edit_id']}\") 回到写入之前的样子。",
+        }
+
+    # ---- import (desktop app only; deliberately NOT an MCP tool, the AI cannot call it) ----------------
+    def import_photo(self, path: str) -> dict:
+        """Add one photo file already on this computer to the catalog ("add, do not move"). The plug-in re-checks the path.
+
+        Returns {"status": "imported" | "already" | "uncertain", "already": bool, "photo_id", "name", "message"}.
+        Read-only mode refuses it (ReadOnlyError); a plug-in refusal raises BridgeError; a timeout gives "uncertain".
+        """
+        self.check_writable()
+        if not isinstance(path, str) or not path.strip():
+            raise EditError("请给出要导入的照片文件路径。")
+        encoded = urllib.parse.quote(path, safe="")
+        try:
+            data = self.call("import_photo", {"path": encoded}, timeout=60)
+        except BridgeTimeout as e:
+            return {
+                "status": "uncertain", "already": False, "photo_id": None, "name": Path(path).name,
+                "message": "Lightroom 没有在时限内回复，不确定这张照片有没有被加入目录。请在 Lightroom 里确认（不要急着重试）。",
+                "error": str(e),
+            }
+        already = bool(data.get("already"))
+        name = data.get("name") or Path(path).name
+        return {
+            "status": "already" if already else "imported", "already": already,
+            "photo_id": data.get("id"), "name": name, "photo": data.get("photo"),
+            "message": f"{name} 本来就在目录里，没有重复添加。" if already else f"已把 {name} 添加到目录（没有移动、复制或删除任何文件）。",
+        }
+
+    # ---- export for the desktop app (NOT an MCP tool; lr_export stays JPEG-only and cannot choose a format) ----
+    def export_photo_for_app(self, folder: str, format: str = "jpeg", long_edge: int = 0, quality: int = 90,
+                             metadata: str = "minimal", bit_depth: int = 16, photo: str = "selected") -> dict:
+        """Export the selected photo as JPEG or TIFF into an existing local folder. The plug-in re-checks the folder.
+
+        Export changes no photo, so the read-only switch does not block it (same as lr_export). A timeout gives
+        {"status": "uncertain"}: the file may or may not exist, check the folder before trying again.
+        """
+        def is_int(v):
+            return isinstance(v, int) and not isinstance(v, bool)
+
+        if format not in ("jpeg", "tiff"):
+            raise EditError("format 只能是 jpeg 或 tiff。")
+        if not is_int(long_edge) or (long_edge != 0 and not 256 <= long_edge <= 20000):
+            raise EditError("long_edge 要么是 0（原始尺寸），要么在 256 到 20000 之间。")
+        if not is_int(quality) or not 40 <= quality <= 100:
+            raise EditError("quality 要在 40 到 100 之间。")
+        if not is_int(bit_depth) or bit_depth not in (8, 16):
+            raise EditError("bit_depth 只能是 8 或 16。")
+        if metadata not in ("minimal", "all"):
+            raise EditError("metadata 只能是 minimal 或 all。")
+        if photo != "selected" and not (isinstance(photo, str) and re.fullmatch(r"[A-Za-z0-9\-]{1,64}", photo)):
+            raise EditError('photo 只能是 "selected" 或照片 id。')
+        if (not isinstance(folder, str) or not folder.strip() or len(folder) > 400 or re.search(r"[\x00-\x1f\x7f]", folder)
+                or folder.startswith(("\\\\", "//")) or not (re.match(r"^[A-Za-z]:[\\/]", folder) or folder.startswith("/"))):
+            raise EditError("导出文件夹要是本机文件夹的完整路径，比如 D:\\照片\\导出；网络路径（\\\\...）不允许。")
+        params = {"photo": photo, "folder": urllib.parse.quote(folder, safe=""), "format": format,
+                  "long_edge": str(long_edge), "metadata": metadata}
+        if format == "jpeg":
+            params["quality"] = str(quality)
+        else:
+            params["bit_depth"] = str(bit_depth)   # quality does not apply to TIFF and is not sent
+        try:
+            data = self.call("export_photo", params, timeout=300)
+        except BridgeTimeout as e:
+            return {
+                "status": "uncertain", "format": format, "folder": folder,
+                "message": "Lightroom 没有在时限内回复，不确定有没有导出成功。请到文件夹里确认有没有新文件（不要急着重试，以免重复导出）。",
+                "error": str(e),
+            }
+        return {"status": "exported", **data}
 
     # ---- presets ---------------------------------------------------
     def list_presets(self, query: str = "", limit: int = 30) -> dict:

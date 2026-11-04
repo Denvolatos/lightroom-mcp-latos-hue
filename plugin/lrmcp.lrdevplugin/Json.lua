@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Minimal JSON encoder (the SDK has none). Responses only; commands from the server are plain "key=value" text.
 local Json = {}
 

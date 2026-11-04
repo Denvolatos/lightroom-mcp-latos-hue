@@ -3,11 +3,37 @@
 Versions: a new feature raises the middle number, a small fix the last one. The server version lives in
 `server/lightroom_mcp/__init__.py`, the plug-in version in `plugin/lrmcp.lrdevplugin/Version.lua` (and `Info.lua`).
 
-## Unreleased — license
+## 0.15.0 (2026-11-04) — import command and library commands for the desktop app, AGPL-3.0
 
-- The project's own code is now licensed under the **GNU AGPL-3.0** (was MIT), from the commits of 2026-11-03 on. In short: free
+- **License change:** The project's own code is now licensed under the **GNU AGPL-3.0** (was MIT), from the commits of 2026-11-03 on. In short: free
   to use, change and share; a distributed (or network-served) modified version must publish its source under the AGPL-3.0 too.
   The releases v0.1.0 to v0.14.0 that were published before stay under the MIT license.
+  Every own source file now carries an `SPDX-License-Identifier: AGPL-3.0-only` header; `THIRD_PARTY_NOTICES.md` lists the bundled packages.
+- New plug-in command `import_photo`: adds one photo file that is already on this computer to the Lightroom catalog, the same as
+  "Add" (not move) in the import dialog. It is for the desktop app on this computer only and is **not an MCP tool**: the tool list
+  is unchanged (22 tools), so an AI assistant cannot call it.
+- The plug-in does not trust the path it is given. It refuses: anything that is not a local drive path (`X:\...`), network paths
+  (`\\server\share\...`), `..` in the path, system and program folders and this tool's own data folder (the same list as export),
+  files that do not exist or are folders, and any extension outside `jpg jpeg arw cr2 cr3 nef nrw raf orf rw2 dng tif tiff heic
+  heif png` (case does not matter). A photo that is already in the catalog is not added twice (the reply says `already`).
+- Nothing is moved, copied or deleted, and no develop or metadata preset is applied. The server side
+  (`EditService.import_photo`) is refused by the read-only switch; a timeout is reported as "uncertain, check in Lightroom".
+- TIFF export for the desktop app only: the plug-in command `export_photo` takes an optional `format` (`jpeg`, the default and
+  unchanged, or `tiff`) and `bit_depth` (`8` or `16`, default 16). TIFF is sRGB with lossless ZIP compression, the file ends in
+  `.tif`, `quality` does not apply, and every folder check and the never-overwrite rule are the same as for JPEG. Any other
+  `format` is refused. The server side is `EditService.export_photo_for_app`, which is **not an MCP tool**: `lr_export` keeps its
+  parameters and stays JPEG-only, so an AI assistant cannot ask for TIFF (the tool list is still 22 tools).
+- After updating, reload the plug-in once in Lightroom (the new command lives in the plug-in).
+- Also in 0.15.0 (desktop app only, **not an MCP tool**, tool list unchanged): `EditService.apply_settings` writes a set of whitelisted settings (sliders, curves, white balance label) to one photo as one change that `lr_restore` can undo. It is used by the desktop app's "my presets" after the user clicks a confirmation list; keys outside the whitelist and out-of-range numbers are refused, the read-only switch applies, and no existing tool changed. Tests added in `server/tests/test_edits.py`.
+- Library browsing for the desktop app, so photos can be browsed and picked in the app instead of in Lightroom. Three new
+  plug-in commands, all **desktop app only and not MCP tools** (the tool list is still 22 tools; an AI assistant cannot call
+  them): `list_folder_photos` (photos of a catalog folder, with paging and an optional recursive flag; a folder that is not in
+  the catalog gives an empty answer, not an error), `get_thumbnails` (up to 24 JPEG thumbnails, 64-512 px, at most 150 KB each,
+  8 seconds per photo before `timeout`), and `select_photos` (selects photos in Lightroom, optionally switching to a folder
+  first, and reports what is really selected afterwards). They read catalog metadata and thumbnails or change only the
+  selection, never a photo or the catalog. Folder paths are checked like import and export. The server side is
+  `LibraryService` in `library.py`; the read-only switch does not block it.
+- Upgrading needs a plug-in reload (the three commands live in the plug-in).
 
 ## 0.14.0 — reconnect fix
 

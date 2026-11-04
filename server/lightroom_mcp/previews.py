@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Preview file handling and picture statistics (Lightroom's SDK has no histogram API, so we compute it)."""
 from __future__ import annotations
 

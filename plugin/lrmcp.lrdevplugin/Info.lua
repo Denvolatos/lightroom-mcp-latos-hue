@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- LrMCP: lets Claude / Codex look at photos (read-only in v1.0). Not an Adobe product.
 return {
 	LrSdkVersion = 15.0,
@@ -16,5 +18,5 @@ return {
 	},
 
 	-- Keep in sync with Version.lua
-	VERSION = { major = 0, minor = 14, revision = 0, build = "dev" },
+	VERSION = { major = 0, minor = 15, revision = 0, build = "dev" },
 }

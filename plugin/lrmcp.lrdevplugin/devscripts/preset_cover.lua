@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script (READ ONLY): how many presets only carry settings that lr_set_develop could write and restore?
 local ctx = ...
 local import = ctx.import

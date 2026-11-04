@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- The plug-in's side of the local bridge. Every running lrmcp server (one per AI session) announces itself in
 -- ~/LrMcp/servers/<port>.txt (port, token, pid). This file polls ALL of them (GET /poll), runs the whitelisted
 -- command each one asks for and answers with POST /result. Commands from different servers run one at a time.

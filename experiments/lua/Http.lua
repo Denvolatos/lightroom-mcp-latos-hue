@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Menu item: "LrMCP: HTTP test (experiment 2)".
 -- Talks to server/exp2_server.py on 127.0.0.1 (read-only for Lightroom: touches no photos).
 -- Tests: auth ok / wrong token / Origin header / latency / slow reply / timeout.

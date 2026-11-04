@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- DEVELOPMENT ONLY (excluded from release builds). Used by Bridge.lua.
 -- Runs a Lua test script by NAME from this plug-in's own devscripts/ folder, and only while the flag file
 -- ~/LrMcp/dev_enabled exists (created by the dev server, removed when it stops).

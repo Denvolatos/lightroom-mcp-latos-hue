@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script: select one photo of the TEST catalog (changes only Lightroom's selection, not any photo).
 -- The photo is the first one whose file name contains "238" (a RAW in the ceshi folder).
 local ctx = ...

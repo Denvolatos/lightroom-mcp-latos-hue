@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """Smoke test over real stdio: start the server command given on the command line, list its tools,
 call lr_status (Lightroom need not be running) and print the results.
 

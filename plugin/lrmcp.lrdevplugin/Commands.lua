@@ -1,11 +1,16 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- The whitelist of commands the Python server may ask for. v1.0: all read-only.
 -- Every command returns a table (encoded to JSON by Bridge.lua) or raises fail("message") for the user.
 -- Nothing here accepts a file path from the request; previews are written to a fixed folder.
 local LrApplication = import "LrApplication"
 local LrDate = import "LrDate"
 local LrExportSession = import "LrExportSession"
+local LrExportSettings = import "LrExportSettings"
 local LrFileUtils = import "LrFileUtils"
 local LrPathUtils = import "LrPathUtils"
+local LrStringUtils = import "LrStringUtils"
+local LrTasks = import "LrTasks"
 
 local Json = require "Json.lua"
 local Limits = require "Limits.lua"
@@ -169,7 +174,8 @@ function M.get_develop(params)
 end
 
 -- name: file name without extension; dir: destination folder; edge: pixels of the long side (0 = original size)
-local function exportSettings(name, dir, edge, quality, minimalMetadata)
+-- tiff: nil for JPEG (unchanged); or { bitDepth = 8|16 } for TIFF (sRGB, lossless ZIP compression, no JPEG quality)
+local function exportSettings(name, dir, edge, quality, minimalMetadata, tiff)
 	local settings = {
 		LR_export_destinationType = "specificFolder",
 		LR_export_destinationPathPrefix = dir,
@@ -193,6 +199,14 @@ local function exportSettings(name, dir, edge, quality, minimalMetadata)
 		LR_useWatermark = false,
 		LR_includeVideoFiles = false,
 	}
+	if tiff then
+		-- Verified on real Lightroom 15.2 (2026-11-03: 16-bit and 8-bit files, ZIP compression, ICC profile embedded): the SDK documents only LR_format = 'TIFF'; the two keys below are the ones Lightroom
+		-- itself writes for TIFF export presets and are not listed in the SDK docs
+		settings.LR_format = "TIFF"
+		settings.LR_jpeg_quality = nil
+		settings.LR_export_bitDepth = tiff.bitDepth
+		settings.LR_tiff_compressionMethod = "compressionMethod_ZIP"
+	end
 	if edge > 0 then
 		settings.LR_size_resizeType = "longEdge"
 		settings.LR_size_maxHeight = edge
@@ -925,12 +939,29 @@ local function checkExportFolder(path)
 end
 
 -- Parameters: photo=<"selected"|uuid>, and ONE of folder=<percent-encoded absolute path> | destination=desktop|pictures|documents|data;
--- optional long_edge=0 (original size) | 256..20000, quality=40..100, metadata=minimal|all
+-- optional long_edge=0 (original size) | 256..20000, quality=40..100, metadata=minimal|all,
+-- format=jpeg (default) | tiff, bit_depth=8|16 (TIFF only, default 16; quality is ignored for TIFF).
+-- TIFF is reachable only from the desktop app: the MCP tool lr_export never sends "format".
 function M.export_photo(params)
 	local catalog = LrApplication.activeCatalog()
 	local photo = photoFromRef(catalog, params.photo)
 	if photo:getRawMetadata("isVideo") then
 		fail("这是视频文件，暂不支持导出。")
+	end
+	local format = params.format
+	if format == nil or format == "" then
+		format = "jpeg"
+	end
+	if format ~= "jpeg" and format ~= "tiff" then
+		fail("format 只能是 jpeg 或 tiff。")
+	end
+	local isTiff = format == "tiff"
+	local bitDepth = 16
+	if isTiff and params.bit_depth ~= nil and params.bit_depth ~= "" then
+		bitDepth = tonumber(params.bit_depth)
+		if bitDepth ~= 8 and bitDepth ~= 16 then
+			fail("bit_depth 只能是 8 或 16。")
+		end
 	end
 	local destination = params.destination
 	local root
@@ -959,6 +990,7 @@ function M.export_photo(params)
 	end
 	quality = math.max(40, math.min(100, math.floor(quality)))
 	local minimal = params.metadata ~= "all"
+	local ext = isTiff and LrExportSettings.extensionForFormat("TIFF") or "jpg"
 
 	-- the file name comes from the photo's own file name, only safe characters; the first free name is used
 	local leaf = LrPathUtils.leafName(photo:getRawMetadata("path") or "photo")
@@ -968,15 +1000,15 @@ function M.export_photo(params)
 	end
 	local stem = base .. "_LrMCP" .. (longEdge > 0 and ("_" .. longEdge .. "px") or "_full")
 	local name, n = stem, 1
-	while LrFileUtils.exists(LrPathUtils.child(root, name .. ".jpg")) do
+	while LrFileUtils.exists(LrPathUtils.child(root, name .. "." .. ext)) do
 		n = n + 1
 		name = stem .. "_" .. n
 	end
-	local path = LrPathUtils.child(root, name .. ".jpg")
+	local path = LrPathUtils.child(root, name .. "." .. ext)
 
 	LrExportSession({
 		photosToExport = { photo },
-		exportSettings = exportSettings(name, root, longEdge, quality / 100, minimal),
+		exportSettings = exportSettings(name, root, longEdge, quality / 100, minimal, isTiff and { bitDepth = bitDepth } or nil),
 	}):doExportOnCurrentTask()
 	if not LrFileUtils.exists(path) then
 		fail("Lightroom 没有生成导出文件（可能被导出设置、磁盘空间或权限拦截）。")
@@ -990,16 +1022,439 @@ function M.export_photo(params)
 	end
 	return {
 		path = path,
-		file = name .. ".jpg",
+		file = name .. "." .. ext,
 		folder = root,
 		destination = destination,
 		bytes = attrs and attrs.fileSize,
 		width = width,
 		height = height,
 		long_edge = longEdge,
-		quality = quality,
+		format = format,
+		extension = ext,
+		quality = (not isTiff) and quality or nil,
+		bit_depth = isTiff and bitDepth or nil,
 		metadata = minimal and "minimal" or "all",
 		photo = describe(photo),
+	}
+end
+
+-- ---------------------------------------------------------------------------------------------------------------------
+-- Import (v0.15): adds ONE photo file that already sits on this computer to the catalog, the same as "Add" in Lightroom's
+-- import dialog (nothing is moved, copied or deleted; no develop or metadata preset). It is for the desktop app only and is
+-- NOT an MCP tool, so the AI cannot call it. Because a path comes from a request, it is checked here and not trusted:
+-- a local drive path (X:\...), no network path, no "..", nothing under the system folders of BLOCKED_FOLDERS (this tool's own
+-- data folder included), an existing file (not a folder) with a photo extension. Parameter: path=<percent-encoded>.
+-- ---------------------------------------------------------------------------------------------------------------------
+local IMPORT_EXTENSIONS = {
+	jpg = true, jpeg = true, arw = true, cr2 = true, cr3 = true, nef = true, nrw = true, raf = true, orf = true,
+	rw2 = true, dng = true, tif = true, tiff = true, heic = true, heif = true, png = true,
+}
+
+local function checkImportPath(path)
+	if path == "" or #path > 400 or path:find("%c") then
+		fail("照片路径不合法（为空、太长或含控制字符）。")
+	end
+	if path:sub(1, 2) == "\\\\" or path:sub(1, 2) == "//" then
+		fail("不允许导入网络路径上的照片。请用本机磁盘上的文件。")
+	end
+	if not path:match("^%a:[\\/]") then
+		fail("照片路径必须是本机的完整路径，比如 D:\\照片\\a.jpg 。")
+	end
+	local norm = (path:gsub("\\", "/")):lower()
+	norm = norm:gsub("//+", "/")
+	for part in norm:gmatch("[^/]+") do
+		if part == ".." then
+			fail("路径里不能有 .. 。")
+		end
+	end
+	for _, bad in ipairs(BLOCKED_FOLDERS) do
+		if (norm .. "/"):find(bad, 1, true) then
+			fail("这个位置不允许导入（系统目录，或本工具自己的数据目录）：" .. path)
+		end
+	end
+	local ext = path:match("%.([^%.\\/]+)$")
+	if not ext or not IMPORT_EXTENSIONS[ext:lower()] then
+		fail("不支持这种文件格式（只接受常见的照片格式：jpg jpeg arw cr2 cr3 nef nrw raf orf rw2 dng tif tiff heic heif png）：" .. path)
+	end
+	local kind = LrFileUtils.exists(path)
+	if kind == "directory" then
+		fail("这是一个文件夹，不是照片文件：" .. path)
+	end
+	if kind ~= "file" then
+		fail("这个文件不存在：" .. path .. "。导入不会替你创建或复制文件。")
+	end
+end
+
+function M.import_photo(params)
+	local raw = params.path
+	if raw == nil or raw == "" then
+		fail("请给出要导入的照片路径（path）。")
+	end
+	local path = (raw:gsub("%%(%x%x)", function(h)
+		return string.char(tonumber(h, 16))
+	end))
+	checkImportPath(path)
+	local catalog = LrApplication.activeCatalog()
+	local name = LrPathUtils.leafName(path)
+	local existing = catalog:findPhotoByPath(path)
+	if existing then
+		return { already = true, imported = false, id = existing:getRawMetadata("uuid"), name = name, photo = describe(existing) }
+	end
+
+	local added, addError
+	local result = catalog:withWriteAccessDo("LrMCP import", function()
+		-- LrTasks.pcall, not pcall: addPhoto yields inside the write gate and a plain pcall forbids that
+		-- ("AgEventLoop.yieldToScheduler called when yielding is not allowed", found on real Lightroom 15.2).
+		local ok, res = LrTasks.pcall(function()
+			return catalog:addPhoto(path)
+		end)
+		if ok then
+			added = res
+		else
+			addError = type(res) == "table" and res.lrmcp or tostring(res)
+		end
+	end, { timeout = 15 })
+	if result ~= "executed" then
+		fail("Lightroom 现在不能写入（可能正忙），没有导入任何照片，请稍后再试。")
+	end
+	if addError then
+		fail("Lightroom 拒绝导入这个文件：" .. addError)
+	end
+	local photo = added or catalog:findPhotoByPath(path)
+	if not photo then
+		fail("Lightroom 没有报错，但在目录里没找到这张照片，请在 Lightroom 里确认。")
+	end
+	return { already = false, imported = true, id = photo:getRawMetadata("uuid"), name = name, photo = describe(photo) }
+end
+
+-- ---------------------------------------------------------------------------------------------------------------------
+-- Library browsing for the desktop app (v0.15): list_folder_photos, get_thumbnails, select_photos. They exist so the app can show
+-- the photos of a folder and let the user pick there, instead of in Lightroom. Desktop app only, NOT MCP tools (the AI cannot call
+-- them). list_folder_photos and get_thumbnails only read; select_photos changes Lightroom's selection (and, if asked, the folder
+-- shown), never a photo or the catalog. Paths and ids come from a request and are checked here. None of them is wrapped in the
+-- write gate: nothing is written. Waiting for a thumbnail uses LrTasks.sleep (and LrTasks.pcall), never a bare pcall.
+-- ---------------------------------------------------------------------------------------------------------------------
+local LIST_DEFAULT, LIST_MAX = 200, 500
+local THUMB_MAX_IDS, THUMB_MIN, THUMB_MAX, THUMB_DEFAULT = 24, 64, 512, 256
+local THUMB_MAX_BYTES = 150 * 1024
+local THUMB_TIMEOUT = 8 -- seconds per photo
+local SELECT_MAX_IDS = 50
+
+local function urlDecode(text)
+	return (text:gsub("%%(%x%x)", function(h)
+		return string.char(tonumber(h, 16))
+	end))
+end
+
+-- a folder of the catalog: local drive path, no network path, no "..", not under BLOCKED_FOLDERS. It need not exist on disk
+-- (a folder can be offline) and is not created; whether it is in the catalog is found out with getFolderByPath.
+local function checkLibraryFolder(path)
+	if path == "" or #path > 400 or path:find("%c") then
+		fail("文件夹路径不合法（为空、太长或含控制字符）。")
+	end
+	if path:sub(1, 2) == "\\\\" or path:sub(1, 2) == "//" then
+		fail("不允许使用网络路径。请用本机磁盘上的文件夹。")
+	end
+	if not path:match("^%a:[\\/]") then
+		fail("文件夹路径必须是本机的完整路径，比如 D:\\照片 。")
+	end
+	local norm = (path:gsub("\\", "/")):lower()
+	norm = norm:gsub("//+", "/")
+	for part in norm:gmatch("[^/]+") do
+		if part == ".." then
+			fail("路径里不能有 .. 。")
+		end
+	end
+	for _, bad in ipairs(BLOCKED_FOLDERS) do
+		if (norm .. "/"):find(bad, 1, true) then
+			fail("这个位置不允许浏览（系统目录，或本工具自己的数据目录）：" .. path)
+		end
+	end
+end
+
+local function folderPathArg(raw)
+	if raw == nil or raw == "" then
+		fail("请给出文件夹路径。")
+	end
+	local path = urlDecode(raw)
+	checkLibraryFolder(path)
+	if #path > 3 then
+		path = path:gsub("[\\/]+$", "")
+	end
+	return path
+end
+
+local function parseIds(raw, maxCount, what)
+	if raw == nil or raw == "" then
+		fail("请给出照片 id（" .. what .. "）。")
+	end
+	local ids, seen = {}, {}
+	for id in urlDecode(raw):gmatch("[^,]+") do
+		if #id > 64 or not id:match("^[%w%-]+$") then
+			fail("照片 id 不合法：只能是字母、数字和连字符。")
+		end
+		if not seen[id] then
+			seen[id] = true
+			ids[#ids + 1] = id
+		end
+	end
+	if #ids == 0 then
+		fail("请给出照片 id（" .. what .. "）。")
+	end
+	if #ids > maxCount then
+		fail(string.format("一次最多 %d 张照片。", maxCount))
+	end
+	return ids
+end
+
+function M.list_folder_photos(params)
+	local path = folderPathArg(params.path)
+	local recursive = params.recursive ~= "0"
+	local offset = math.floor(tonumber(params.offset) or 0)
+	local limit = math.floor(tonumber(params.limit) or LIST_DEFAULT)
+	if offset ~= offset or offset < 0 then
+		fail("offset 不能是负数。")
+	end
+	if limit ~= limit or limit < 1 or limit > LIST_MAX then
+		fail(string.format("limit 要在 1 到 %d 之间。", LIST_MAX))
+	end
+	local catalog = LrApplication.activeCatalog()
+	local folder = catalog:getFolderByPath(path)
+	if not folder then
+		return { in_catalog = false, total = 0, offset = offset, folder = path, photos = Json.array({}) }
+	end
+	local entries = {}
+	for _, photo in ipairs(folder:getPhotos(recursive) or {}) do
+		local p = photo:getRawMetadata("path") or ""
+		entries[#entries + 1] = { photo = photo, path = p, key = p:gsub("\\", "/"):lower(), uuid = photo:getRawMetadata("uuid") or "" }
+	end
+	table.sort(entries, function(a, b)
+		if a.key ~= b.key then
+			return a.key < b.key
+		end
+		return a.uuid < b.uuid
+	end)
+	local root = (path:gsub("\\", "/")):lower():gsub("/+$", "")
+	local out = {}
+	for i = offset + 1, math.min(#entries, offset + limit) do
+		local e = entries[i]
+		local photo = e.photo
+		local dims = photo:getRawMetadata("dimensions") or {}
+		local pick = photo:getRawMetadata("pickStatus")
+		local dir = (e.path:gsub("\\", "/")):match("^(.*)/[^/]*$") or ""
+		local subfolder = ""
+		if dir:lower():sub(1, #root) == root then
+			subfolder = dir:sub(#root + 2)
+		end
+		out[#out + 1] = {
+			id = e.uuid,
+			name = LrPathUtils.leafName(e.path),
+			path = e.path,
+			subfolder = subfolder,
+			format = photo:getRawMetadata("fileFormat"),
+			rating = photo:getRawMetadata("rating"),
+			flag = (pick == 1 and "pick") or (pick == -1 and "reject") or "none",
+			captured = photo:getRawMetadata("dateTimeOriginalISO8601"),
+			width = dims.width,
+			height = dims.height,
+			is_virtual_copy = photo:getRawMetadata("isVirtualCopy") and true or false,
+		}
+	end
+	return { in_catalog = true, total = #entries, offset = offset, folder = path, recursive = recursive, photos = Json.array(out) }
+end
+
+-- width and height from the JPEG's start-of-frame marker (nil when it cannot be read)
+local function jpegSize(data)
+	local pos, n = 3, #data
+	while pos + 8 <= n do
+		if data:byte(pos) ~= 0xFF then
+			return nil
+		end
+		local m = data:byte(pos + 1)
+		if m == 0xFF then
+			pos = pos + 1
+		elseif m == 0x01 or (m >= 0xD0 and m <= 0xD9) then
+			pos = pos + 2
+		else
+			if m >= 0xC0 and m <= 0xCF and m ~= 0xC4 and m ~= 0xC8 and m ~= 0xCC then
+				return data:byte(pos + 7) * 256 + data:byte(pos + 8), data:byte(pos + 5) * 256 + data:byte(pos + 6)
+			end
+			pos = pos + 2 + data:byte(pos + 2) * 256 + data:byte(pos + 3)
+		end
+	end
+	return nil
+end
+
+-- ask for one thumbnail and wait (this task sleeps, Lightroom keeps running) at most THUMB_TIMEOUT seconds. Returns data or nil, error.
+local function fetchThumbnail(photo, size)
+	local done, data, err = false, nil, nil
+	local ok, request = LrTasks.pcall(function()
+		return photo:requestJpegThumbnail(size, size, function(d, e)
+			done, data, err = true, d, e
+		end)
+	end)
+	if not ok then
+		return nil, tostring(type(request) == "table" and request.lrmcp or request)
+	end
+	local deadline = LrDate.currentTime() + THUMB_TIMEOUT
+	while not done and LrDate.currentTime() < deadline do
+		LrTasks.sleep(0.05)
+	end
+	local keep = request -- the request object must stay referenced until the callback has run
+	if not done then
+		return nil, "timeout"
+	end
+	if type(data) ~= "string" or data == "" then
+		return nil, tostring(err or "no_data")
+	end
+	return data
+end
+
+function M.get_thumbnails(params)
+	local ids = parseIds(params.ids, THUMB_MAX_IDS, "ids")
+	local size = THUMB_DEFAULT
+	if params.size ~= nil and params.size ~= "" then
+		size = tonumber(params.size)
+		if not size or size ~= size or size < THUMB_MIN or size > THUMB_MAX then
+			fail(string.format("size 要在 %d 到 %d 之间。", THUMB_MIN, THUMB_MAX))
+		end
+		size = math.floor(size)
+	end
+	local catalog = LrApplication.activeCatalog()
+	local out = {}
+	for _, id in ipairs(ids) do
+		local photo = catalog:findPhotoByUuid(id)
+		if not photo then
+			out[#out + 1] = { id = id, ok = false, error = "not_found" }
+		else
+			local data, err = fetchThumbnail(photo, size)
+			if data and #data > THUMB_MAX_BYTES then
+				data, err = fetchThumbnail(photo, math.max(THUMB_MIN, math.floor(size * 0.6)))
+				if data and #data > THUMB_MAX_BYTES then
+					data, err = nil, "too_large"
+				end
+			end
+			if data then
+				local w, h = jpegSize(data)
+				out[#out + 1] = { id = id, ok = true, jpeg_base64 = LrStringUtils.encodeBase64(data), width = w, height = h, bytes = #data }
+			else
+				out[#out + 1] = { id = id, ok = false, error = err }
+			end
+		end
+	end
+	return { size = size, thumbnails = Json.array(out) }
+end
+
+local function selectedIds(catalog)
+	-- getTargetPhotos() returns the whole filmstrip when nothing is selected, so look at getTargetPhoto() first
+	local ids = {}
+	if not catalog:getTargetPhoto() then
+		return ids
+	end
+	for _, p in ipairs(catalog:getTargetPhotos() or {}) do
+		ids[#ids + 1] = p:getRawMetadata("uuid")
+	end
+	return ids
+end
+
+function M.select_photos(params)
+	local ids = parseIds(params.ids, SELECT_MAX_IDS, "ids")
+	local activeId = params.active
+	if activeId ~= nil and activeId ~= "" then
+		activeId = urlDecode(activeId)
+		if #activeId > 64 or not activeId:match("^[%w%-]+$") then
+			fail("active 不合法：只能是照片 id。")
+		end
+	else
+		activeId = nil
+	end
+	local folderPath
+	if params.show_folder ~= nil and params.show_folder ~= "" then
+		folderPath = folderPathArg(params.show_folder)
+	end
+	local catalog = LrApplication.activeCatalog()
+	local found, missing, byId = {}, {}, {}
+	for _, id in ipairs(ids) do
+		local photo = catalog:findPhotoByUuid(id)
+		if photo then
+			found[#found + 1] = photo
+			byId[id] = photo
+		else
+			missing[#missing + 1] = id
+		end
+	end
+	if #found == 0 then
+		fail("在当前目录里找不到这些照片：id 无效，或 Lightroom 现在打开的是另一个目录。")
+	end
+	local active = activeId and byId[activeId] or found[1]
+	if activeId and not byId[activeId] then
+		missing[#missing + 1] = activeId
+	end
+	local others = {}
+	for _, p in ipairs(found) do
+		if p ~= active then
+			others[#others + 1] = p
+		end
+	end
+
+	local folderShown, folderNote = nil, nil
+	if folderPath then
+		local folder = catalog:getFolderByPath(folderPath)
+		if not folder then
+			folderShown, folderNote = false, "这个文件夹不在目录里，没有切换文件夹。"
+		else
+			local ok, res = LrTasks.pcall(function()
+				return catalog:setActiveSources({ folder })
+			end)
+			folderShown = ok and res == true
+			if not folderShown then
+				folderNote = "Lightroom 没有切换到这个文件夹。"
+			end
+		end
+	end
+
+	-- Right after setActiveSources Lightroom needs a moment to show the folder; until then the photos are not in the current
+	-- view and setSelectedPhotos selects nothing without an error (seen on real Lightroom 15.2): wait, select, read back, and
+	-- try again a few times. Without a folder switch there is one attempt only.
+	local attempts = folderShown and 5 or 1
+	if folderShown then
+		LrTasks.sleep(0.3)
+	end
+	local ok, err, selected, notSelected
+	for attempt = 1, attempts do
+		ok, err = LrTasks.pcall(function()
+			catalog:setSelectedPhotos(active, others)
+		end)
+		selected = selectedIds(catalog)
+		local got = {}
+		for _, id in ipairs(selected) do
+			got[id] = true
+		end
+		notSelected = {}
+		for _, p in ipairs(found) do
+			local id = p:getRawMetadata("uuid")
+			if not got[id] then
+				notSelected[#notSelected + 1] = id
+			end
+		end
+		if not ok or #notSelected == 0 or attempt == attempts then
+			break
+		end
+		LrTasks.sleep(0.4)
+	end
+	local reason
+	if not ok then
+		reason = "Lightroom 拒绝了选中操作：" .. tostring(type(err) == "table" and err.lrmcp or err)
+	elseif #notSelected > 0 then
+		reason = "有照片没有被选中：它们可能不在 Lightroom 当前显示的文件夹或集合里。可以带上 show_folder 让 Lightroom 先切到照片所在的文件夹。"
+	end
+	return {
+		selected = Json.array(selected),
+		missing = Json.array(missing),
+		not_selected = Json.array(notSelected),
+		all_selected = ok and #notSelected == 0,
+		folder_shown = folderShown,
+		reason = reason or folderNote,
 	}
 end
 
@@ -1014,6 +1469,10 @@ local COMMANDS = {
 	apply_preset = M.apply_preset,
 	restore_settings = M.restore_settings,
 	export_photo = M.export_photo,
+	import_photo = M.import_photo,
+	list_folder_photos = M.list_folder_photos,
+	get_thumbnails = M.get_thumbnails,
+	select_photos = M.select_photos,
 	get_metadata = M.get_metadata,
 	set_metadata = M.set_metadata,
 }

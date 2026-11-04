@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Denvolatos and contributors
 """0.3.0 acceptance check: SEVERAL servers (= several AI sessions) against one real Lightroom.
 
 SAFETY: only on the test catalog (path contains "ceshi") with exactly one photo selected. All changes are undone at the

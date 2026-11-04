@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Menu item: "LrMCP: Develop test (experiment 4)".
 -- Select ONE photo in the TEST catalog first. Steps (each logged to LrMcpExp4.log):
 --   read all develop settings -> export "before" preview -> snapshot -> small change

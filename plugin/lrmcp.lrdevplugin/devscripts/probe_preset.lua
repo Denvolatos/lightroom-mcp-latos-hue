@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (C) 2026 Denvolatos and contributors
 -- Dev script: apply real presets to a TEST photo and see whether writing back the old values of the keys they touch
 -- restores the photo EXACTLY (all settings, tables included). Also: is the Lua io library usable inside the plug-in?
 local ctx = ...

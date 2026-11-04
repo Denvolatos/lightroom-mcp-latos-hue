@@ -1,0 +1,1801 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- Copyright (C) 2026 Denvolatos and contributors -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>修图助手</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #17181b; --panel: #1f2125; --panel2: #25282d; --line: #31353b;
+    --text: #e6e8eb; --muted: #8b929b; --accent: #4c9aff; --accent2: #2d6fd6;
+    --ok: #3ecf8e; --warn: #f5a524; --bad: #f31260;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 14px/1.5 "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+    display: flex; flex-direction: column; overflow: hidden; user-select: none;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  /* ---------- top bar ---------- */
+  .topbar { min-height: 48px; flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
+    padding: 4px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .brand { font-weight: 600; margin-right: 8px; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: #3b2f12; color: var(--warn); }
+  .btn { background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 5px 14px; transition: background .15s, border-color .15s; }
+  .btn:hover { background: #2d3138; border-color: #454b53; }
+  .btn.primary { background: var(--accent2); border-color: var(--accent2); }
+  .btn.primary:hover { background: var(--accent); border-color: var(--accent); }
+  .btn.small { padding: 2px 10px; font-size: 12px; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .spacer { flex: 1; }
+  /* 窄窗口：按钮、标签、状态文字一律不换行、不被压扁；放不下时顶栏折成两行，提示文字缩略（完整内容在鼠标悬停提示里） */
+  .topbar > * { flex: none; white-space: nowrap; }
+  .topbar .spacer { flex: 1 1 0; min-width: 0; }
+  .btn, .tab, .seg button, .badge, .status, .switch, .subseg button, .chatbar button { white-space: nowrap; }
+  .subseg button { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .chatbar input { min-width: 0; } .chatbar button { flex: none; }
+  .opts .switch { flex: none; }
+  .galtools { flex-wrap: wrap; } .galtools input[type=text] { flex: 1 1 90px; }
+  .status { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .upd-note { color: var(--accent); margin-right: 6px; }   /* 有新版本时的温和提示：只提示，点了才去浏览器看 */
+  .hint { color: var(--muted); font-size: 12px; max-width: 460px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #lrhint { flex: 0 1 auto; min-width: 120px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.35; }   /* 顶栏提示只占一行，放不下就缩略；完整内容放在 title 里 */
+  .topbar > #lrhint { flex: 0 1 auto; }
+  /* ---------- three columns ---------- */
+  .main { flex: 1; min-height: 0; display: grid; grid-template-columns: clamp(220px, 26vw, 340px) minmax(0, 1fr) clamp(240px, 28vw, 360px); }
+  .main > .col { min-width: 0; overflow: hidden; }
+  .col { min-height: 0; display: flex; flex-direction: column; background: var(--panel); }
+  .col.left { border-right: 1px solid var(--line); }
+  .col.right { border-left: 1px solid var(--line); }
+  .tabs { display: flex; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid var(--line); flex: none; }
+  .tab { padding: 6px 12px; border: none; background: none; color: var(--muted);
+    border-bottom: 2px solid transparent; }
+  .tab:hover { color: var(--text); }
+  .tab.on { color: var(--text); border-bottom-color: var(--accent); }
+  .pane { overflow: auto; padding: 10px; min-height: 0; }
+  .list-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px;
+    border: 1px solid transparent; cursor: pointer; }
+  .list-item:hover { background: var(--panel2); }
+  .list-item .name { flex: 1; }
+  .list-item .tag { font-size: 11px; color: var(--muted); }
+  .star { color: var(--muted); cursor: pointer; }
+  .star.on { color: var(--warn); }
+  .empty { color: var(--muted); font-size: 12px; padding: 4px 8px; }
+  /* left: upper tabs area (presets / favourites / experience) 3/5, files 2/5 */
+  .left .upper { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .left .lower { flex: 2; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+  .section-title { padding: 8px 12px; color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 8px; flex: none; }
+  .folder { padding: 4px 8px; color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .thumb { width: 44px; height: 32px; border-radius: 4px; flex: none; }
+  /* ---------- center ---------- */
+  .center { background: var(--bg); display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .viewbar { min-height: 40px; flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 4px 12px;
+    border-bottom: 1px solid var(--line); background: var(--panel); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .seg button { border: none; background: var(--panel2); padding: 4px 14px; color: var(--muted); }
+  .seg button.on { background: var(--accent2); color: #fff; }
+  .stage { flex: 1; min-height: 0; display: grid; gap: 10px; padding: 12px 12px 6px; grid-template-rows: minmax(0, 1fr); }
+  .stage.pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .frame { position: relative; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line);
+    min-height: 0; min-width: 0; background: #0f1012; }
+  .frame .scroller { position: absolute; inset: 0; display: flex; overflow: hidden; }
+  .frame .pimg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; }
+  .frame.has .pimg { display: block; }
+  .stage.actual .scroller { overflow: auto; }
+  .stage.actual .pimg { position: static; width: auto; height: auto; max-width: none; margin: auto; flex: none; }
+  .frame .label { position: absolute; left: 10px; top: 10px; padding: 2px 10px; border-radius: 99px;
+    background: rgba(0,0,0,.6); font-size: 12px; z-index: 2; }
+  .frame .note { position: absolute; left: 10px; bottom: 10px; right: 10px; font-size: 12px; color: #dfe3e8;
+    text-shadow: 0 1px 2px #000; z-index: 2; pointer-events: none; }
+  .frame .ph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
+    padding: 0 24px; color: var(--muted); font-size: 13px; z-index: 1; }
+  .frame.has .ph { display: none; }
+  .frame .chip { position: absolute; right: 10px; top: 10px; padding: 2px 10px; border-radius: 99px; z-index: 2;
+    background: rgba(0,0,0,.6); font-size: 12px; color: var(--warn); display: none; }
+  .frame.busy .chip { display: block; }
+  .infobar { flex: none; padding: 2px 14px 10px; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
+  .infobar .line { color: var(--text); opacity: .85; font-variant-numeric: tabular-nums; user-select: text; }
+  .seg button:disabled { opacity: .5; cursor: not-allowed; }
+  .viewbar > *, .viewbar label { flex: none; white-space: nowrap; }
+  .viewbar #pvctl { flex-wrap: wrap; row-gap: 4px; }
+  .viewbar .spacer { flex: 1 1 0; min-width: 0; }
+  #cur { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  @media (max-width: 800px) { .main { grid-template-columns: 220px minmax(0, 1fr) 220px; } }
+  @media (max-width: 900px) {
+    .stage.pair { grid-template-columns: minmax(0, 1fr); grid-template-rows: repeat(2, minmax(0, 1fr)); }
+    .viewbar > .why:not(#cur) { display: none; }
+  }
+  .viewbar select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; font: inherit; font-size: 12px; }
+  /* 仅界面演示用（#demo）：示例画面，非真实照片 */
+  .scene { position: absolute; inset: 0; background:
+    radial-gradient(circle at 70% 22%, #f6d9a8 0 6%, transparent 7%),
+    linear-gradient(180deg, #6f93b8 0%, #9db8cf 38%, #c9d3d6 52%, transparent 52%),
+    linear-gradient(165deg, transparent 0 52%, #e9eef2 52% 60%, #8a95a0 60% 72%, #3d4a3a 72% 100%);
+    background-color: #c9d3d6; transition: filter .4s ease; }
+  .scene.after { filter: contrast(1.18) saturate(1.35) brightness(1.04); }
+  /* ---------- right ---------- */
+  .right .params { flex: 2; min-height: 0; display: flex; flex-direction: column; }
+  .right .chat { flex: 1; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 400; font-size: 12px; padding: 4px 6px; }
+  td { padding: 5px 6px; border-top: 1px solid var(--line); }
+  td.num { font-variant-numeric: tabular-nums; }
+  .up { color: var(--ok); } .down { color: var(--warn); }
+  .why { color: var(--muted); font-size: 12px; }
+  .msgs { flex: 1; min-height: 0; overflow: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+  .msg { padding: 6px 10px; border-radius: 10px; max-width: 92%; user-select: text; }
+  .msg.me { align-self: flex-end; background: var(--accent2); }
+  .msg.ai { align-self: flex-start; background: var(--panel2); white-space: pre-wrap; }
+  .msg.err { align-self: flex-start; background: #4a2a2a; color: #ffd9d9; }
+  .note { align-self: flex-start; font-size: 12px; color: var(--muted); padding: 0 10px; }
+  .chatbar button:disabled { opacity: .45; cursor: not-allowed; }
+  .ask { align-self: stretch; border: 1px solid var(--warn); border-radius: 10px; padding: 8px 10px; background: #2a2414; }
+  .ask .row { display: flex; gap: 8px; margin-top: 6px; }
+  .restore-row { margin-top: 10px; }
+  .st-ok { color: var(--ok); } .st-bad { color: var(--bad); } .st-wait { color: var(--warn); } .st-mute { color: var(--muted); }
+  .ask .items { margin: 4px 0; } .ask .items div { font-variant-numeric: tabular-nums; }
+  .ask.done { border-color: var(--line); background: var(--panel2); }
+  .dialog.small { width: 380px; } .dialog p { margin: 0; white-space: pre-wrap; }
+  .chatbar { flex: none; display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--line); }
+  .chatbar input { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 6px 10px; font: inherit; outline: none; user-select: text; }
+  .chatbar input:focus { border-color: var(--accent); }
+  .opts { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 10px; font-size: 12px; color: var(--muted);
+    border-top: 1px solid var(--line); }
+  .switch { position: relative; width: 34px; height: 18px; border-radius: 99px; background: #444a52; border: none; padding: 0; transition: background .2s; }
+  .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left .2s; }
+  .switch.on { background: var(--ok); } .switch.on::after { left: 18px; }
+  /* ---------- export dialog ---------- */
+  .mask { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; }
+  .mask.show { display: flex; }
+  .dialog { width: 460px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+  .dialog h3 { margin: 0 0 12px; }
+  .field { display: grid; grid-template-columns: 90px 1fr; gap: 8px; align-items: center; margin: 8px 0; }
+  .field select, .field input { background: var(--bg); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 8px; font: inherit; }
+  .dialog .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  /* ---------- export dialog (0.8.0) ---------- */
+  .dialog.exp { width: 560px; max-width: calc(100vw - 40px); max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
+  .dialog.exp .body { overflow: auto; margin: 0 -6px; padding: 0 6px; }
+  .dialog.exp .row { flex: none; }
+  .exp .erow { display: grid; grid-template-columns: 80px 1fr; gap: 4px 10px; align-items: center; margin: 9px 0; }
+  .exp .erow > .lab { color: var(--text); }
+  .exp .erow select, .exp .erow input[type=text], .exp .erow input[type=number] { background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
+  .exp .erow input[type=text] { width: 100%; user-select: text; }
+  .exp .inline { display: flex; gap: 8px; align-items: center; }
+  .exp .inline input[type=text] { flex: 1; min-width: 0; }
+  .exp .inline input[type=range] { flex: 1; }
+  .exp input[type=number] { width: 100px; }
+  .exp .sub { grid-column: 2; color: var(--muted); font-size: 12px; }
+  .exp .warn { grid-column: 2; color: var(--warn); font-size: 12px; }
+  .exp .warn:empty { display: none; }
+  .exp .bad { color: var(--bad); font-size: 12px; margin: 6px 0; }
+  .exp .bad:empty { display: none; }
+  .exp .okmsg { color: var(--ok); }
+  .exp .big { font-size: 15px; margin: 2px 0 10px; }
+  .exp .kvl { display: grid; grid-template-columns: 80px 1fr; gap: 4px 10px; margin: 6px 0; font-size: 13px; user-select: text; }
+  .exp .kvl > span:nth-child(odd) { color: var(--muted); } .exp .kvl > span:nth-child(even) { word-break: break-all; }
+  .exp .mute { color: var(--muted); font-size: 12px; margin: 4px 0; }
+  .exp .fname { font-family: Consolas, monospace; user-select: text; word-break: break-all; }
+  .exp .sep { border-top: 1px solid var(--line); margin: 10px 0 2px; }
+  .exp label.radio { margin-right: 14px; cursor: pointer; }
+  .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%;
+    vertical-align: -2px; margin-right: 8px; animation: sp 1s linear infinite; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  /* ---------- settings dialog ---------- */
+  .dialog.wide { width: 580px; max-width: calc(100vw - 40px); max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
+  .dialog.wide .body { overflow: auto; margin: 0 -6px; padding: 0 6px; }
+  .sgroup { border-top: 1px solid var(--line); padding: 12px 0 4px; }
+  .sgroup:first-child { border-top: none; padding-top: 0; }
+  .sgroup h4 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
+  .srow { display: grid; grid-template-columns: 120px 1fr; gap: 8px; align-items: center; margin: 8px 0; }
+  .srow > label, .srow > .lab { color: var(--text); }
+  .srow input[type=text], .srow select { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 8px; font: inherit; }
+  .srow .inline { display: flex; gap: 8px; align-items: center; }
+  .srow .inline input { flex: 1; min-width: 0; user-select: text; }
+  .sub { grid-column: 2; color: var(--muted); font-size: 12px; margin-top: -4px; }
+  .sub.bad, .ferr { color: var(--bad); } .sub.ok { color: var(--ok); }
+  .ferr { grid-column: 2; font-size: 12px; margin-top: -4px; }
+  .kv { display: grid; grid-template-columns: 120px 1fr; gap: 4px 8px; margin: 4px 0 8px; font-size: 13px; }
+  .kv span:nth-child(odd) { color: var(--muted); } .kv span:nth-child(even) { user-select: text; word-break: break-all; }
+  .sfoot { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+  /* ---------- environment wizard (0.14.0) ---------- */
+  .wz-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .wz-head h3 { margin: 0; }
+  .wz-intro { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+  .wz-item { display: grid; grid-template-columns: 22px 1fr; gap: 3px 10px; padding: 11px 0; border-top: 1px solid var(--line); }
+  .wz-item:first-child { border-top: none; }
+  .wz-ic { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #0b1a12; margin-top: 1px; }
+  .wz-item.ready .wz-ic { background: var(--ok); } .wz-item.todo .wz-ic { background: var(--warn); color: #2a1c00; }
+  .wz-item.wait .wz-ic { background: #444a52; color: var(--text); }
+  .wz-item .wz-title { font-weight: 600; } .wz-item .wz-tag { font-size: 12px; margin-left: 8px; font-weight: 400; }
+  .wz-item.ready .wz-tag { color: var(--ok); } .wz-item.todo .wz-tag { color: var(--warn); } .wz-item.wait .wz-tag { color: var(--muted); }
+  .wz-item .wz-text, .wz-item .wz-hint, .wz-item .wz-act { grid-column: 2; }
+  .wz-item .wz-text { font-size: 13px; word-break: break-all; user-select: text; }
+  .wz-item .wz-hint { font-size: 12px; color: var(--muted); line-height: 1.45; user-select: text; }
+  .wz-item .wz-act { justify-self: start; margin-top: 4px; }
+  .wz-list.checking .wz-item { opacity: .6; }
+  .wz-all { color: var(--ok); margin: 8px 0 2px; font-weight: 600; }
+  .wz-never { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; margin-top: 10px; }
+  .sfoot .msg-line { flex: 1; font-size: 12px; } .sfoot .msg-line.ok { color: var(--ok); } .sfoot .msg-line.bad { color: var(--bad); }
+  /* ---------- import dialog / library ---------- */
+  .dialog.imp { width: 600px; max-width: calc(100vw - 40px); max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
+  .dialog.imp .body { overflow: auto; margin: 0 -6px; padding: 0 6px; user-select: text; }
+  .dialog.imp .row { flex: none; }
+  .imp .big { font-size: 15px; margin: 2px 0 10px; }
+  .imp .kvl { display: grid; grid-template-columns: 110px 1fr; gap: 4px 8px; margin: 6px 0; font-size: 13px; }
+  .imp .kvl > span:nth-child(odd) { color: var(--muted); } .imp .kvl > span:nth-child(even) { word-break: break-all; }
+  .imp .bad { color: var(--bad); font-size: 12px; margin: 4px 0; } .imp .okmsg { color: var(--ok); font-size: 12px; }
+  .imp .warn { color: var(--warn); font-size: 12px; margin: 4px 0; } .imp .mute { color: var(--muted); font-size: 12px; margin: 4px 0; }
+  .imp input[type=text] { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
+  .bar { height: 10px; border-radius: 99px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; margin: 10px 0 8px; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent2); transition: width .2s; }
+  .imp table td, .imp table th { font-size: 12px; vertical-align: top; }
+  .imp .plist { max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; margin-top: 6px; }
+  .libhead { display: flex; align-items: center; gap: 6px; padding: 6px 8px 2px; color: var(--muted); font-size: 12px; }
+  .libgrp { padding: 3px 8px; cursor: pointer; border-radius: 6px; display: flex; gap: 6px; align-items: center; }
+  .libgrp:hover { background: var(--panel2); } .libgrp .cnt { color: var(--muted); font-size: 11px; margin-left: auto; }
+  .libfile { padding: 2px 8px 2px 26px; font-size: 12px; cursor: pointer; border-radius: 6px; display: flex; gap: 8px; }
+  .libfile:hover, .libfile.on { background: var(--panel2); } .libfile .sz { color: var(--muted); margin-left: auto; font-variant-numeric: tabular-nums; }
+  .libinfo { margin: 6px 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; color: var(--muted); user-select: text; }
+  /* ---------- AI pick dialog ---------- */
+  .dialog.pk { width: 700px; max-width: calc(100vw - 40px); max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
+  .dialog.pk .body { overflow: auto; margin: 0 -6px; padding: 0 6px; user-select: text; }
+  .dialog.pk .row { flex: none; }
+  .pk .big { font-size: 15px; margin: 2px 0 10px; }
+  .pk .mute { color: var(--muted); font-size: 12px; margin: 4px 0; } .pk .warn { color: var(--warn); font-size: 12px; margin: 4px 0; }
+  .pk .bad { color: var(--bad); font-size: 12px; margin: 6px 0; } .pk .bad:empty { display: none; } .pk .okmsg { color: var(--ok); }
+  .pk .sep { border-top: 1px solid var(--line); margin: 10px 0 2px; }
+  .pk .grid { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+  .pk .pcell { width: 118px; } .pk .pcell .pt { width: 118px; height: 80px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); object-fit: cover; display: block; }
+  .pk .pcell .pn { font-size: 11px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pk .prow { display: grid; grid-template-columns: 90px 1fr; gap: 4px 10px; align-items: start; margin: 9px 0; }
+  .pk .prow > .lab { color: var(--text); padding-top: 2px; }
+  .pk .prow label.radio { display: inline-block; margin: 0 14px 4px 0; cursor: pointer; }
+  .pk .prow input[type=text] { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; margin-top: 4px; }
+  .pk .sumbox { border: 1px solid var(--line); background: var(--panel2); border-radius: 8px; padding: 8px 10px; margin: 4px 0 10px; white-space: pre-wrap; word-break: break-word; }
+  .pk .rawbox { border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px; margin: 6px 0; white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; font-size: 13px; }
+  .pk .card { display: grid; grid-template-columns: 30px 120px 1fr; gap: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin: 8px 0; background: var(--panel); }
+  .pk .card .rk { font-size: 18px; font-weight: 600; color: var(--accent); text-align: center; padding-top: 2px; }
+  .pk .card img, .pk .card .noimg { width: 120px; height: 80px; border-radius: 6px; object-fit: cover; background: var(--bg); border: 1px solid var(--line); cursor: zoom-in; display: block; }
+  .pk .card .nm { font-weight: 600; word-break: break-all; } .pk .card .meta { font-size: 13px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .pk .card .why2 { font-size: 13px; margin-top: 4px; } .pk .card .old { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .pk .stars { color: var(--warn); letter-spacing: 1px; }
+  .pk table { width: 100%; } .pk table td, .pk table th { font-size: 13px; vertical-align: top; }
+  .pk .dim { color: var(--muted); }
+  .lbmask { cursor: zoom-out; z-index: 200; flex-direction: column; gap: 8px; } .lbmask img { max-width: 92vw; max-height: 86vh; border-radius: 6px; } .lbmask .lbn { color: #dfe3e8; font-size: 13px; }
+  /* ---------- presets / favourites / experience ---------- */
+  .subseg { display: flex; gap: 4px; padding: 6px 8px 2px; } .subseg button { flex: 1; padding: 3px 6px; font-size: 12px; background: none; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); }
+  .subseg button.on { color: var(--text); background: var(--panel2); border-color: var(--accent); }
+  .tools { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 8px; align-items: center; }
+  .tools input[type=text], .tools select { flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; font: inherit; font-size: 12px; user-select: text; }
+  .list-item.sel { background: var(--panel2); border-color: var(--accent); }
+  .list-item .name .sub2 { display: block; color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .list-item .name.dim { color: var(--muted); }
+  .detail { margin: 6px 8px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: 12px; }
+  .detail .dn { font-weight: 600; font-size: 13px; word-break: break-all; } .detail .dm { color: var(--muted); margin: 3px 0; word-break: break-word; } .detail .dm.bad { color: var(--bad); }
+  .dm.pad { padding: 4px 10px; color: var(--muted); font-size: 12px; } .detail input[type=range] { width: 120px; vertical-align: middle; }
+  .empty.bad { color: var(--bad); }
+  .dialog.pk textarea { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; resize: vertical; margin-top: 4px; }
+  .dialog.pk .prow label.radio input { margin-right: 4px; }
+  .recbtn { text-align: left; }
+  /* ---------- 图库（左栏下方） ---------- */
+  .galhead { display: flex; align-items: center; gap: 6px; padding: 8px 10px 4px; flex: none; }
+  .galtitle { font-weight: 600; }
+  .galtools { display: flex; gap: 6px; padding: 2px 10px 6px; flex: none; }
+  .galtools input[type=text] { flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; font: inherit; font-size: 12px; user-select: text; }
+  .galtools select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; font: inherit; font-size: 12px; }
+  .galbar { flex: none; padding: 0 10px 4px; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+  .galbar .gline { display: flex; align-items: center; gap: 8px; }
+  .galbar .gline .gsel { color: var(--text); font-variant-numeric: tabular-nums; }
+  .galbar .gwarn { color: var(--warn); }
+  .galbar .gbox { border: 1px solid var(--line); background: var(--panel2); border-radius: 6px; padding: 5px 8px; }
+  .galbar .gbox .bar { margin: 6px 0 2px; }
+  .galmsg { flex: none; padding: 0 10px; font-size: 12px; color: var(--warn); }
+  .galmsg:empty { display: none; }
+  .galmsg.bad { color: var(--bad); } .galmsg { margin-bottom: 4px; }
+  .galscroll { flex: 1; min-height: 0; overflow: auto; padding: 0 10px 10px; outline: none; }
+  .galscroll .gempty { color: var(--muted); font-size: 12px; padding: 10px 2px; line-height: 1.7; }
+  .galscroll .gempty .gpath { user-select: text; word-break: break-all; margin: 6px 0; color: var(--text); opacity: .85; }
+  .ghead { display: flex; gap: 6px; align-items: center; padding: 6px 2px 4px; cursor: pointer; font-size: 12px; color: var(--muted); position: sticky; top: 0; background: var(--panel); z-index: 3; }
+  .ghead:hover { color: var(--text); }
+  .ghead .gn { color: var(--text); } .ghead .gc { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .ggrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; padding-bottom: 6px; }
+  .ggrid.hide { display: none; }
+  .cell { position: relative; border: 2px solid transparent; border-radius: 6px; padding: 0; cursor: pointer; background: var(--panel2); min-width: 0; }
+  .cell:hover { border-color: #454b53; }
+  .cell.sel { border-color: var(--accent2); background: #1d2a3d; }
+  .cell.act { border-color: #9cc7ff; box-shadow: 0 0 0 2px rgba(76,154,255,.75); }
+  .cell .timg { position: relative; aspect-ratio: 4 / 3; border-radius: 4px 4px 0 0; overflow: hidden; background: #0f1012; display: flex; align-items: center; justify-content: center; }
+  .cell .timg img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; }
+  .cell .timg.load::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 20%, rgba(255,255,255,.07) 50%, transparent 80%); background-size: 200% 100%; animation: shim 1.3s linear infinite; }
+  @keyframes shim { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  .cell .timg .ph2 { font-size: 11px; color: var(--muted); text-align: center; padding: 0 4px; line-height: 1.3; }
+  .cell .timg .retry { font-size: 11px; padding: 0 8px; margin-top: 3px; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; }
+  .cell .timg.fail { flex-direction: column; }
+  .cell .fmt { position: absolute; left: 3px; top: 3px; font-size: 10px; line-height: 14px; padding: 0 4px; border-radius: 3px; background: rgba(0,0,0,.65); color: #dfe3e8; letter-spacing: .3px; }
+  .cell .vc { position: absolute; right: 3px; top: 3px; font-size: 10px; line-height: 14px; padding: 0 4px; border-radius: 3px; background: rgba(0,0,0,.65); color: #dfe3e8; }
+  .cell .meta { position: absolute; right: 3px; bottom: 3px; display: flex; gap: 3px; align-items: center; font-size: 10px; line-height: 14px; }
+  .cell .meta .stars { background: rgba(0,0,0,.65); color: var(--warn); padding: 0 3px; border-radius: 3px; letter-spacing: -1px; }
+  .cell .meta .flag { padding: 0 4px; border-radius: 3px; background: rgba(0,0,0,.65); }
+  .cell .meta .flag.pick { color: var(--ok); } .cell .meta .flag.reject { color: var(--bad); }
+  .cell .tag { position: absolute; left: 3px; bottom: 3px; font-size: 10px; line-height: 14px; padding: 0 4px; border-radius: 3px; background: rgba(60,45,10,.9); color: var(--warn); }
+  .cell .tag.bad { background: rgba(70,20,30,.92); color: #ff8aa6; }
+  .cell .cname { font-size: 11px; padding: 2px 4px 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+  .cell.na .cname { color: var(--muted); }
+  ::-webkit-scrollbar { width: 8px; height: 8px; } ::-webkit-scrollbar-thumb { background: #3a3f46; border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="brand">修图助手</span><span class="badge" id="demobadge">界面演示 · 示例数据</span>
+  <button class="btn" id="impbtn" onclick="startImport()">导入</button>
+  <button class="btn" onclick="openExport()">导出</button>
+  <button class="btn" id="pickbtn" onclick="openPick()" title="在 Lightroom 中选择照片后，让 AI 比较并给出排名和建议">AI 挑片</button>
+  <button class="btn" onclick="undo()">撤销</button>
+  <button class="btn" id="newchat" onclick="newChat()" style="display:none">新对话</button>
+  <span class="spacer"></span>
+  <span class="status upd-note" id="updnote" style="display:none"><span id="updtxt"></span><button class="btn small" id="updopen">查看新版本</button></span>
+  <button class="btn" id="setbtn" style="display:none" onclick="openSettings()">设置</button>
+  <span class="status"><span class="dot" id="lrdot"></span><span id="lrstat">Lightroom 已连接（示例）</span></span>
+  <span class="hint" id="lrhint"></span>
+  <span class="status" id="toastbox"></span>
+</div>
+
+<div class="main">
+  <!-- LEFT -->
+  <div class="col left">
+    <div class="upper">
+      <div class="tabs" id="ltabs">
+        <button class="tab on" data-t="preset">预设</button>
+        <button class="tab" data-t="fav">收藏</button>
+        <button class="tab" data-t="exp">经验</button>
+      </div>
+      <div class="pane" id="lpane"></div>
+    </div>
+    <div class="lower" id="gal">
+      <div class="galhead"><span class="galtitle" id="gal_title">图库</span><span class="spacer"></span>
+        <button class="btn small" id="gal_refresh" title="重新读取软件文件夹和 Lightroom 目录">刷新</button>
+        <button class="btn small" id="gal_open" title="在资源管理器中打开软件文件夹">打开文件夹</button></div>
+      <div class="galtools"><input type="text" id="gal_q" placeholder="搜索文件名" maxlength="60" autocomplete="off">
+        <select id="gal_sort" title="排序"><option value="name">按文件名</option><option value="time">按拍摄时间</option></select>
+        <select id="gal_filter" title="筛选"><option value="all">全部</option><option value="rated">已评星</option><option value="pick">留用</option><option value="new">尚未加入</option></select></div>
+      <div class="galbar" id="gal_bar"></div>
+      <div class="galmsg" id="gal_msg"></div>
+      <div class="galscroll" id="gal_scroll" tabindex="0"></div>
+    </div>
+  </div>
+
+  <!-- CENTER -->
+  <div class="center">
+    <div class="viewbar">
+      <div class="seg" id="modes"><button class="on" data-m="pair">并排</button><button data-m="multi" disabled title="需要版本功能，后续提供">多版本</button></div>
+      <span class="why">多版本：需要版本功能，后续提供</span>
+      <span class="spacer"></span>
+      <span id="pvctl" style="display:none;align-items:center;gap:8px">
+        <label class="why">预览清晰度 <select id="edge"><option value="768">长边 768 px</option><option value="1024" selected>长边 1024 px</option><option value="1536">长边 1536 px</option><option value="2048">长边 2048 px</option></select></label>
+        <button class="btn small" id="zoom" title="双击画面也可切换">适合窗口</button>
+      </span>
+      <span class="why" id="cur"></span>
+    </div>
+    <div class="stage pair" id="stage"></div>
+    <div class="infobar" id="infobar"></div>
+  </div>
+
+  <!-- RIGHT -->
+  <div class="col right">
+    <div class="params">
+      <div class="section-title">本次调整</div>
+      <div class="pane"><table id="ptable"><thead><tr><th>参数</th><th>改前</th><th>改后</th><th>状态</th><th></th></tr></thead><tbody></tbody></table>
+        <div class="empty" id="pempty">暂无调整。请在下方输入修图需求。</div>
+        <div class="restore-row" id="restorerow" style="display:none"><button class="btn small" onclick="restoreOriginal()">还原到原始状态</button></div></div>
+    </div>
+    <div class="chat">
+      <div class="msgs" id="msgs"><div class="msg ai">请选择照片并输入期望的修图效果。</div></div>
+      <div class="opts"><button class="switch on" id="sw" title="开启后，每项调整需先经确认才会执行"></button><span id="swlabel">逐项确认：开（每项调整需先确认）</span></div>
+      <div class="chatbar"><input id="inp" placeholder="例如：提高天空通透度，增强整体层次感" autocomplete="off"><button class="btn primary" id="send">发送</button><button class="btn" id="stop" style="display:none">停止</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="mask" id="mask">
+  <div class="dialog exp" role="dialog" aria-label="导出照片">
+    <h3>导出照片</h3>
+    <div class="body" id="ex_body"></div>
+    <div class="row" id="ex_foot"></div>
+  </div>
+</div>
+
+<div class="mask" id="imask">
+  <div class="dialog imp" role="dialog" aria-label="导入照片">
+    <h3 id="im_title">导入照片</h3>
+    <div class="body" id="im_body"></div>
+    <div class="row" id="im_foot"></div>
+  </div>
+</div>
+
+<div class="mask" id="pmask">
+  <div class="dialog pk" role="dialog" aria-label="AI 挑片">
+    <h3 id="pk_title">AI 挑片</h3>
+    <div class="body" id="pk_body"></div>
+    <div class="row" id="pk_foot"></div>
+  </div>
+</div>
+
+<div class="mask" id="lmask">
+  <div class="dialog pk" role="dialog" aria-label="预设、经验与收藏">
+    <h3 id="lb_title">预设</h3>
+    <div class="body" id="lb_body"></div>
+    <div class="row" id="lb_foot"></div>
+  </div>
+</div>
+
+<div class="mask" id="smask">
+  <div class="dialog wide" role="dialog" aria-label="设置">
+    <h3>设置</h3>
+    <div class="body">
+      <div class="sgroup">
+        <h4>常规</h4>
+        <div class="srow"><span class="lab">软件文件夹</span>
+          <span class="inline"><input type="text" id="s_folder" readonly><button class="btn small" id="s_pick">选择文件夹</button></span>
+          <span class="sub">导入时，照片会复制到该文件夹，再加入 Lightroom 目录；原片不会被移动或删除。</span>
+          <span class="ferr" id="e_folder"></span></div>
+      </div>
+      <div class="sgroup">
+        <h4>环境检查</h4>
+        <div class="srow"><span class="lab">检查是否都准备好</span>
+          <span class="inline"><button class="btn small" id="s_wizard">打开环境检查</button></span>
+          <span class="sub">随时检查照片文件夹、Lightroom、Lightroom 插件和 AI 助手是否都准备好了；只检查，不会改动你的电脑。</span></div>
+      </div>
+      <div class="sgroup">
+        <h4>Lightroom</h4>
+        <div class="srow"><span class="lab">自动启动 Lightroom</span>
+          <span class="inline"><button class="switch" id="s_autolr" aria-label="打开软件时自动启动 Lightroom"></button><span id="s_autolr_t">关</span></span>
+          <span class="sub">打开软件时自动在后台启动 Lightroom（最小化，不会抢走你当前的窗口）。Lightroom 已经开着就不会重复启动；关闭本软件时也不会关闭 Lightroom。</span></div>
+        <div class="srow"><span class="lab">Lightroom 的位置</span>
+          <span class="inline"><input type="text" id="s_lrpath" readonly><button class="btn small" id="s_lrpick">选择文件</button><button class="btn small" id="s_lrclear">自动查找</button></span>
+          <span class="sub" id="s_lrnote"></span><span class="ferr" id="e_lrpath"></span></div>
+      </div>
+      <div class="sgroup">
+        <h4>AI 来源</h4>
+        <div class="srow"><label for="s_provider">使用的来源</label><select id="s_provider"></select>
+          <span class="sub" id="s_pstate"></span><span class="sub bad" id="s_pexp" style="display:none"></span><span class="sub" id="s_ppriv" style="display:none"></span><span class="sub" id="s_pnote">切换来源后，下一次“新对话”生效。</span>
+          <span class="ferr" id="e_provider"></span></div>
+      </div>
+      <div class="sgroup">
+        <h4>对话</h4>
+        <div class="srow"><span class="lab">逐项确认默认值</span>
+          <span class="inline"><button class="switch on" id="s_confirm" aria-label="逐项确认默认值"></button><span id="s_confirm_t">开</span></span>
+          <span class="sub">新对话开始时使用该默认值；对话中仍可随时切换。</span></div>
+        <div class="srow"><span class="lab">让 AI 参考我的经验库</span>
+          <span class="inline"><button class="switch on" id="s_notes" aria-label="对话时让 AI 参考我的经验库"></button><span id="s_notes_t">开</span></span>
+          <span class="sub">开启后，每次新对话开始时，会把“参与对话”的经验（最近修改优先，总长度不超过 3000 字）作为参考资料提供给 AI；资料仅供参考，不是指令，AI 的权限不会因此改变。经验只发送给当前使用的 AI 来源。</span></div>
+        <div class="srow"><label for="s_edge">预览默认清晰度</label><select id="s_edge"></select>
+          <span class="ferr" id="e_edge"></span></div>
+      </div>
+      <div class="sgroup">
+        <h4>更新</h4>
+        <div class="srow"><span class="lab">启动时检查新版本</span>
+          <span class="inline"><button class="switch on" id="s_upd" aria-label="启动时检查是否有新版本"></button><span id="s_upd_t">开</span></span>
+          <span class="sub">启动时检查是否有新版本（只会提示，不会自动下载或安装；检查只访问 GitHub，不发送任何个人信息）。</span></div>
+      </div>
+      <div class="sgroup">
+        <h4>关于</h4>
+        <div class="kv">
+          <span>软件版本</span><span id="a_app"></span>
+          <span>Lightroom 版本</span><span id="a_lr"></span>
+          <span>插件版本</span><span id="a_plugin"></span>
+          <span>检查更新</span><span><button class="btn small" id="a_updcheck">检查更新</button> <span id="a_updtxt"></span> <button class="btn small" id="a_updopen" style="display:none">查看新版本</button></span>
+          <span>数据位置</span><span id="a_data"></span>
+          <span>项目主页</span><span id="a_url"></span>
+        </div>
+      </div>
+    </div>
+    <div class="sfoot"><span class="msg-line" id="s_msg"></span>
+      <button class="btn" id="s_cancel">取消</button><button class="btn primary" id="s_save">保存</button></div>
+  </div>
+</div>
+
+<div class="mask" id="wmask">
+  <div class="dialog wide" role="dialog" aria-label="环境检查">
+    <div class="wz-head"><h3>环境检查</h3><button class="btn small" id="w_x" aria-label="关闭">×</button></div>
+    <div class="wz-intro">下面几项都准备好了，就可以开始修图。这里只做检查，需要你动手的地方会告诉你怎么做。</div>
+    <div class="body wz-list" id="w_list"></div>
+    <div class="wz-all" id="w_all" style="display:none">都准备好了，可以开始修图。</div>
+    <label class="wz-never"><input type="checkbox" id="w_never"> 以后不再自动显示</label>
+    <div class="sfoot"><span class="msg-line" id="w_msg"></span>
+      <button class="btn" id="w_re">重新检查</button><button class="btn primary" id="w_done" style="display:none">完成</button></div>
+  </div>
+</div>
+
+<script>
+const PHOTOS = [
+  {n:'DSC08205.JPG', f:'雪山', c:'#6f93b8'}, {n:'DSC08206.JPG', f:'雪山', c:'#8aa5bd'},
+  {n:'DSC08211.JPG', f:'雪山', c:'#5d7f9e'}, {n:'IMG_0412.JPG', f:'街拍', c:'#b08968'},
+  {n:'IMG_0415.JPG', f:'街拍', c:'#9c7a5b'}, {n:'IMG_0420.JPG', f:'未分类', c:'#7a8f6a'}
+];
+const PRESETS = ['清爽风光', '电影感', '黑白高对比', '日系低饱和'];
+const EXPERIENCE = ['天空发灰：先降低高光，再提高蓝色饱和度', '逆光人像：阴影 +40，曝光小幅降低'];
+let sel = 0, fav = new Set([0]), favP = new Set(['电影感']), steps = [], history = [], mode = 'pair', ask = true;
+
+const $ = s => document.querySelector(s);
+function toast(t){ const b=$('#toastbox'); b.textContent=t; clearTimeout(toast.t); toast.t=setTimeout(()=>b.textContent='',6000); }
+
+/* ---- left tabs ---- */
+let ltab = 'preset';
+function renderLeftDemo(){
+  const p = $('#lpane'); p.innerHTML = '';
+  if (ltab==='preset') PRESETS.forEach(x=>{
+    const d=document.createElement('div'); d.className='list-item';
+    d.innerHTML=`<span class="name">${x}</span><span class="star ${favP.has(x)?'on':''}">★</span>`;
+    d.querySelector('.star').onclick=e=>{e.stopPropagation(); favP.has(x)?favP.delete(x):favP.add(x); renderLeft();};
+    d.onclick=()=>toast('应用预设「'+x+'」：功能开发中'); p.appendChild(d); });
+  if (ltab==='fav'){ const l=[...PHOTOS.filter((_,i)=>fav.has(i)).map(x=>'照片 · '+x.n), ...[...favP].map(x=>'预设 · '+x)];
+    if(!l.length) p.innerHTML='<div class="empty">暂无收藏。点击 ★ 添加收藏。</div>';
+    l.forEach(x=>{const d=document.createElement('div'); d.className='list-item'; d.innerHTML=`<span class="name">${x}</span>`; p.appendChild(d);}); }
+  if (ltab==='exp') { EXPERIENCE.forEach(x=>{const d=document.createElement('div'); d.className='list-item'; d.innerHTML=`<span class="name">${x}</span>`; p.appendChild(d);});
+    p.insertAdjacentHTML('beforeend','<div class="empty">经验仅保存在本机，由 AI 记录。</div>'); }
+}
+$('#ltabs').onclick = e => { const t=e.target.closest('.tab'); if(!t) return;
+  document.querySelectorAll('#ltabs .tab').forEach(x=>x.classList.toggle('on',x===t)); ltab=t.dataset.t;
+  if (REAL() && ltab==='preset' && LB.sub==='lr' && !LB.lr) loadLr(); renderLeft(); };
+/* ---- 预设 / 收藏 / 经验（真实模式；演示模式仍用上面的示例数据）---- */
+const LB = {sub:'mine', presets:null, sel:null, strength:100, lrq:'', lr:null, lrSel:null, notes:null, nq:'', ntag:'', nsel:null, fav:null, err:''};
+const lapi = () => window.pywebview.api;
+async function loadLib(which){
+  if (!REAL()) return;
+  try {
+    if (!which || which==='p') LB.presets = await lapi().lib_presets();
+    if (!which || which==='n') LB.notes = await lapi().lib_notes(LB.nq, LB.ntag);
+    if (!which || which==='f') LB.fav = await lapi().lib_favs();
+    LB.err = '';
+  } catch(e){ LB.err = '无法读取预设、经验或收藏，请重试。'; }
+  renderLeft(); renderFiles();
+}
+function lbOpen(title){ $('#lb_title').textContent = title; $('#lmask').classList.add('show'); }
+function lbClose(){ $('#lmask').classList.remove('show'); }
+function lbSet(body, buttons){
+  $('#lb_body').innerHTML = body; const f = $('#lb_foot'); f.innerHTML = '';
+  (buttons||[]).forEach(b=>{ const e=document.createElement('button'); e.className='btn '+(b.cls||''); e.textContent=b.label; e.disabled=!!b.disabled; if(b.id) e.id=b.id; e.onclick=b.onclick; f.appendChild(e); });
+}
+function promptDialog(title, label, value, maxlen, multi){
+  return new Promise(res=>{
+    lbOpen(title);
+    lbSet(`<div class="prow"><span class="lab">${esc(label)}</span><div>${multi ? `<textarea id="pd_in" maxlength="${maxlen}" rows="4"></textarea>` : `<input type="text" id="pd_in" maxlength="${maxlen}">`}
+      <div class="mute">不超过 ${maxlen} 个字。</div></div></div>`,
+      [{label:'取消', onclick:()=>{ lbClose(); res(null); }}, {label:'确定', cls:'primary', onclick:()=>{ const v=$('#pd_in').value; lbClose(); res(v); }}]);
+    $('#pd_in').value = value||''; $('#pd_in').focus();
+  });
+}
+const GROUP_NAMES = {tone:'色调', color:'色彩', detail:'细节与效果', curve:'曲线', wb:'白平衡', crop:'裁剪与拉直'};
+const photoReady = () => !!(photoName || (SEL && SEL.count>0));
+
+function subSeg(opts, cur, attr){ return `<div class="subseg">${opts.map(o=>`<button data-${attr}="${o[0]}" class="${cur===o[0]?'on':''}">${o[1]}</button>`).join('')}</div>`; }
+function starHtml(on, attrs){ return `<span class="star ${on?'on':''}" ${attrs} title="${on?'取消收藏':'收藏'}">★</span>`; }
+
+function renderLeft(){
+  const p = $('#lpane');
+  if (!REAL()) return renderLeftDemo();
+  let h = '';
+  if (LB.err) h += `<div class="empty bad">${esc(LB.err)}</div>`;
+  if (ltab==='preset') h += presetTabHtml(); else if (ltab==='fav') h += favTabHtml(); else h += noteTabHtml();
+  p.innerHTML = h; p.dataset.k = '';
+  bindLeft(p);
+}
+function presetTabHtml(){
+  let h = subSeg([['mine','我的预设'],['lr','Lightroom 预设']], LB.sub, 'sub');
+  if (LB.sub==='mine'){
+    const L = LB.presets;
+    h += `<div class="tools"><button class="btn small primary" id="pr_save" title="把当前照片的调整保存为预设，仅保存在本机">保存当前照片的调整为预设</button><button class="btn small" id="pr_imp">导入</button></div>`;
+    if (!L) return h + '<div class="empty">正在读取…</div>';
+    if (!L.presets.length) return h + '<div class="empty">还没有预设。调整好一张照片后，点击“保存当前照片的调整为预设”。预设只保存在本机，软件不预装任何预设。</div>';
+    L.presets.forEach(x=>{ h += `<div class="list-item${LB.sel===x.id?' sel':''}" data-pid="${esc(x.id)}"><span class="name">${esc(x.name)}</span>${starHtml(x.fav, `data-fav="preset" data-key="${esc(x.name)}"`)}</div>`; });
+    const s = L.presets.find(x=>x.id===LB.sel);
+    if (s) h += `<div class="detail"><div class="dn">${esc(s.name)}</div><div class="dm">分组：${esc(s.groups.join('、'))}　·　${s.count} 项参数</div>${s.note?`<div class="dm">${esc(s.note)}</div>`:''}
+      <div class="dm"><label>强度 <input type="range" id="pr_str" min="1" max="100" value="${LB.strength}"> <span id="pr_strv">${LB.strength}%</span></label></div>
+      <div class="tools"><button class="btn small primary" id="pr_apply" ${photoReady()?'':'disabled title="请先在 Lightroom 中选择照片"'}>套用到当前照片</button>
+      <button class="btn small" id="pr_ren">重命名</button><button class="btn small" id="pr_note">编辑备注</button><button class="btn small" id="pr_exp">导出</button><button class="btn small" id="pr_del">删除</button></div></div>`;
+    return h;
+  }
+  h += `<div class="tools"><input type="text" id="lr_q" placeholder="搜索名称或分组（一个词）" value="${esc(LB.lrq)}"><button class="btn small" id="lr_go">搜索</button></div>`;
+  if (!LB.lr) return h + '<div class="empty">正在读取 Lightroom 预设…</div>';
+  if (!LB.lr.ok) return h + `<div class="empty bad">${esc(LB.lr.message)}</div>`;
+  h += `<div class="dm pad">${esc(LB.lr.note)}</div>`;
+  LB.lr.groups.forEach(g=>{ h += `<div class="folder">${esc(g.folder)}</div>`;
+    g.presets.forEach(x=>{ h += `<div class="list-item${LB.lrSel===x.id?' sel':''}" data-lid="${esc(x.id)}"><span class="name${x.masks?' dim':''}">${esc(x.name)}${x.masks?'（含蒙版）':''}</span>${starHtml(x.fav, `data-fav="lr_preset" data-key="${esc(x.key)}" data-label="${esc(x.name)}"`)}</div>`; }); });
+  let sel = null; LB.lr.groups.forEach(g=>g.presets.forEach(x=>{ if (x.id===LB.lrSel) sel = x; }));
+  if (sel) h += `<div class="detail"><div class="dn">${esc(sel.name)}</div>${sel.masks?'<div class="dm bad">该预设包含蒙版（局部调整），无法套用。</div>':'<div class="dm">套用前会显示确认清单；改前保存完整快照，可撤销。</div>'}
+    <div class="tools"><button class="btn small primary" id="lr_apply" ${(sel.masks||!photoReady())?'disabled':''}>套用到当前照片</button></div></div>`;
+  return h;
+}
+function favTabHtml(){
+  const F = LB.fav; if (!F) return '<div class="empty">正在读取…</div>';
+  let h = `<div class="tools"><button class="btn small" id="fv_photo" ${photoReady()?'':'disabled'}>${F.photo_fav?'取消收藏当前照片':'收藏当前照片'}</button></div>`;
+  if (!F.total) return h + '<div class="empty">暂无收藏。可在预设、经验列表或当前照片旁点击 ★ 添加收藏。</div>';
+  const sec = (title, arr, kind)=>{ if (!arr.length) return ''; let s = `<div class="folder">${title}（${arr.length}）</div>`;
+    arr.forEach(x=>{ s += `<div class="list-item" data-fk="${kind}" data-key="${esc(x.key)}"><span class="name">${esc(x.label)}</span>${starHtml(true, `data-fav="${kind}" data-key="${esc(x.key)}"`)}</div>`; }); return s; };
+  h += sec('我的预设', F.groups.preset, 'preset') + sec('Lightroom 预设', F.groups.lr_preset, 'lr_preset') + sec('经验', F.groups.note, 'note') + sec('照片', F.groups.photo, 'photo');
+  h += '<div class="dm pad" id="fv_info"></div>';
+  return h;
+}
+function noteTabHtml(){
+  const N = LB.notes; 
+  let h = `<div class="tools"><button class="btn small primary" id="nt_new">新建经验</button><button class="btn small" id="nt_imp">导入</button><button class="btn small" id="nt_exp">导出</button></div>`;
+  if (!N) return h + '<div class="empty">正在读取…</div>';
+  h += `<div class="tools"><input type="text" id="nt_q" placeholder="搜索标题、正文、标签" value="${esc(LB.nq)}"><select id="nt_tag"><option value="">全部标签</option>${N.tags.map(t=>`<option value="${esc(t)}" ${LB.ntag===t?'selected':''}>${esc(t)}</option>`).join('')}</select></div>`;
+  if (!N.notes.length) h += (LB.nq||LB.ntag) ? '<div class="empty">没有符合条件的经验。</div>' : '<div class="empty">还没有经验。点击“新建经验”记录你自己的调色心得，或在 AI 完成一次调整后点击“把这次做法记成经验”。经验只保存在本机，软件不预装任何经验。</div>';
+  N.notes.forEach(n=>{ h += `<div class="list-item" data-nid="${esc(n.id)}"><span class="name">${esc(n.title)}<span class="sub2">${esc([n.scene, ...n.tags].filter(Boolean).join(' · '))}${n.use_in_chat?'':' · 不参与对话'}</span></span>${starHtml(n.fav, `data-fav="note" data-key="${esc(n.id)}"`)}</div>`; });
+  h += `<div class="dm pad">${N.context.eligible ? `开启“让 AI 参考我的经验库”时，新对话将提供最近的 ${N.context.used} 条（共 ${N.context.eligible} 条参与对话${N.context.truncated?'，超出长度上限的已舍弃':''}）。` : '没有“参与对话”的经验，AI 不会收到经验资料。'}</div>`;
+  return h;
+}
+
+function bindLeft(p){
+  p.querySelectorAll('[data-sub]').forEach(b=>b.onclick=()=>{ LB.sub = b.dataset.sub; if (LB.sub==='lr' && !LB.lr) loadLr(); renderLeft(); });
+  p.querySelectorAll('.star[data-fav]').forEach(s=>s.onclick=async e=>{ e.stopPropagation();
+    const r = await lapi().lib_fav_toggle(s.dataset.fav, s.dataset.key, s.dataset.label||''); if (!r.ok) return toast(r.message||'无法收藏');
+    await loadLib(); if (s.dataset.fav==='lr_preset') loadLr(true); });
+  p.querySelectorAll('[data-pid]').forEach(d=>d.onclick=()=>{ LB.sel = LB.sel===d.dataset.pid ? null : d.dataset.pid; renderLeft(); });
+  p.querySelectorAll('[data-lid]').forEach(d=>d.onclick=()=>{ LB.lrSel = LB.lrSel===d.dataset.lid ? null : d.dataset.lid; renderLeft(); });
+  p.querySelectorAll('[data-nid]').forEach(d=>d.onclick=()=>openNote(d.dataset.nid));
+  p.querySelectorAll('[data-fk]').forEach(d=>d.onclick=()=>favClick(d.dataset.fk, d.dataset.key));
+  const on = (id, fn)=>{ const e = p.querySelector('#'+id); if (e) e.onclick = fn; };
+  on('pr_save', openSavePreset); on('pr_imp', importPreset); on('pr_apply', ()=>applyMine()); on('pr_ren', renamePreset); on('pr_note', notePreset);
+  on('pr_exp', exportPreset); on('pr_del', deletePreset); on('lr_go', ()=>{ LB.lrq = p.querySelector('#lr_q').value; loadLr(); }); on('lr_apply', ()=>applyLr());
+  on('nt_new', ()=>openNote(null)); on('nt_imp', importNotes); on('nt_exp', exportNotes);
+  on('fv_photo', async()=>{ const r = await lapi().lib_fav_toggle('photo','',''); if (!r.ok) toast(r.message||'无法收藏'); loadLib('f'); });
+  const str = p.querySelector('#pr_str'); if (str) str.oninput = ()=>{ LB.strength = parseInt(str.value,10); p.querySelector('#pr_strv').textContent = LB.strength+'%'; };
+  const q = p.querySelector('#lr_q'); if (q) q.onkeydown = e=>{ if (e.key==='Enter'){ LB.lrq = q.value; loadLr(); } };
+  const nq = p.querySelector('#nt_q'); if (nq) nq.onkeydown = e=>{ if (e.key==='Enter'){ LB.nq = nq.value; loadLib('n'); } };
+  const nt = p.querySelector('#nt_tag'); if (nt) nt.onchange = ()=>{ LB.ntag = nt.value; LB.nq = p.querySelector('#nt_q').value; loadLib('n'); };
+}
+async function loadLr(keep){ if (!keep) LB.lr = null; renderLeft(); try { LB.lr = await lapi().lib_lr_presets(LB.lrq); } catch(e){ LB.lr = {ok:false, message:'无法读取 Lightroom 预设。'}; } renderLeft(); }
+function favClick(kind, key){
+  if (kind==='preset'){ const x = (LB.presets&&LB.presets.presets||[]).find(p=>p.name===key); ltab='preset'; LB.sub='mine'; if (x) LB.sel = x.id; tabsOn(); renderLeft(); }
+  else if (kind==='note'){ openNote(key); }
+  else if (kind==='lr_preset'){ ltab='preset'; LB.sub='lr'; LB.lrq=''; tabsOn(); loadLr(); }
+  else { const i = $('#fv_info'); if (i) i.textContent = '照片收藏仅记录名称与收藏时间。软件暂时不能在 Lightroom 中自动选中该照片，请在 Lightroom 中自行选择。'; }
+}
+function tabsOn(){ document.querySelectorAll('#ltabs .tab').forEach(x=>x.classList.toggle('on', x.dataset.t===ltab)); }
+
+/* 保存为预设 */
+async function openSavePreset(){
+  if (!photoReady()) return infoDialog('无法保存', '请先在 Lightroom 中选择一张照片。');
+  const o = await lapi().lib_preset_options();
+  lbOpen('保存当前照片的调整为预设');
+  lbSet(`<div class="prow"><span class="lab">名称</span><div><input type="text" id="sp_name" maxlength="${o.limits.name}" placeholder="不超过 ${o.limits.name} 个字"></div></div>
+    <div class="prow"><span class="lab">备注</span><div><textarea id="sp_note" rows="3" maxlength="${o.limits.note}" placeholder="可选，不超过 ${o.limits.note} 个字"></textarea></div></div>
+    <div class="prow"><span class="lab">包含的分组</span><div>${o.groups.map(g=>`<label class="radio"><input type="checkbox" class="sp_g" value="${g.id}" ${g.default?'checked':''}> ${esc(g.label)}</label>`).join('')}
+      <div class="mute">默认不含裁剪与拉直；预设不含局部调整（蒙版）。仅保存本软件允许修改的参数，只保存在本机。</div></div></div>
+    <div class="bad" id="sp_err"></div>`,
+    [{label:'取消', onclick:lbClose}, {label:'保存', cls:'primary', id:'sp_ok', onclick:()=>doSavePreset(false)}]);
+  $('#sp_name').focus();
+}
+async function doSavePreset(overwrite){
+  const groups = [...document.querySelectorAll('.sp_g:checked')].map(c=>c.value);
+  $('#sp_ok').disabled = true;
+  const r = await lapi().lib_preset_save($('#sp_name').value, $('#sp_note').value, groups, overwrite);
+  if (r.exists){ $('#sp_ok').disabled = false; if (await askDialog('覆盖预设', r.message, '覆盖')) return doSavePreset(true); return; }
+  if (!r.ok){ $('#sp_err').textContent = r.message||'无法保存。'; $('#sp_ok').disabled = false; return; }
+  lbClose(); toast(r.message); LB.sel = r.id; ltab='preset'; LB.sub='mine'; tabsOn(); loadLib();
+}
+/* 套用：确认清单 */
+async function applyMine(){
+  const r = await lapi().lib_apply_prepare('mine', LB.sel, LB.strength);
+  applyConfirmView(r);
+}
+async function applyLr(){ applyConfirmView(await lapi().lib_apply_prepare('lr', LB.lrSel, 100)); }
+function applyConfirmView(r){
+  if (!r.ok) return infoDialog(r.nothing ? '无需套用' : '无法套用', r.message||'无法生成确认清单。');
+  lbOpen('确认套用');
+  const rows = r.items.map(i=>`<tr><td>${esc(i.label)}</td><td class="num">${esc(i.current)}</td><td class="num">→ ${esc(i.new)}${i.clipped?' <span class="st-wait">（已裁剪到范围）</span>':''}</td></tr>`).join('');
+  lbSet(`<div class="big">${esc(r.title)}</div><div class="mute">目标照片：${esc(r.photo||'当前照片')}</div>
+    ${r.items.length ? `<table><thead><tr><th>参数</th><th>当前</th><th>新值</th></tr></thead><tbody>${rows}</tbody></table>` : ''}
+    ${r.note ? `<div class="sumbox">${esc(r.note)}</div>` : ''}
+    ${r.skipped&&r.skipped.length ? `<div class="mute">这张照片没有以下参数，已跳过：${esc(r.skipped.join('、'))}。</div>` : ''}
+    ${r.clipped ? `<div class="warn">有 ${r.clipped} 项超出允许范围，已裁剪到边界。</div>` : ''}
+    <div class="mute">写入后可在右侧“本次调整”中撤销。</div><div class="bad" id="ap_err"></div>`,
+    [{label:'取消', onclick:async()=>{ await lapi().lib_apply_cancel(); lbClose(); }},
+     {label:'确认套用', cls:'primary', id:'ap_ok', onclick:async()=>{ $('#ap_ok').disabled = true; const w = await lapi().lib_apply_confirm(r.token);
+        if (!w.ok){ $('#ap_err').textContent = w.message||'无法套用。'; $('#ap_ok').disabled = !!w.readonly; return; }
+        lbClose(); toast(w.message); }}]);
+}
+async function renamePreset(){
+  const x = LB.presets.presets.find(p=>p.id===LB.sel); const v = await promptDialog('重命名预设', '新名称', x.name, 40, false); if (v===null) return;
+  const r = await lapi().lib_preset_rename(LB.sel, v); if (!r.ok) return infoDialog('无法重命名', r.message); LB.sel = r.id; loadLib();
+}
+async function notePreset(){
+  const x = LB.presets.presets.find(p=>p.id===LB.sel); const v = await promptDialog('编辑备注', '备注', x.note, 200, true); if (v===null) return;
+  const r = await lapi().lib_preset_note(LB.sel, v); if (!r.ok) return infoDialog('无法保存', r.message); loadLib('p');
+}
+async function deletePreset(){
+  const x = LB.presets.presets.find(p=>p.id===LB.sel);
+  if (!await askDialog('删除预设', `将删除预设“${x.name}”，此操作不能撤销（不影响已套用的照片）。是否继续？`, '删除')) return;
+  const r = await lapi().lib_preset_delete(LB.sel); if (!r.ok) return infoDialog('无法删除', r.message); LB.sel = null; loadLib();
+}
+async function exportPreset(){ const r = await lapi().lib_preset_export(LB.sel); if (r.cancelled) return; toast(r.ok ? '已导出预设文件' : (r.message||'导出失败')); }
+async function importPreset(){
+  const r = await lapi().lib_preset_import(); if (r.cancelled) return;
+  if (r.exists){ const yes = await askDialog('覆盖预设', r.message, '覆盖'); const c = await lapi().lib_preset_import_commit(yes); if (!yes) return; if (!c.ok) return infoDialog('无法导入', c.message); toast(c.message); return loadLib(); }
+  if (!r.ok) return infoDialog('无法导入', r.message); toast(r.message); loadLib();
+}
+
+/* 经验：查看 / 编辑 / 新建 */
+function openNote(id){
+  const n = id ? (LB.notes&&LB.notes.notes||[]).find(x=>x.id===id) : null;
+  if (id && !n) return;
+  noteEditor(n || {title:'', scene:'', tags:[], body:'', use_in_chat:true}, id||'', '');
+}
+function noteEditor(n, id, banner, back){
+  lbOpen(id ? '编辑经验' : '新建经验');
+  lbSet(`${banner||''}<div class="prow"><span class="lab">标题</span><div><input type="text" id="ne_title" maxlength="60" placeholder="不超过 60 字"></div></div>
+    <div class="prow"><span class="lab">场景</span><div><input type="text" id="ne_scene" maxlength="30" placeholder="可选，不超过 30 字，例如：雪山、逆光人像"></div></div>
+    <div class="prow"><span class="lab">标签</span><div><input type="text" id="ne_tags" placeholder="最多 5 个，每个不超过 16 字，用逗号分隔"></div></div>
+    <div class="prow"><span class="lab">正文</span><div><textarea id="ne_body" rows="9" maxlength="2000" placeholder="不超过 2000 字。建议写明具体参数、依据与效果。"></textarea><div class="mute" id="ne_cnt"></div></div></div>
+    <div class="prow"><span class="lab">参与对话</span><div><label class="radio"><input type="checkbox" id="ne_use"> 新对话开始时可作为 AI 的参考资料</label></div></div>
+    <div class="bad" id="ne_err"></div>`,
+    [id ? {label:'删除', onclick:async()=>{ if (!await askDialog('删除经验', `将删除经验“${n.title}”，此操作不能撤销。是否继续？`, '删除')) return;
+        const r = await lapi().lib_note_delete(id); if (!r.ok) return infoDialog('无法删除', r.message); lbClose(); loadLib(); }} : null,
+     {label:'取消', onclick:lbClose}, {label:'保存', cls:'primary', id:'ne_ok', onclick:()=>saveNote(id)}].filter(Boolean));
+  $('#ne_title').value = n.title||''; $('#ne_scene').value = n.scene||''; $('#ne_tags').value = (n.tags||[]).join('，'); $('#ne_body').value = n.body||''; $('#ne_use').checked = n.use_in_chat!==false;
+  const cnt = ()=>{ $('#ne_cnt').textContent = $('#ne_body').value.length+' / 2000'; }; $('#ne_body').oninput = cnt; cnt();
+}
+async function saveNote(id){
+  const tags = $('#ne_tags').value.split(/[,，、;；]+/).map(s=>s.trim()).filter(Boolean);
+  $('#ne_ok').disabled = true;
+  const r = await lapi().lib_note_save(id, {title:$('#ne_title').value, scene:$('#ne_scene').value, tags, body:$('#ne_body').value, use_in_chat:$('#ne_use').checked});
+  if (!r.ok){ $('#ne_err').textContent = r.message||'无法保存。'; $('#ne_ok').disabled = false; return; }
+  lbClose(); toast('经验已保存'); ltab='exp'; tabsOn(); loadLib();
+}
+async function importNotes(){
+  const r = await lapi().lib_notes_import(); if (r.cancelled) return;
+  if (!r.ok) return infoDialog('无法导入', r.message); toast(r.message); loadLib();
+}
+async function exportNotes(){ const r = await lapi().lib_notes_export(); if (r.cancelled) return; if (!r.ok) return infoDialog('无法导出', r.message); toast('已导出经验库'); }
+
+/* 记成经验 */
+function offerRecord(){
+  document.querySelectorAll('.recbtn').forEach(e=>e.remove());
+  if (!REAL() || !rows.some(r=>r.status==='已应用')) return;
+  const d = document.createElement('div'); d.className = 'note recbtn'; d.innerHTML = '<button class="btn small">把这次做法记成经验</button>';
+  $('#msgs').appendChild(d); d.scrollIntoView(); d.querySelector('button').onclick = startRecord;
+}
+async function startRecord(){
+  const r = await lapi().lib_record_start(); if (!r.ok) return infoDialog('无法生成草稿', r.message);
+  lbOpen('把这次做法记成经验');
+  lbSet(`<div class="big"><span class="spin"></span>正在请 AI 起草经验…</div><div class="mute">只总结已确认并已应用的调整。AI 不会直接写入经验库；生成后你可以编辑，点击“保存”才会写入。</div>`,
+        [{label:'停止', onclick:async(e)=>{ e.target.disabled = true; await lapi().lib_record_stop(); }}]);
+}
+function onRecordDone(ev){
+  if (!$('#lmask').classList.contains('show')) return;
+  const usage = `<div class="mute">用时 ${ev.elapsed} 秒${ev.tokens?'，约 '+Number(ev.tokens).toLocaleString()+' token':''}${ev.cost!=null?'，估算费用 $'+Number(ev.cost).toFixed(3):''}（估算值，非实际账单）。</div>`;
+  lapi().lib_record_close();
+  if (ev.ok){
+    noteEditor(ev.draft, '', `<div class="sumbox">这是 AI 起草的经验草稿，尚未保存。请核对内容，可直接修改；点击“保存”后才会写入经验库。</div>${usage}`);
+    return;
+  }
+  lbSet(`<div class="big">未能生成经验草稿</div><div class="warn">${esc(ev.message)}</div>${ev.raw?`<div class="rawbox">${esc(ev.raw)}</div>`:''}${usage}`,
+    [{label:'关闭', onclick:lbClose}, {label:'手动新建', cls:'primary', onclick:()=>noteEditor({title:'', scene:'', tags:[], body:'', use_in_chat:true}, '', '')}]);
+}
+
+
+/* ---- files ---- */
+let SEL = {count:0, photos:[], active_id:null};      // Lightroom 当前选中的照片（最多前 20 张）；AI 挑片按钮与预设套用用它判断是否有选中
+function selSig(){ return SEL.count+'|'+SEL.active_id+'|'+SEL.photos.map(p=>p.id).join(','); }
+function renderFiles(){ if (REAL()) { updatePickBtn(); return; } loadGallery(); }     // 真实模式的图库由 loadGallery 与图库事件驱动
+
+/* ---- center ---- */
+function nApplied(){ return REAL() ? rows.filter(r=>r.status==='已应用').length : steps.length; }
+const DEMO = location.hash === '#demo';
+let pv = null, actual = false, noBackend = false;   // pv = 后端推送的最近一次预览内容
+const PH_INITIAL = '初始（首次打开时）';
+const PH_INITIAL_TIP = '软件第一次读取该照片时的状态。若照片此前已在 Lightroom 中调整过，则不等同于原片。';
+function fmtInfo(p){ return [p.name,p.camera,p.iso,p.aperture,p.shutter,p.focal,p.format,p.size].filter(x=>x).join('  ·  '); }
+function frameHTML(id, label, tip){ return `<div class="frame" id="${id}"><div class="scroller"><img class="pimg" alt=""></div><div class="ph"></div><span class="label" ${tip?`title="${esc(tip)}"`:''}>${label}</span><span class="chip">正在读取预览</span><span class="note"></span></div>`; }
+function setFrame(id, o){   // o: {url, text, note, busy}
+  const f=$('#'+id), img=f.querySelector('.pimg');
+  if (o.url){ if (img.getAttribute('src')!==o.url) img.src=o.url; f.classList.add('has'); }
+  else { img.removeAttribute('src'); f.classList.remove('has'); f.querySelector('.ph').textContent=o.text||''; }
+  f.classList.toggle('busy', !!o.busy); f.querySelector('.note').textContent=o.note||'';
+}
+function renderStage(){
+  const s=$('#stage'), real=REAL(), kind = real ? 'real' : (DEMO ? 'demo' : 'none');
+  s.classList.toggle('actual', actual && real);
+  if (s.dataset.kind!==kind){
+    s.dataset.kind=kind;
+    if (kind==='demo') s.innerHTML=`<div class="frame has"><div class="scene"></div><span class="label">初始（示例）</span></div><div class="frame has"><div class="scene"></div><span class="label">当前（示例）</span><span class="note"></span></div>`;
+    else { s.innerHTML=frameHTML('fi',PH_INITIAL,PH_INITIAL_TIP)+frameHTML('fc','当前'); s.ondblclick=toggleZoom; }
+  }
+  $('#pvctl').style.display = real ? 'flex' : 'none';
+  if (real) updatePickBtn();
+  if (kind==='demo'){ $('#cur').textContent='界面演示 · 示例画面，非真实照片';
+    s.children[1].querySelector('.scene').classList.toggle('after', !!nApplied());
+    s.children[1].querySelector('.note').textContent = nApplied()?'已调整 '+nApplied()+' 项':'暂无调整'; $('#infobar').innerHTML=''; return; }
+  if (kind==='none'){ $('#cur').textContent='';
+    const t = noBackend ? '当前为静态页面，无预览（地址后加 #demo 可查看界面演示）' : '正在读取预览';
+    setFrame('fi',{text:t}); setFrame('fc',{text:t}); $('#infobar').innerHTML=''; return; }
+  const p = pv || {state:'loading', message:'正在读取预览'}, ph = p.photo || {};
+  $('#cur').textContent = ph.name || photoName || '';
+  if (p.state==='ok'){
+    const n = nApplied(), pi = p.current;
+    setFrame('fi',{url:p.initial.url});
+    setFrame('fc',{url:p.current.url, busy:!!p.loading, note: p.same ? (n?'':'与初始一致') : (n?'已调整 '+n+' 项':'')});
+    $('#infobar').innerHTML = `<div class="line">${esc(fmtInfo(ph))}</div><div>预览 ${pi.w&&pi.h?pi.w+' × '+pi.h+' 像素':''}${actual?'（100% 显示）':''}。“初始”指软件首次读取该照片时的状态；若此前已在 Lightroom 中调整过，则不等同于原片。</div>`;
+  } else {
+    const t = p.message || '正在读取预览';
+    setFrame('fi',{text:t}); setFrame('fc',{text:t});
+    $('#infobar').innerHTML = ph.name ? `<div class="line">${esc(fmtInfo(ph))}</div>` : '';
+  }
+}
+function toggleZoom(){ if(!REAL()) return; actual=!actual; $('#zoom').textContent = actual ? '100%' : '适合窗口'; renderStage(); }
+$('#zoom').onclick=toggleZoom;
+$('#edge').onchange=()=>{ if(REAL()) window.pywebview.api.set_preview_edge(parseInt($('#edge').value,10)); };
+setTimeout(()=>{ if(!REAL()){ noBackend=true; renderStage(); } }, 2500);
+
+/* ---- right ---- */
+let rows = [];   // 真实模式下的“本次调整”（由后端推送）
+const STCLS = {'已应用':'st-ok','失败':'st-bad','已拒绝':'st-bad','待确认':'st-wait','处理中':'st-wait','已撤销':'st-mute'};
+function esc(t){ return String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function renderParams(){
+  const tb=$('#ptable tbody'); tb.innerHTML='';
+  if (REAL()){
+    rows.forEach(r=>{ const can = r.status==='已应用' && r.edit_id;
+      tb.insertAdjacentHTML('beforeend',
+        `<tr><td>${esc(r.label)}<div class="why">${esc(r.reason)}</div></td><td class="num">${esc(r.before)}</td><td class="num">${esc(r.after)}</td><td class="${STCLS[r.status]||''}">${esc(r.status)}</td><td>${can?`<button class="btn small" data-eid="${esc(r.edit_id)}">撤销</button>`:''}</td></tr>`); });
+    tb.querySelectorAll('button[data-eid]').forEach(b=>b.onclick=()=>undoRow(b.dataset.eid));
+    $('#pempty').style.display = rows.length?'none':'block';
+    $('#restorerow').style.display = rows.some(r=>r.status==='已应用')?'block':'none';
+    return;
+  }
+  steps.forEach(s=>{ tb.insertAdjacentHTML('beforeend',
+    `<tr><td>${s.k}<div class="why">${s.why}</div></td><td class="num">${s.a}</td><td class="num ${s.b>s.a?'up':'down'}">${s.b}</td><td class="st-ok">已应用</td><td><button class="btn small" onclick="undoOne('${s.k}')">撤销</button></td></tr>`); });
+  $('#pempty').style.display = steps.length?'none':'block';
+}
+function say(t, who='ai'){ const m=document.createElement('div'); m.className='msg '+who; m.textContent=t; $('#msgs').appendChild(m); m.scrollIntoView(); return m; }
+
+const PLAN = [
+  {k:'高光', a:0, b:-35, why:'天空高光区域过亮，降低以保留云层层次'},
+  {k:'蓝色饱和度', a:0, b:18, why:'增强天空蓝色'},
+  {k:'清晰度', a:0, b:12, why:'提升山体轮廓清晰度'}
+];
+function apply(s){ steps.push(s); renderParams(); renderStage(); }
+function runPlan(i=0){
+  if(i>=PLAN.length){ say('调整已完成。可在「本次调整」中逐项撤销。'); return; }
+  const s=PLAN[i];
+  if(!ask){ apply(s); setTimeout(()=>runPlan(i+1),500); return; }
+  const m=document.createElement('div'); m.className='ask';
+  m.innerHTML=`拟调整：${s.k} ${s.a} → ${s.b}<div class="why">依据：${s.why}</div><div class="row"><button class="btn primary small">同意</button><button class="btn small">拒绝</button></div>`;
+  $('#msgs').appendChild(m); m.scrollIntoView();
+  const [ok,no]=m.querySelectorAll('button');
+  ok.onclick=()=>{ m.querySelector('.row').remove(); apply(s); runPlan(i+1); };
+  no.onclick=()=>{ m.querySelector('.row').remove(); m.append('已拒绝'); runPlan(i+1); };
+}
+const REAL = () => !!(window.pywebview && window.pywebview.api && window.pywebview.api.send);
+let cur = null, busy = false;
+let confirmDefault = true;   // 设置里的“逐项确认默认值”，新对话开始时套用   // cur = 正在流式显示的那条 AI 消息
+let photoName = null;           // 真实模式：Lightroom 当前选中的照片
+const DOTCLR = {connected:'var(--ok)', connecting:'var(--warn)', disconnected:'var(--bad)'};
+let LRL = {state:'idle', message:''}, LASTST = null;   // LRL：软件自动启动 Lightroom 的进度（lr_launch 事件）
+function showStatus(s){ LASTST = s;
+  let text = s.text, hint = s.state==='connected' ? '' : s.hint, dot = DOTCLR[s.state]||'var(--bad)';
+  if (s.state!=='connected' && ['starting','already_running','not_found','failed','timeout'].indexOf(LRL.state)>=0){
+    hint = LRL.message;
+    if (LRL.state==='starting'){ text = '正在启动 Lightroom…'; dot = 'var(--warn)'; hint = '请稍候，Lightroom 启动需要一会儿。'; } }
+  $('#lrstat').textContent = text; $('#lrdot').style.background = dot;
+  $('#lrhint').textContent = hint; $('#lrhint').title = hint; }
+function onLrLaunch(ev){ LRL = ev; if (LASTST) showStatus(LASTST); else { $('#lrstat').textContent = ev.state==='starting' ? '正在启动 Lightroom…' : $('#lrstat').textContent; $('#lrhint').textContent = ev.message; } }
+function setBusy(b){ busy=b; $('#send').disabled=b; $('#inp').disabled=b; $('#stop').style.display=b?'':'none'; $('#newchat').disabled=b; }
+async function newChat(){
+  if (!REAL() || busy) return;
+  if (!await askDialog('新对话', '将清空当前对话与「本次调整」表格并重置助手会话。照片上已应用的调整不会被撤销，仍可用「还原到原始状态」还原。是否继续？', '新对话')) return;
+  await window.pywebview.api.reset();
+  $('#msgs').innerHTML=''; rows=[]; cur=null; setAsk(confirmDefault); say('请选择照片并输入期望的修图效果。'); renderParams(); renderStage(); toast('已开始新对话');
+}
+function note(t){ const n=document.createElement('div'); n.className='note'; n.textContent=t; $('#msgs').appendChild(n); n.scrollIntoView(); return n; }
+function fmtCost(c){ return (c==null) ? '' : '，估算费用 $'+Number(c).toFixed(3); }
+/* 后端（Python）把每个事件推到这里 */
+function showConfirm(ev){
+  const m=document.createElement('div'); m.className='ask'; m.id='cf_'+ev.id;
+  const items = ev.items.length ? ev.items.map(i=>`<div>${esc(i.label)}：${esc(i.from)} → ${esc(i.to)}</div>`).join('') : '';
+  m.innerHTML=`${esc(ev.title)}${items?'':'：'+esc(ev.reason)}<div class="items">${items}</div>${items&&ev.reason?`<div class="why">依据：${esc(ev.reason)}</div>`:''}<div class="row"><button class="btn primary small">同意</button><button class="btn small">拒绝</button></div>`;
+  $('#msgs').appendChild(m); m.scrollIntoView();
+  const [ok,no]=m.querySelectorAll('button');
+  ok.onclick=()=>{ m.querySelector('.row').innerHTML='已提交：同意'; window.pywebview.api.answer(ev.id,true); };
+  no.onclick=()=>{ m.querySelector('.row').innerHTML='已提交：拒绝'; window.pywebview.api.answer(ev.id,false); };
+}
+function closeConfirm(ev){ const m=document.getElementById('cf_'+ev.id); if(!m) return; m.classList.add('done');
+  m.querySelector('.row').innerHTML = ev.allow ? '已同意' : (ev.message && ev.message.indexOf('超过')>=0 ? '确认超时，已视为拒绝' : '已拒绝'); }
+window.onClaudeEvent = function(ev){
+  if (ev.type==='text'){ if(!cur) cur=say('', 'ai'); cur.textContent+=ev.text; cur.scrollIntoView(); }
+  else if (ev.type==='tool'){ cur=null; note(ev.label); }
+  else if (ev.type==='error'){ cur=null; say(ev.message,'err'); }
+  else if (ev.type==='adjust'){ rows=ev.rows; renderParams(); renderStage(); }
+  else if (ev.type==='status'){ showStatus(ev); }
+  else if (ev.type==='lr_launch'){ onLrLaunch(ev); }
+  else if (ev.type==='photo'){ photoName=ev.name; renderStage(); loadLib('f'); }
+  else if (ev.type==='preview'){ pv=ev; renderStage(); }
+  else if (ev.type==='connecting'){ cur=null; note(ev.message); }
+  else if (ev.type==='confirm'){ cur=null; showConfirm(ev); }
+  else if (ev.type==='confirm_done'){ closeConfirm(ev); }
+  else if (ev.type==='stopped'){ cur=null; note('已停止'); }
+  else if (ev.type && ev.type.indexOf('import_')===0){ onImportEvent(ev); }
+  else if (ev.type && ev.type.indexOf('export_')===0){ onExportEvent(ev); }
+  else if (ev.type==='selection'){ SEL = {count:ev.count, photos:ev.photos||[], active_id:ev.active_id}; updatePickBtn(); }
+  else if (ev.type && ev.type.indexOf('library_')===0){ onLibraryEvent(ev); }
+  else if (ev.type && ev.type.indexOf('pick_')===0){ onPickEvent(ev); }
+  else if (ev.type==='record_done'){ onRecordDone(ev); }
+  else if (ev.type==='notes_context'){ cur=null; note('已将 '+ev.used+' 条经验作为参考资料提供给 AI'+(ev.truncated?'（共 '+ev.eligible+' 条参与对话，已选取最近修改的 '+ev.used+' 条）':'')+'。'); }
+  else if (ev.type==='done'){
+    if (!cur && ev.text && !ev.is_error && !$('#msgs').lastChild.classList.contains('ai')) say(ev.text,'ai');
+    cur=null; setBusy(false);
+    offerRecord();
+    if (ev.tokens) note('本次用量约 '+ev.tokens.toLocaleString()+' token'+fmtCost(ev.cost)+'（估算值，非实际账单）');
+  }
+};
+function send(){ const v=$('#inp').value.trim(); if(!v || busy) return; $('#inp').value=''; say(v,'me');
+  if (REAL()){
+    setBusy(true); cur=null; note('正在处理请求');
+    window.pywebview.api.send(v, ask).then(r=>{ if(r && !r.ok){ say(r.message,'err'); setBusy(false); } })
+      .catch(()=>{ say('无法连接后台，请重新启动程序。','err'); setBusy(false); });
+    return;
+  }
+  setTimeout(()=>{ say('已收到需求，正在分析照片并制定调整方案。（演示回复）'); setTimeout(()=>runPlan(0),500); },400); }
+$('#stop').onclick=()=>{ if(REAL()) window.pywebview.api.stop(); };
+$('#send').onclick=send; $('#inp').onkeydown=e=>{ if(e.key==='Enter') send(); };
+function setAsk(v){ ask=!!v; $('#sw').classList.toggle('on',ask);
+  $('#swlabel').textContent= ask?'逐项确认：开（每项调整需先确认）':'逐项确认：关（自动执行）'; }
+$('#sw').onclick=()=>setAsk(!ask);
+
+/* 弹窗：返回 Promise<boolean> */
+function askDialog(title, text, okLabel){ return new Promise(res=>{
+  const mk=document.createElement('div'); mk.className='mask show';
+  mk.innerHTML=`<div class="dialog small"><h3>${esc(title)}</h3><p>${esc(text)}</p><div class="row"><button class="btn">取消</button><button class="btn primary">${esc(okLabel)}</button></div></div>`;
+  document.body.appendChild(mk); const [c,o]=mk.querySelectorAll('button');
+  c.onclick=()=>{ mk.remove(); res(false); }; o.onclick=()=>{ mk.remove(); res(true); }; }); }
+async function undoRow(eid, force=false){
+  const r = await window.pywebview.api.undo(eid, force);
+  if (r.ok) return toast('已撤销');
+  if (r.conflict && !force){
+    if (await askDialog('参数在调整后又发生变化', r.message+'\n\n强制撤销将覆盖这些后续改动。', '强制撤销')) return undoRow(eid, true);
+    return;
+  }
+  toast('撤销失败：'+r.message);
+}
+async function restoreOriginal(force=false){
+  if (!force && !await askDialog('还原到原始状态', '将当前照片还原到首次调整之前的状态，已应用的调整均会被撤销。是否继续？', '还原')) return;
+  const r = await window.pywebview.api.restore_original(force);
+  if (r.ok) return toast('已还原到原始状态');
+  if (r.conflict && !force){
+    if (await askDialog('参数在调整后又发生变化', r.message+'\n\n强制还原将覆盖这些后续改动。', '强制还原')) return restoreOriginal(true);
+    return;
+  }
+  toast('还原失败：'+r.message);
+}
+function undoOne(k){ steps=steps.filter(s=>s.k!==k); renderParams(); renderStage(); toast('已撤销「'+k+'」'); }
+function undo(){
+  if (REAL()){ const last=[...rows].reverse().find(r=>r.status==='已应用'&&r.edit_id); if(!last) return toast('没有可撤销的调整'); return undoRow(last.edit_id); }
+  if(!steps.length) return toast('没有可撤销的调整'); const s=steps.pop(); renderParams(); renderStage(); toast('已撤销「'+s.k+'」'); }
+
+/* ---- export dialog ---- */
+let EX = {st:null, o:null, stage:null};
+const EX_SIZES = [0, 4096, 2048, 1024];
+function exOpen(){ $('#mask').classList.add('show'); }
+function exClose(){ $('#mask').classList.remove('show'); EX.stage=null; }
+function exSet(body, buttons){
+  $('#ex_body').innerHTML=body; const f=$('#ex_foot'); f.innerHTML='';
+  (buttons||[]).forEach(b=>{ const e=document.createElement('button'); e.className='btn '+(b.cls||''); e.textContent=b.label; e.disabled=!!b.disabled; if(b.id) e.id=b.id; e.onclick=b.onclick; f.appendChild(e); });
+}
+async function openExport(){
+  if (!REAL()) return toast('界面演示中，导出不可用');
+  exOpen(); EX.stage='load';
+  exSet('<div class="mute"><span class="spin"></span>正在读取 Lightroom 中选中的照片…</div>', [{label:'取消', onclick:exClose}]);
+  let cur = null;
+  try { cur = await window.pywebview.api.export_state(); } catch(e){}
+  if (cur && cur.stage==='running'){ EX.stage='run'; exRunning(); return; }
+  if (cur && cur.stage==='done' && cur.result){ exResult(cur.result); return; }
+  try { EX.st = await window.pywebview.api.export_dialog_state(); }
+  catch(e){ exSet('<div class="bad">无法读取导出信息，请重试。</div>', [{label:'关闭', onclick:exClose}]); return; }
+  EX.o = Object.assign({}, EX.st.options); EX.stage='form'; exForm();
+}
+function exInfoLine(p){ return [p.camera, p.format, p.size].filter(Boolean).join(' · ') || '—'; }
+function exForm(){
+  const st=EX.st, o=EX.o, p=st.photo;
+  const photoHtml = p
+    ? `<div class="kvl"><span>文件名</span><span>${esc(p.name||'—')}</span><span>基本信息</span><span>${esc(exInfoLine(p))}</span></div>
+       <div class="mute">导出内容为该照片的当前状态（含已做的调整）。本版一次导出一张。</div>`
+    : `<div class="bad">${esc(st.reason||'没有可导出的照片。')}</div>`;
+  const sizeSel = EX_SIZES.includes(o.size) ? String(o.size) : 'custom';
+  exSet(`${photoHtml}<div class="sep"></div>
+    <div class="erow"><span class="lab">保存位置</span>
+      <span class="inline"><input type="text" id="ex_dir" readonly placeholder="尚未选择文件夹" value="${esc(st.folder||'')}"><button class="btn small" id="ex_pick">选择文件夹</button></span>
+      <span class="sub" id="ex_dirmsg"></span></div>
+    <div class="erow"><label class="lab" for="ex_fmt">格式</label><select id="ex_fmt"><option value="jpeg">JPEG</option><option value="tiff">TIFF</option></select></div>
+    <div class="erow" id="ex_qrow"><label class="lab" for="ex_q">质量</label><span class="inline"><input type="range" id="ex_q" min="40" max="100" step="1"><span id="ex_qv" style="width:28px;text-align:right"></span></span>
+      <span class="sub">数值越大画质越好，文件越大。</span></div>
+    <div class="erow" id="ex_brow"><span class="lab">位深</span><span><label class="radio"><input type="radio" name="ex_bd" value="16"> 16 位</label><label class="radio"><input type="radio" name="ex_bd" value="8"> 8 位</label></span>
+      <span class="sub">无损压缩，文件较大。</span></div>
+    <div class="erow"><label class="lab" for="ex_size">大小</label>
+      <span class="inline"><select id="ex_size"><option value="0">原始尺寸</option><option value="4096">长边 4096 像素</option><option value="2048">长边 2048 像素</option><option value="1024">长边 1024 像素</option><option value="custom">自定义</option></select>
+        <span id="ex_cwrap" class="inline">长边 <input type="number" id="ex_custom" min="256" max="20000" step="1"> 像素</span></span>
+      <span class="sub" id="ex_csub">自定义范围：256–20000 的整数。</span><span class="warn" id="ex_big"></span></div>
+    <div class="erow"><label class="lab" for="ex_md">元数据</label><select id="ex_md"><option value="minimal">仅必要信息（默认）</option><option value="all">包含全部元数据</option></select>
+      <span class="sub" id="ex_mdsub"></span></div>
+    <div class="sep"></div>
+    <div class="erow"><span class="lab">文件名</span><span class="fname" id="ex_name"></span><span class="sub">若同名文件已存在，将自动改名（_2、_3…），不会覆盖。</span></div>
+    <div class="bad" id="ex_err"></div>`,
+    [{label:'取消', onclick:exClose}, {label:'导出', cls:'primary', id:'ex_go', onclick:exStart}]);
+  $('#ex_fmt').value=o.format; $('#ex_q').value=o.quality; $('#ex_md').value=o.metadata; $('#ex_size').value=sizeSel;
+  $('#ex_custom').value = sizeSel==='custom' ? o.size : '';
+  document.querySelectorAll('input[name=ex_bd]').forEach(r=>{ r.checked = Number(r.value)===o.bit_depth; r.onchange=()=>{ o.bit_depth=Number(r.value); exUpdate(); }; });
+  $('#ex_fmt').onchange=()=>{ o.format=$('#ex_fmt').value; exUpdate(); };
+  $('#ex_q').oninput=()=>{ o.quality=Number($('#ex_q').value); exUpdate(); };
+  $('#ex_md').onchange=()=>{ o.metadata=$('#ex_md').value; exUpdate(); };
+  $('#ex_size').onchange=()=>{ const v=$('#ex_size').value;
+    if (v==='custom'){ const t=$('#ex_custom').value.trim(); o.size = /^\d+$/.test(t) ? Number(t) : -1; } else { o.size=Number(v); } exUpdate(); };
+  $('#ex_custom').oninput=()=>{ const t=$('#ex_custom').value.trim(); o.size = /^\d+$/.test(t) ? Number(t) : -1; exUpdate(); };
+  $('#ex_pick').onclick=exPick;
+  exUpdate();
+}
+function exSizeOk(o){ return o.size===0 || (Number.isInteger(o.size) && o.size>=256 && o.size<=20000); }
+function exName(){
+  if (!EX.st.photo) return '—';
+  const nm = (EX.st.photo && EX.st.photo.name) || 'photo', o=EX.o;
+  const stem = nm.replace(/\\/g,'/').split('/').pop().replace(/\.[^.]*$/,'').replace(/[^A-Za-z0-9\-_]/g,'_') || 'photo';
+  return stem+'_LrMCP_'+(o.size>0 && exSizeOk(o) ? o.size+'px' : 'full')+'.'+(o.format==='tiff'?'tif':'jpg');
+}
+function exUpdate(){
+  const st=EX.st, o=EX.o, tiff=o.format==='tiff', custom=$('#ex_size').value==='custom';
+  $('#ex_qrow').style.display = tiff?'none':''; $('#ex_brow').style.display = tiff?'':'none';
+  $('#ex_qv').textContent=o.quality; $('#ex_cwrap').style.display = custom?'':'none'; $('#ex_csub').style.display = custom?'':'none';
+  const bad = !exSizeOk(o);
+  $('#ex_csub').style.color = bad ? 'var(--bad)' : '';
+  $('#ex_big').textContent = (tiff && o.bit_depth===16 && o.size===0) ? '文件可能超过 100 MB。' : '';
+  $('#ex_mdsub').textContent = o.metadata==='all' ? '包含拍摄信息，可能含拍摄位置；分享前请留意。' : '仅保留色彩与方向等必要信息，不含拍摄位置。';
+  $('#ex_name').textContent = exName();
+  $('#ex_dirmsg').textContent = st.folder ? '' : (st.folder_message || '请选择保存位置。');
+  $('#ex_dirmsg').style.color = '';
+  $('#ex_err').textContent = '';
+  $('#ex_go').disabled = !(st.photo && st.folder && !bad);
+}
+async function exPick(){
+  const r = await window.pywebview.api.choose_export_folder();
+  if (r.ok){ EX.st.folder=r.folder; EX.st.folder_message=''; $('#ex_dir').value=r.folder; }
+  exUpdate();
+  if (!r.ok && r.message){ $('#ex_dirmsg').textContent=r.message; $('#ex_dirmsg').style.color='var(--bad)'; }
+}
+async function exStart(){
+  const o=EX.o;
+  const payload = {format:o.format, size:o.size, quality:o.quality, bit_depth:o.bit_depth, metadata:o.metadata};
+  $('#ex_go').disabled=true;
+  const r = await window.pywebview.api.export_current_photo(payload);
+  if (!r.ok){ exUpdate(); $('#ex_err').textContent=r.message||'无法导出。'; if (r.changed) $('#ex_go').disabled=true; return; }
+  EX.stage='run'; exRunning();
+}
+function exRunning(){
+  exOpen(); exSet('<div class="big"><span class="spin"></span>正在导出…</div><div class="mute">Lightroom 导出通常需要数秒到数十秒，请稍候。导出期间请勿关闭软件。</div>',
+    [{label:'取消', disabled:true}, {label:'导出', cls:'primary', disabled:true}]);
+}
+function exResult(ev){
+  EX.stage='done'; exOpen();
+  const close = {label:'关闭', cls:'primary', onclick:async()=>{ await window.pywebview.api.export_close(); exClose(); }};
+  if (ev.status==='exported'){
+    const bd = ev.format==='tiff' && ev.bit_depth ? `（${ev.bit_depth} 位）` : '';
+    exSet(`<div class="big okmsg">导出完成。</div>
+      <div class="kvl"><span>文件名</span><span>${esc(ev.file)}</span><span>格式</span><span>${esc(ev.format_label)}${bd}</span>
+        <span>尺寸</span><span>${esc(ev.dimensions||'—')}</span><span>文件大小</span><span>${esc(ev.size_text)}</span>
+        <span>保存位置</span><span>${esc(ev.folder)}</span></div>`,
+      [{label:'在资源管理器中显示', onclick:async()=>{ const r=await window.pywebview.api.reveal_last_export(); if(!r.ok) toast(r.message); }}, close]);
+  } else if (ev.status==='uncertain'){
+    exSet(`<div class="big">状态不确定</div><div class="warn" style="color:var(--warn)">${esc(ev.message)}</div><div class="kvl"><span>保存位置</span><span>${esc(ev.folder)}</span></div>`, [close]);
+  } else {
+    exSet(`<div class="big">导出失败</div><div class="bad">${esc(ev.message)}</div>`,
+      [{label:'返回修改', onclick:async()=>{ await window.pywebview.api.export_close(); openExport(); }}, close]);
+  }
+}
+function onExportEvent(ev){
+  if (ev.type==='export_done'){ if ($('#mask').classList.contains('show')) exResult(ev); else toast('导出已结束，请点击“导出”查看结果。'); }
+  else if (ev.type==='export_progress' && $('#mask').classList.contains('show')) exRunning();
+}
+$('#mask').onclick=e=>{ if(e.target.id==='mask' && (EX.stage==='form'||EX.stage==='load')) exClose(); };
+
+
+/* ---- import ---- */
+let IM = {cat:'', stage:null, pstage:null};
+const fmtSize = n => n>=1073741824 ? (n/1073741824).toFixed(2)+' GB' : n>=1048576 ? (n/1048576).toFixed(1)+' MB' : n>=1024 ? (n/1024).toFixed(1)+' KB' : n+' B';
+const fmtTime = s => { s=Math.round(s||0); return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); };
+function imOpen(title){ $('#im_title').textContent=title; $('#imask').classList.add('show'); }
+function imClose(){ $('#imask').classList.remove('show'); IM.stage=null; IM.pstage=null; }
+function imSet(body, buttons){   // buttons: [{label, cls, onclick, disabled, id}]
+  $('#im_body').innerHTML=body; const f=$('#im_foot'); f.innerHTML='';
+  (buttons||[]).forEach(b=>{ const e=document.createElement('button'); e.className='btn '+(b.cls||''); e.textContent=b.label; e.disabled=!!b.disabled; if(b.id) e.id=b.id; e.onclick=b.onclick; f.appendChild(e); });
+}
+function infoDialog(title, text){ return askDialog(title, text, '知道了'); }
+async function startImport(){
+  if (!REAL()) return toast('界面演示中，导入不可用');
+  if (IM.stage) { $('#imask').classList.add('show'); return; }
+  IM.cat=''; IM.stage='scanning';      // 先置状态：扫描很快结束时，完成事件可能先于本函数返回
+  const r = await window.pywebview.api.choose_source_folder();
+  if (!r.ok){ IM.stage=null; if (r.message) await infoDialog('无法导入', r.message); return; }
+  if (IM.stage==='scanning') imScanning(0);
+}
+function imScanning(n){
+  imOpen('导入照片');
+  imSet(`<div class="big">正在扫描来源文件夹</div><div class="mute">已找到 ${n} 张照片。扫描只读取文件名，不会改动存储卡上的任何内容。</div>`,
+    [{label:'取消', onclick:async()=>{ await window.pywebview.api.import_cancel(); imClose(); }}]);
+}
+async function imConfirm(){
+  IM.stage='confirm'; imOpen('导入照片');
+  const cur = $('#im_cat') ? $('#im_cat').value : IM.cat;
+  const p = await window.pywebview.api.import_prepare(cur);
+  if (!p.found){ imSet(`<div class="bad">${esc((p.errors&&p.errors._)||'没有可导入的内容。')}</div>`, [{label:'关闭', onclick:async()=>{ await window.pywebview.api.import_close(); imClose(); }}]); return; }
+  const f=p.found, errs=Object.entries(p.errors||{});
+  const errHTML = errs.filter(([k])=>k!=='category').map(([,m])=>`<div class="bad">${esc(m)}</div>`).join('');
+  const catErr = (p.errors&&p.errors.category) ? `<div class="bad">${esc(p.errors.category)}</div>` : '';
+  const notes = [];
+  notes.push('<div class="mute">原片仅被读取，不会移动、删除或修改；照片复制到软件文件夹后再加入 Lightroom 目录。同名文件只有内容校验一致才跳过，不同内容会自动改名；复制后会再次校验，不会覆盖已有文件。</div>');
+  if (!p.lr_connected) notes.push('<div class="warn">Lightroom 当前未连接：将只复制照片，稍后可在结果页选择“重新尝试加入 Lightroom”。</div>');
+  if (!p.base_exists && !(p.errors&&p.errors.base)) notes.push('<div class="warn">软件文件夹尚不存在，开始导入时将询问是否创建。</div>');
+  if (f.skipped_links) notes.push(`<div class="mute">已忽略 ${f.skipped_links} 个快捷方式或链接。</div>`);
+  imSet(`<div class="big">找到 ${f.n} 张（RAW ${f.raw}、JPEG ${f.jpeg}、其他 ${f.other}），共 ${esc(f.size_text)}</div>
+    <div class="kvl"><span>来源文件夹</span><span>${esc(p.source)}</span>
+      <span>软件文件夹</span><span>${esc(p.base)}${p.base_is_default?'（默认位置，可在设置中更换）':''}</span>
+      <span>分类文件夹名</span><span><input type="text" id="im_cat" maxlength="60" placeholder="可选，留空则直接放入软件文件夹" value="${esc(cur)}"></span>
+      <span>保存到</span><span>${esc(p.target)}</span>
+      <span>磁盘剩余空间</span><span>${esc(p.free_text)}（本次需要约 ${esc(p.needed_text)}）</span></div>${catErr}${errHTML}${notes.join('')}`,
+    [{label:'取消', onclick:async()=>{ await window.pywebview.api.import_cancel(); imClose(); }},
+     {label:'开始导入', cls:'primary', id:'im_go', disabled:!p.can_start, onclick:imBegin}]);
+  const inp=$('#im_cat'); let t=null;
+  inp.oninput=()=>{ clearTimeout(t); t=setTimeout(()=>{ IM.cat=inp.value; imConfirm().then(()=>{ const i=$('#im_cat'); i.focus(); i.setSelectionRange(i.value.length,i.value.length); }); },350); };
+}
+async function imBegin(){
+  const cat=$('#im_cat').value; IM.cat=cat;
+  let r = await window.pywebview.api.import_start(cat, false);
+  if (r.needs_create){
+    if (!await askDialog('创建文件夹', '软件文件夹不存在：\n'+r.base+'\n是否创建？', '创建')) return;
+    r = await window.pywebview.api.import_start(cat, true);
+  }
+  if (!r.ok){ await infoDialog('无法开始导入', r.message||'无法开始导入。'); imConfirm(); return; }
+  IM.stage='copying'; IM.pstage=null;
+  imProgress({i:0,n:0,name:'',elapsed:0,counts:{copied:0,skipped:0,failed:0,lr_ok:0,lr_uncertain:0,lr_pending:0,lr_failed:0}});
+}
+function countsLine(c){ return `已复制 ${c.copied}　跳过 ${c.skipped}　失败 ${c.failed}　已加入 Lightroom ${c.lr_ok}`+(c.lr_uncertain?`　需确认 ${c.lr_uncertain}`:'')+(c.lr_pending?`　尚未加入 ${c.lr_pending}`:'')+(c.lr_failed?`　加入失败 ${c.lr_failed}`:''); }
+function imProgress(ev){
+  if (IM.stage!=='copying' && IM.stage!=='retry') IM.stage='copying';
+  imOpen(ev.mode==='retry'?'重新加入 Lightroom':'正在导入');
+  const n=ev.n||0, i=Math.min(ev.i+1,n), pct = n? Math.round(ev.i/n*100):0;
+  if ($('#im_bar') && IM.pstage==='on'){ $('#im_bar').style.width=pct+'%'; $('#im_line').textContent = n?`第 ${i}/${n} 个　${ev.name||''}`:'准备中'; $('#im_time').textContent='已用时 '+fmtTime(ev.elapsed); $('#im_counts').textContent=countsLine(ev.counts); return; }
+  IM.pstage='on';
+  imSet(`<div class="big" id="im_line">${n?`第 ${i}/${n} 个　${esc(ev.name||'')}`:'准备中'}</div><div class="bar"><i id="im_bar" style="width:${pct}%"></i></div>
+    <div class="mute" id="im_time">已用时 ${fmtTime(ev.elapsed)}</div><div class="mute" id="im_counts">${esc(countsLine(ev.counts))}</div>
+    <div class="mute">取消后将在当前照片处理完成后停止，已完成的保留。</div>`,
+    [{label:'取消导入', onclick:async(e)=>{ e.target.disabled=true; e.target.textContent='正在停止'; await window.pywebview.api.import_cancel(); }}]);
+}
+function imResult(ev){
+  IM.stage='done'; IM.pstage=null; imOpen('导入结果'); const c=ev.counts;
+  const rows = (ev.problems||[]).map(p=>{ const what = p.copy==='failed' ? '复制' : '加入 Lightroom';
+    return `<tr><td>${esc(p.name)}</td><td>${what}</td><td>${p.lr==='uncertain'?'请在 Lightroom 中确认：':''}${esc(p.reason||'')}</td></tr>`; }).join('');
+  const lines = [];
+  if (ev.cancelled) lines.push('<div class="warn">已取消。已完成的照片保留，未处理的没有复制。</div>');
+  if (c.lr_pending) lines.push(`<div class="warn">有 ${c.lr_pending} 张已复制但尚未加入 Lightroom。</div>`);
+  if (c.lr_uncertain) lines.push(`<div class="warn">有 ${c.lr_uncertain} 张需要在 Lightroom 中确认是否已加入（软件不会自动重试，以免重复添加）。</div>`);
+  if (!ev.cancelled && !c.failed && !c.lr_pending && !c.lr_uncertain && !c.lr_failed) lines.push('<div class="okmsg">全部完成。</div>');
+  imSet(`<div class="big">${esc(countsLine(c))}</div><div class="mute">共 ${ev.n} 张，用时 ${fmtTime(ev.elapsed)}。</div>${lines.join('')}
+    ${rows?`<div class="plist"><table><thead><tr><th>文件</th><th>环节</th><th>原因</th></tr></thead><tbody>${rows}</tbody></table>${ev.problems_more?`<div class="mute">另有 ${ev.problems_more} 项未列出。</div>`:''}</div>`:''}`,
+    [ev.pending_retry?{label:'重新尝试加入 Lightroom', onclick:async()=>{ const r=await window.pywebview.api.import_retry_lr(); if(!r.ok) await infoDialog('无法重新加入', r.message); else { IM.stage='retry'; IM.pstage=null; } }}:null,
+     {label:'关闭', cls:'primary', onclick:async()=>{ await window.pywebview.api.import_close(); imClose(); }}].filter(Boolean));
+}
+function onImportEvent(ev){
+  if (ev.type==='import_scan'){
+    if (ev.state==='scanning'){ if(IM.stage==='scanning'){ imScanning(ev.found||0); } }
+    else if (ev.state==='done'){ if (ev.error){ imOpen('导入照片'); imSet(`<div class="bad">${esc(ev.error)}</div>`, [{label:'关闭', onclick:async()=>{ await window.pywebview.api.import_close(); imClose(); }}]); } else imConfirm(); }
+    else if (ev.state==='cancelled'){ imClose(); }
+  } else if (ev.type==='import_progress'){ imProgress(ev); }
+  else if (ev.type==='import_done'){ imResult(ev); }
+}
+
+/* ---- AI 挑片 ---- */
+let PK = {stage:null, photos:[], thumbs:{}, o:{criterion:'overall', custom:'', count:'top3'}, res:null, ap:null, timer:null, t0:0, n:0};
+const PK_CRIT = [['overall','综合观感'],['technical','技术质量（对焦、曝光、噪点）'],['composition','构图'],['custom','自定义']];
+const PK_CNT = [['top1','挑出最好的 1 张'],['top3','前 3 张'],['all','全部排序']];
+const PK_MAX = 10;
+function updatePickBtn(){
+  const b=$('#pickbtn'); if(!b) return; const n=SEL.count;
+  b.disabled = REAL() && n===0;
+  b.title = n===0 ? '请先在 Lightroom 中选择照片' : (n===1 ? '评估选中的这一张照片' : (n>PK_MAX ? '已选中 '+n+' 张，请减少到 '+PK_MAX+' 张以内' : '比较选中的 '+n+' 张照片并给出排名和建议'));
+}
+function pkOpen(title){ $('#pk_title').textContent = title||'AI 挑片'; $('#pmask').classList.add('show'); }
+function pkClear(){ if (PK.timer){ clearInterval(PK.timer); PK.timer=null; } }
+function pkClose(){ pkClear(); $('#pmask').classList.remove('show'); PK.stage=null; }
+function pkSet(body, buttons){
+  $('#pk_body').innerHTML=body; const f=$('#pk_foot'); f.innerHTML='';
+  (buttons||[]).forEach(b=>{ const e=document.createElement('button'); e.className='btn '+(b.cls||''); e.textContent=b.label; e.disabled=!!b.disabled; if(b.id) e.id=b.id; e.onclick=b.onclick; f.appendChild(e); });
+}
+const pkStars = n => '★'.repeat(n)+'☆'.repeat(5-n);
+const pkFlag = f => ({pick:'留用', none:'无旗标', reject:'排除'}[f] || '—');
+const pkRating = r => r ? r+' 星' : '无星级';
+function pkThumb(id){ const u=PK.thumbs[id]; return u ? `<img class="pt" src="${esc(u)}" alt="">` : `<div class="pt"></div>`; }
+async function pkFinishClose(){ try{ await window.pywebview.api.pick_apply_close(); await window.pywebview.api.pick_close(); }catch(e){} pkClose(); }
+async function openPick(){
+  if (!REAL()) return toast('界面演示中，AI 挑片不可用');
+  const api = window.pywebview.api;
+  pkOpen(); PK.stage='load';
+  pkSet('<div class="mute"><span class="spin"></span>正在读取 Lightroom 中选中的照片…</div>', [{label:'取消', onclick:pkClose}]);
+  let st=null, ap=null;
+  try { st = await api.pick_state(); ap = await api.pick_apply_state(); } catch(e){}
+  if (st && st.thumbs) Object.assign(PK.thumbs, st.thumbs);
+  if (ap && ap.stage==='writing'){ PK.stage='applying'; pkApplying({i:0,n:0,name:''}); return; }
+  if (ap && ap.stage==='done' && ap.results.length){ pkApplied(ap); return; }
+  if (st && st.stage==='running'){ PK.n=st.n||0; PK.stage='run'; pkRunning(); return; }
+  if (st && st.stage==='done' && st.result){ PK.res=st.result; pkResult(); return; }
+  let r; try { r = await api.pick_prepare(); } catch(e){ r = {ok:false, message:'无法读取选中的照片，请重试。'}; }
+  if (!r.ok){ PK.stage='error'; pkSet(`<div class="bad" style="font-size:13px">${esc(r.message||'无法开始。')}</div>`, [{label:'关闭', cls:'primary', onclick:pkClose}]); return; }
+  if (r.stage==='running'){ PK.stage='run'; pkRunning(); return; }
+  PK.photos = r.photos; Object.assign(PK.thumbs, r.thumbs||{}); PK.stage='form'; pkForm();
+}
+function pkForm(){
+  const o=PK.o, n=PK.photos.length, one=n===1;
+  const cells = PK.photos.map(p=>`<div class="pcell" data-id="${esc(p.id)}">${pkThumb(p.id)}<div class="pn" title="${esc(p.name||'')}">${esc(p.name||'（未命名）')}</div></div>`).join('');
+  pkOpen(one ? '评估这一张' : 'AI 挑片');
+  pkSet(`<div class="big">${one ? '将评估选中的这 1 张照片' : '将比较选中的 '+n+' 张照片'}</div>
+    <div class="grid" id="pk_grid">${cells}</div>
+    <div class="mute">开始后，这些照片的预览图会发送给当前使用的 AI 来源。AI 的结果先只显示在软件里，需要您确认后才会写入 Lightroom。</div>
+    <div class="sep"></div>
+    <div class="prow"><span class="lab">评判标准</span><span>${PK_CRIT.map(([v,t])=>`<label class="radio"><input type="radio" name="pk_c" value="${v}" ${o.criterion===v?'checked':''}> ${t}</label>`).join('')}
+      <input type="text" id="pk_custom" maxlength="120" placeholder="例如：更看重人物表情与光线氛围（不超过 120 字）" value="${esc(o.custom)}"><span class="mute" id="pk_cn"></span></span></div>
+    ${one ? '' : `<div class="prow"><span class="lab">结果数量</span><span>${PK_CNT.map(([v,t])=>`<label class="radio"><input type="radio" name="pk_n" value="${v}" ${o.count===v?'checked':''}> ${t}</label>`).join('')}</span></div>`}
+    <div class="bad" id="pk_err"></div>`,
+    [{label:'取消', onclick:pkFinishClose}, {label:'开始', cls:'primary', id:'pk_go', onclick:pkStart}]);
+  document.querySelectorAll('input[name=pk_c]').forEach(r=>r.onchange=()=>{ o.criterion=r.value; pkFormUpdate(); });
+  document.querySelectorAll('input[name=pk_n]').forEach(r=>r.onchange=()=>{ o.count=r.value; });
+  $('#pk_custom').oninput=()=>{ o.custom=$('#pk_custom').value; pkFormUpdate(); };
+  pkFormUpdate();
+}
+function pkFormUpdate(){
+  const o=PK.o, custom=o.criterion==='custom', t=o.custom.replace(/\s+/g,' ').trim(), len=t.length;
+  $('#pk_custom').style.display = custom ? '' : 'none'; $('#pk_cn').style.display = custom ? '' : 'none';
+  $('#pk_cn').textContent = len+' / 120 字' + (len>120 ? '，超出长度' : '');
+  $('#pk_cn').style.color = len>120 ? 'var(--bad)' : '';
+  $('#pk_go').disabled = custom && (len===0 || len>120);
+}
+async function pkStart(){
+  const o=PK.o; $('#pk_go').disabled=true; $('#pk_err').textContent='';
+  const r = await window.pywebview.api.pick_start({criterion:o.criterion, custom:o.criterion==='custom'?o.custom:'', count:o.count});
+  if (!r.ok){ $('#pk_err').textContent = r.message||'无法开始。'; if (!r.changed) pkFormUpdate(); return; }
+  PK.n = PK.photos.length; PK.stage='run'; pkRunning();
+}
+function pkRunning(label){
+  pkClear(); pkOpen('AI 挑片'); PK.t0 = Date.now();
+  pkSet(`<div class="big"><span class="spin"></span>正在比较 ${PK.n||PK.photos.length} 张照片…</div>
+    <div class="mute" id="pk_lab">${esc(label||'已发送请求，等待 AI 回复。')}</div><div class="mute" id="pk_time">已用时 00:00</div>
+    <div class="mute">通常需要数十秒；最长等待 180 秒。可随时停止。</div>`,
+    [{label:'停止', id:'pk_stop', onclick:async(e)=>{ e.target.disabled=true; e.target.textContent='正在停止'; await window.pywebview.api.pick_stop(); }}]);
+  PK.timer = setInterval(()=>{ const t=$('#pk_time'); if(t) t.textContent='已用时 '+fmtTime((Date.now()-PK.t0)/1000); }, 1000);
+}
+function pkUsage(ev){
+  const bits = ['用时 '+ev.elapsed+' 秒']; if (ev.tokens) bits.push('约 '+Number(ev.tokens).toLocaleString()+' token'); if (ev.cost!=null) bits.push('估算费用 $'+Number(ev.cost).toFixed(3));
+  return `<div class="mute">${esc(bits.join('，'))}（估算值，非实际账单）。</div>`;
+}
+function pkResult(){
+  pkClear(); const ev=PK.res; PK.stage='result'; pkOpen('AI 挑片');
+  const again = {label:'重新比较', onclick:async()=>{ await window.pywebview.api.pick_close(); PK.res=null; pkClose(); openPick(); }};
+  const close = {label:'关闭', cls:'primary', onclick:pkFinishClose};
+  const head = `<div class="mute">${esc(ev.n)} 张照片 · 评判标准：${esc(ev.criterion_label)} · 结果：${esc(ev.count_label)}</div>`;
+  if (['failed','timeout','stopped'].includes(ev.status)){
+    pkSet(`<div class="big">${ev.status==='stopped'?'已停止':(ev.status==='timeout'?'等待超时':'未能完成')}</div><div class="${ev.status==='stopped'?'mute':'bad'}" style="font-size:13px">${esc(ev.message)}</div>${head}`, [again, close]); return;
+  }
+  const dropped = (ev.dropped||[]).length ? `<div class="warn">${ev.dropped.map(esc).join('<br>')}</div>` : '';
+  if (ev.status==='unstructured'){
+    pkSet(`<div class="big">未能得到结构化结果</div><div class="warn">${esc(ev.message)}</div>${dropped}
+      <div class="rawbox">${esc(ev.raw||'（AI 没有返回文字）')}</div>${head}${pkUsage(ev)}`, [again, close]); return;
+  }
+  const cards = ev.ranking.map(r=>`<div class="card"><div class="rk">${r.rank}</div>
+      <div>${PK.thumbs[r.photo_id]?`<img src="${esc(PK.thumbs[r.photo_id])}" alt="" data-zoom="${esc(r.photo_id)}" title="点击放大">`:`<div class="noimg" data-zoom="${esc(r.photo_id)}"></div>`}</div>
+      <div><div class="nm">${esc(r.name||'（未命名）')}</div>
+        <div class="meta">评分 ${esc(r.score)} / 10　建议 <span class="stars">${pkStars(r.stars)}</span>（${pkRating(r.stars)}）· ${pkFlag(r.flag)}</div>
+        <div class="why2">${esc(r.reason)}</div>
+        <div class="old">Lightroom 中现有：${pkRating(r.old_rating||0)} / ${pkFlag(r.old_flag||'none')}</div></div></div>`).join('');
+  pkSet(`${head}<div class="sumbox">${ev.summary ? esc(ev.summary) : '（AI 没有给出总评）'}</div>${dropped}${cards}
+    ${ev.extra>0?`<div class="mute">AI 还给出了另外 ${ev.extra} 项，超出所选结果范围，未显示。</div>`:''}
+    <div class="mute">星级和旗标只是 AI 的建议，尚未写入 Lightroom。点击缩略图可放大查看。</div>${pkUsage(ev)}`,
+    [again, {label:'应用建议的星级和旗标', cls:'primary', onclick:pkApply}, close]);
+  document.querySelectorAll('#pk_body [data-zoom]').forEach(e=>e.onclick=()=>pkZoom(e.dataset.zoom));
+}
+async function pkZoom(id){
+  const r = await window.pywebview.api.pick_preview(id);
+  if (!r.ok) return toast(r.message||'无法放大');
+  const nm = ((PK.res&&PK.res.ranking||[]).find(x=>x.photo_id===id)||{}).name || '';
+  const mk=document.createElement('div'); mk.className='mask show lbmask';
+  mk.innerHTML=`<img src="${esc(r.url)}" alt=""><div class="lbn">${esc(nm)}　（点击任意处关闭）</div>`; mk.onclick=()=>mk.remove(); document.body.appendChild(mk);
+}
+/* 写入 Lightroom：确认清单 → 写入 → 结果 → 撤销 */
+async function pkApply(){
+  const r = await window.pywebview.api.pick_apply_prepare();
+  if (!r.ok) return infoDialog('无法应用建议', r.message||'无法生成确认清单。');
+  PK.ap = r.items; PK.stage='confirm'; pkConfirmView();
+}
+function pkConfirmView(){
+  pkClear(); pkOpen('确认写入 Lightroom');
+  const rows = PK.ap.map(i=>{
+    const can = i.changed;
+    return `<tr><td><input type="checkbox" data-id="${esc(i.photo_id)}" ${can?'checked':'disabled'}></td><td>${esc(i.name||'（未命名）')}</td>
+      <td class="${can?'':'dim'}">${esc(i.old_text)}</td><td class="${can?'':'dim'}">${i.error?'<span class="st-bad">'+esc(i.error)+'</span>':(can?'→ '+esc(i.new_text):'无变化')}</td></tr>`; }).join('');
+  pkSet(`<div class="big">将写入以下照片的星级和旗标</div>
+    <table><thead><tr><th></th><th>照片</th><th>现有（星级 / 旗标）</th><th>写入后</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="mute">只修改星级和旗标，不会改动关键词或其他信息。可取消勾选不想改的照片；写入后可撤销这次写入。</div>
+    <div class="bad" id="pk_err"></div>`,
+    [{label:'返回', onclick:async()=>{ await window.pywebview.api.pick_apply_cancel(); pkResult(); }},
+     {label:'确认写入', cls:'primary', id:'pk_ok', onclick:pkApplyGo}]);
+  const upd=()=>{ const n=document.querySelectorAll('#pk_body input[type=checkbox]:checked').length; $('#pk_ok').disabled = n===0; $('#pk_ok').textContent = n ? '确认写入（'+n+' 张）' : '确认写入'; };
+  document.querySelectorAll('#pk_body input[type=checkbox]').forEach(c=>c.onchange=upd); upd();
+}
+async function pkApplyGo(){
+  const ids=[...document.querySelectorAll('#pk_body input[type=checkbox]:checked')].map(c=>c.dataset.id);
+  $('#pk_ok').disabled=true;
+  const r = await window.pywebview.api.pick_apply_confirm(ids);
+  if (!r.ok){ $('#pk_err').textContent = r.message||'无法写入。'; $('#pk_ok').disabled = !!r.readonly; return; }
+  PK.stage='applying'; pkApplying({i:0,n:ids.length,name:''});
+}
+function pkApplying(ev){
+  pkOpen('正在写入'); pkSet(`<div class="big"><span class="spin"></span>正在写入${ev.n?'（'+Math.min(ev.i+1,ev.n)+' / '+ev.n+'）':''}…</div><div class="mute">${esc(ev.name||'')}</div>`, [{label:'关闭', disabled:true}]);
+}
+const AP_ST = {ok:['成功','st-ok'], failed:['失败','st-bad'], uncertain:['不确定','st-wait'], undone:['已还原','st-mute'], conflict:['未还原（又被改过）','st-bad']};
+function pkApplied(ev, undoRes){
+  PK.stage='applied'; pkClear(); pkOpen('写入结果');
+  const ur = {}; (undoRes||[]).forEach(u=>ur[u.photo_id]=u);
+  const rows = ev.results.map(r=>{ const u=ur[r.photo_id]; const st = u ? u.status : (r.undone ? 'undone' : r.status), m = AP_ST[st]||[st,''];
+    const msg = u && u.message ? u.message : r.message;
+    return `<tr><td>${esc(r.name||'（未命名）')}</td><td>${esc(pkRating(r.new_rating))} / ${pkFlag(r.new_flag)}</td><td class="${m[1]}">${m[0]}${msg?'<div class="why">'+esc(msg)+'</div>':''}</td></tr>`; }).join('');
+  const s=ev.summary||{}, undone = ev.results.filter(r=>r.undone || (ur[r.photo_id]&&ur[r.photo_id].status==='undone')).length;
+  const canUndo = ev.results.some(r=>r.has_edit && !r.undone && !(ur[r.photo_id]&&ur[r.photo_id].status==='undone'));
+  pkSet(`<div class="big">${undone ? '已还原 '+undone+' 张' : `成功 ${s.ok||0} 张`+(s.failed?`，失败 ${s.failed} 张`:'')+(s.uncertain?`，不确定 ${s.uncertain} 张`:'')}</div>
+    <table><thead><tr><th>照片</th><th>写入的星级 / 旗标</th><th>结果</th></tr></thead><tbody>${rows}</tbody></table>
+    ${s.uncertain?'<div class="warn">标为“不确定”的照片，请在 Lightroom 中确认其星级和旗标。</div>':''}
+    <div class="mute">${undone ? '撤销只还原本次写入的星级和旗标。' : '如需恢复原样，可点击“撤销这次写入”。'}</div><div class="bad" id="pk_err"></div>`,
+    [canUndo?{label:'撤销这次写入', onclick:()=>pkUndo(false)}:null, {label:'关闭', cls:'primary', onclick:pkFinishClose}].filter(Boolean));
+}
+async function pkUndo(force){
+  const r = await window.pywebview.api.pick_apply_undo(force);
+  if (r.results){
+    const st = await window.pywebview.api.pick_apply_state(); pkApplied(st, r.results);
+    if (r.conflict && !force && await askDialog('这些照片在写入后又发生变化', (r.results.filter(x=>x.status==='conflict').map(x=>(x.name||'')+'：'+x.message).join('\n'))+'\n\n强制撤销将覆盖这些后续改动。', '强制撤销')) return pkUndo(true);
+    return;
+  }
+  $('#pk_err').textContent = r.message||'无法撤销。';
+}
+function onPickEvent(ev){
+  const open = $('#pmask').classList.contains('show');
+  if (ev.type==='pick_thumb'){ PK.thumbs[ev.id]=ev.url;
+    if (open && PK.stage==='form'){ const c=document.querySelector(`#pk_grid .pcell[data-id="${CSS.escape(ev.id)}"]`); if(c){ const t=c.querySelector('.pt'); const im=document.createElement('img'); im.className='pt'; im.alt=''; im.src=ev.url; t.replaceWith(im); } } }
+  else if (ev.type==='pick_progress'){ if (open && PK.stage==='run'){ const l=$('#pk_lab'); if(l) l.textContent=ev.label||''; } }
+  else if (ev.type==='pick_done'){ PK.res=ev; if (open && ['run','form','load'].includes(PK.stage)) pkResult(); else if (!open) toast('AI 挑片已结束，请点击“AI 挑片”查看结果。'); }
+  else if (ev.type==='pick_apply_progress'){ if (open && PK.stage==='applying') pkApplying(ev); }
+  else if (ev.type==='pick_apply_done'){ if (open && PK.stage==='applying') pkApplied(ev); else if (!open) toast('写入已结束，请点击“AI 挑片”查看结果。'); }
+}
+$('#pmask').onclick=e=>{ if(e.target.id==='pmask' && (PK.stage==='form'||PK.stage==='load'||PK.stage==='error')) pkFinishClose(); };
+
+/* ---- 图库（软件内浏览与选择照片；Lightroom 只是后台引擎）---- */
+const GAL_MAX_SEL = 50;
+const G = {st:null, byId:{}, thumbs:{}, failed:{}, sel:[], active:null, anchor:null, q:'', sort:'name', filter:'all', collapsed:{},
+  order:[], cells:new Map(), vis:new Set(), busySel:false, wantSel:null, io:null, reqTimer:null, loadTimer:null, demo:false};
+const gapi = () => window.pywebview.api;
+function gmsg(t, bad){ const m=$('#gal_msg'); m.textContent=t||''; m.classList.toggle('bad', !!bad); }
+function galDemoState(){
+  const stars=[3,0,1,0,2,0], flags=['pick','none','none','reject','none','none'];
+  return {ok:true, state:'ready', message:'', base:'示例', base_exists:true, in_catalog:true, lr_connected:true, total:PHOTOS.length, limit:2000, truncated:false,
+    not_added:0, missing:0, thumbs:{}, failed:{}, selection:{ids:[], active:null}, add:null,
+    photos:PHOTOS.map((p,i)=>({id:'demo-'+i, name:p.n, group:p.f, format:'JPG', rating:stars[i], flag:flags[i], captured:'2026-01-0'+(i+1), w:6000, h:4000, vc:false, added:true, missing:false, color:p.c}))};
+}
+async function loadGallery(){
+  if (!REAL()){ G.demo=true; G.st=galDemoState(); afterState(); return; }
+  G.demo=false;
+  let st; try { st = await gapi().library_state(); } catch(e){ st = {ok:true, state:'error', message:'无法读取图库，请点击“刷新”重试。', photos:[], thumbs:{}, failed:{}, selection:{ids:[],active:null}, add:null, total:0}; }
+  G.st = st; G.thumbs = Object.assign({}, st.thumbs||{}); G.failed = Object.assign({}, st.failed||{});
+  if (!G.busySel){ G.sel = (st.selection&&st.selection.ids)||[]; G.active = (st.selection&&st.selection.active)||null; }
+  afterState();
+}
+function afterState(){
+  G.byId = {}; (G.st.photos||[]).forEach(p=>G.byId[p.id]=p);
+  G.sel = G.sel.filter(i=>G.byId[i]); if (!G.byId[G.active]) G.active = G.sel.length ? G.sel[G.sel.length-1] : null;
+  buildGallery();
+}
+function galVisible(){
+  const q = G.q.trim().toLowerCase(), f = G.filter;
+  return (G.st.photos||[]).filter(p=> (!q || p.name.toLowerCase().indexOf(q)>=0) &&
+    (f==='all' || (f==='rated' && (p.rating||0)>=1) || (f==='pick' && p.flag==='pick') || (f==='new' && !p.added)));
+}
+function galCmp(a,b){
+  const k = p => G.sort==='time' ? [p.captured?0:1, String(p.captured||''), p.name.toLowerCase()] : [p.name.toLowerCase()];
+  const x=k(a), y=k(b); for (let i=0;i<x.length;i++){ if (x[i]<y[i]) return -1; if (x[i]>y[i]) return 1; } return 0;
+}
+function galGroups(list){
+  const g = {}; list.forEach(p=>{ (g[p.group]=g[p.group]||[]).push(p); });
+  const root = '（未分类）';
+  return Object.keys(g).sort((a,b)=> ((a===root?0:1)-(b===root?0:1)) || a.toLowerCase().localeCompare(b.toLowerCase()))
+    .map(n=>({name:n, photos:g[n].sort(galCmp)}));
+}
+function timgState(p){
+  const url = G.thumbs[p.id], bad = G.failed[p.id];
+  if (G.demo) return {cls:'timg', style:` style="background:linear-gradient(160deg,${esc(p.color||'#667')},#2b3138)"`, inner:''};
+  if (url) return {cls:'timg', style:'', inner:`<img src="${esc(url)}" alt="" draggable="false" onerror="galImgErr(this)">`};
+  if (!p.added) return {cls:'timg na', style:'', inner:`<span class="ph2">${esc(p.format)}</span>`};
+  if (bad) return {cls:'timg fail', style:'', inner:`<span class="ph2" title="${esc(bad)}">读取失败</span><button class="retry" data-id="${esc(p.id)}">重试</button>`};
+  return {cls:'timg load', style:'', inner:''};
+}
+function cellInner(p){
+  const t = timgState(p);
+  const meta = ((p.rating||0)>0 ? `<span class="stars" title="${p.rating} 星">${'★'.repeat(Math.min(5,p.rating))}</span>` : '') +
+    (p.flag==='pick' ? '<span class="flag pick" title="留用">留用</span>' : (p.flag==='reject' ? '<span class="flag reject" title="排除">排除</span>' : ''));
+  const tag = !p.added ? '<span class="tag" title="照片在软件文件夹里，但还没有加入 Lightroom 目录">尚未加入</span>'
+    : (p.missing ? '<span class="tag bad" title="目录里有记录，但磁盘上找不到该文件">文件缺失</span>' : '');
+  return `<div class="${t.cls}"${t.style}>${t.inner}<span class="fmt">${esc(p.format)}</span>${p.vc?'<span class="vc">副本</span>':''}${tag}${meta?`<span class="meta">${meta}</span>`:''}</div><div class="cname">${esc(p.name)}</div>`;
+}
+function galImgErr(img){ const c=img.closest('.cell'); if (!c) return; const id=c.dataset.id; delete G.thumbs[id]; G.failed[id]='缩略图无法显示'; refreshCell(id); }
+function cellHtml(p){
+  return `<div class="cell${p.added?'':' na'}" data-id="${esc(p.id)}" title="${esc(p.name)}${p.captured?'　'+esc(p.captured):''}">${cellInner(p)}</div>`;
+}
+function refreshCell(id){ const el=G.cells.get(id), p=G.byId[id]; if (!el||!p) return; el.className='cell'+(p.added?'':' na'); el.innerHTML=cellInner(p); applySelClass(el,id); }
+function applySelClass(el,id){ el.classList.toggle('sel', G.sel.indexOf(id)>=0); el.classList.toggle('act', id===G.active); }
+function applySelClasses(){ G.cells.forEach((el,id)=>applySelClass(el,id)); }
+function buildGallery(){
+  const box=$('#gal_scroll'), st=G.st, top=box.scrollTop;
+  if (G.io){ G.io.disconnect(); } G.cells.clear(); G.vis.clear(); G.order=[];
+  $('#gal_title').textContent = '图库' + (st.total ? `（${st.total} 张）` : '') + (st.state==='loading' && st.total ? '　正在刷新…' : '');
+  let h='';
+  if (st.state==='idle' || (st.state==='loading' && !(st.photos||[]).length)){ h = `<div class="gempty"><span class="spin"></span>正在读取图库…</div>`; }
+  else if (st.state==='error'){ h = `<div class="gempty" style="color:var(--bad)">${esc(st.message||'无法读取图库。')}</div>`; }
+  else if (!st.base){ h = `<div class="gempty">请先在设置中选择照片工作文件夹。</div>`; }
+  else if (!st.total){
+    h = `<div class="gempty">软件文件夹中还没有照片。请点击“导入”从存储卡复制照片，或将照片放入软件文件夹后点击“加入 Lightroom”。` +
+      (st.base_exists ? '' : `<br>软件文件夹尚不存在，完成一次导入后会自动创建。`) +
+      `<div class="gpath">${esc(st.base)}</div><button class="btn small" id="gal_open2">在资源管理器中打开</button></div>`;
+  } else {
+    const list = galVisible();
+    if (!list.length) h = `<div class="gempty">没有符合条件的照片。</div>`;
+    galGroups(list).forEach(g=>{
+      const closed = !!G.collapsed[g.name];
+      h += `<div class="ghead" data-g="${esc(g.name)}"><span>${closed?'▸':'▾'}</span><span class="gn">${esc(g.name)}</span><span class="gc">${g.photos.length}</span></div>`;
+      h += `<div class="ggrid${closed?' hide':''}">` + g.photos.map(cellHtml).join('') + `</div>`;
+      if (!closed) g.photos.forEach(p=>G.order.push(p.id));
+    });
+  }
+  box.innerHTML = h; box.scrollTop = top;
+  box.querySelectorAll('.cell').forEach(el=>{ G.cells.set(el.dataset.id, el); applySelClass(el, el.dataset.id); });
+  const o2=$('#gal_open2'); if (o2) o2.onclick=openBaseFolder;
+  if (!G.demo && 'IntersectionObserver' in window){
+    G.io = new IntersectionObserver(es=>{ es.forEach(e=>{ const id=e.target.dataset.id; if (e.isIntersecting) G.vis.add(id); else G.vis.delete(id); }); scheduleThumbs(); },
+      {root:box, rootMargin:'240px'});
+    G.cells.forEach((el,id)=>{ if (!el.parentElement.classList.contains('hide')) G.io.observe(el); });
+  }
+  renderBar();
+}
+function scheduleThumbs(){ clearTimeout(G.reqTimer); G.reqTimer=setTimeout(()=>requestThumbs(false), 80); }
+async function requestThumbs(retry){
+  if (G.demo || !REAL()) return;
+  const ids=[...G.vis].filter(i=>G.byId[i] && G.byId[i].added).slice(0,120); if (!ids.length) return;
+  let r; try { r = await gapi().library_thumbnails(ids, !!retry); } catch(e){ return; }
+  if (!r || !r.ok){ if (r && r.message) gmsg(r.message, true); return; }
+  applyThumbs(Object.entries(r.thumbs||{}).map(([id,v])=>Object.assign({id}, v)));
+}
+function applyThumbs(items){
+  items.forEach(it=>{ if (!G.byId[it.id]) return;
+    if (it.url){ if (G.thumbs[it.id]!==it.url){ G.thumbs[it.id]=it.url; delete G.failed[it.id]; refreshCell(it.id); } }
+    else if (it.error && it.error.indexOf('尚未加入')<0){ if (G.failed[it.id]!==it.error){ delete G.thumbs[it.id]; G.failed[it.id]=it.error; refreshCell(it.id); } } });
+}
+/* ---- 顶部：已选、清除、加入 Lightroom ---- */
+function renderBar(){
+  const st=G.st, bar=$('#gal_bar'); if (!st || st.state==='error' || st.state==='idle' || !(st.photos||[]).length){ bar.innerHTML=''; return; }
+  const n=G.sel.length;
+  let h = `<div class="gline"><span class="gsel">已选 ${n} 张</span><button class="btn small" id="gal_clear" ${n?'':'disabled'}>清除选择</button></div>`;
+  const add=st.add, na=st.not_added||0;
+  if (add && add.state==='running'){
+    const pct=add.n?Math.round(100*add.i/add.n):0;
+    h += `<div class="gbox"><div>正在加入 Lightroom：第 ${Math.min(add.i+1,add.n)}/${add.n} 张　${esc(add.name||'')}</div><div class="bar"><i style="width:${pct}%"></i></div><button class="btn small" id="gal_addcancel">取消</button></div>`;
+  } else if (add && add.state==='done'){
+    const c=add.counts||{}; const parts=[`已加入 ${c.added||0} 张`]; if (c.uncertain) parts.push(`需确认 ${c.uncertain} 张`); if (c.failed) parts.push(`失败 ${c.failed} 张`);
+    if (c.pending) parts.push(`尚未加入 ${c.pending} 张（Lightroom 未连接）`); if (add.cancelled) parts.push('已取消');
+    const probs=(add.problems||[]).slice(0,5).map(p=>`<div>${esc(p.name)}：${esc(p.reason)}</div>`).join('');
+    h += `<div class="gbox"><div>${esc(parts.join('　'))}</div>${probs}${(add.problems||[]).length>5?`<div>另有 ${add.problems.length-5} 项未列出。</div>`:''}<div style="margin-top:4px"><button class="btn small" id="gal_addclose">知道了</button></div></div>`;
+  } else if (na>0){
+    h += `<div class="gline"><span class="gwarn">${na} 张尚未加入 Lightroom</span><button class="btn small primary" id="gal_add">加入 Lightroom</button></div>`;
+  }
+  if (st.truncated) h += `<div class="gwarn">${esc(st.truncated_message||'仅显示前 2000 张。')}</div>`;
+  if ((st.missing||0)>0) h += `<div>${st.missing} 张照片的文件缺失（目录里有记录，磁盘上找不到）。</div>`;
+  bar.innerHTML=h;
+  const b=(id,fn)=>{ const e=$('#'+id); if (e) e.onclick=fn; };
+  b('gal_clear', clearSel); b('gal_add', addToLr); b('gal_addcancel', ()=>gapi().library_cancel_add());
+  b('gal_addclose', async()=>{ await gapi().library_close_add(); if (G.st) G.st.add=null; renderBar(); });
+}
+/* ---- 点选：单击 / Ctrl 增减 / Shift 区间 / Ctrl+A 全选；选中同步到 Lightroom，以 Lightroom 实际选区为准 ---- */
+function limitSel(ids, active){
+  if (ids.length>GAL_MAX_SEL){ gmsg(`一次最多选择 ${GAL_MAX_SEL} 张，已选择前 ${GAL_MAX_SEL} 张。`); ids=ids.slice(0,GAL_MAX_SEL); if (ids.indexOf(active)<0) active=ids[ids.length-1]; }
+  return {ids, active};
+}
+function cellClick(id, e){
+  const p=G.byId[id]; if (!p) return;
+  if (!p.added){ gmsg('该照片尚未加入 Lightroom，请先点击“加入 Lightroom”。'); return; }
+  let ids, active=id;
+  if (e.shiftKey && G.anchor && G.order.indexOf(G.anchor)>=0 && G.order.indexOf(id)>=0){
+    const a=G.order.indexOf(G.anchor), b=G.order.indexOf(id), seg=G.order.slice(Math.min(a,b), Math.max(a,b)+1).filter(i=>G.byId[i].added);
+    ids = a<=b ? seg : seg.reverse();
+  } else if (e.ctrlKey || e.metaKey){
+    const had=G.sel.indexOf(id)>=0; ids = had ? G.sel.filter(i=>i!==id) : G.sel.concat([id]);
+    G.anchor=id; if (had) active = ids.length ? ids[ids.length-1] : null;
+  } else { ids=[id]; G.anchor=id; }
+  if (!ids.length){ clearSel(); return; }
+  gmsg('');
+  const r=limitSel(ids, active); G.sel=r.ids; G.active=r.active; applySelClasses(); renderBar(); sendSel();
+}
+function selectAllShown(){
+  const ids=G.order.filter(i=>G.byId[i] && G.byId[i].added); if (!ids.length) return;
+  gmsg(''); const r=limitSel(ids, ids[0]); G.sel=r.ids; G.active=r.ids[0]; G.anchor=r.ids[0]; applySelClasses(); renderBar(); sendSel();
+}
+async function sendSel(){
+  if (G.demo || !REAL()) return;
+  if (G.busySel){ G.wantSel={ids:[...G.sel], active:G.active}; return; }
+  G.busySel=true; let want={ids:[...G.sel], active:G.active}, last=null;
+  while (want){
+    G.wantSel=null;
+    try { last = await gapi().library_select(want.ids, want.active); } catch(e){ last = {ok:false, message:'选择失败，请重试。', selected:G.sel, active:G.active}; }
+    if (G.wantSel){ want=G.wantSel; continue; }          // 等待期间又点选了：只处理最后一次
+    want=null;
+  }
+  G.busySel=false;
+  if (last){
+    G.sel=(last.selected||[]).filter(i=>G.byId[i]); G.active=last.active||(G.sel.length?G.sel[G.sel.length-1]:null);
+    if (last.message) gmsg(last.message, !last.ok); else if (!last.ok) gmsg('选择未生效。', true);
+  }
+  applySelClasses(); renderBar();
+}
+async function clearSel(){
+  G.sel=[]; G.active=null; G.anchor=null; applySelClasses(); renderBar();
+  if (G.demo || !REAL()) return;
+  try { const r=await gapi().library_clear_selection(); if (r && r.message) gmsg(r.message); } catch(e){}
+}
+async function addToLr(){
+  const r=await gapi().library_add_missing(); if (!r.ok) gmsg(r.message||'无法加入。', true); else gmsg('');
+}
+async function openBaseFolder(){ if (!REAL()) return; const r=await gapi().open_library(); if (!r.ok) toast(r.message); }
+function onLibraryEvent(ev){
+  if (ev.type==='library_changed'){ clearTimeout(G.loadTimer); G.loadTimer=setTimeout(loadGallery, 40); }
+  else if (ev.type==='library_thumbs'){ applyThumbs(ev.items||[]); }
+  else if (ev.type==='library_selection'){ if (!G.busySel){ G.sel=(ev.ids||[]).filter(i=>G.byId[i]); G.active=ev.active||null; applySelClasses(); renderBar(); } }
+  else if (ev.type==='library_meta'){ (ev.items||[]).forEach(it=>{ const p=G.byId[it.id]; if (p){ p.rating=it.rating; p.flag=it.flag; refreshCell(it.id); } }); }
+  else if (ev.type==='library_add'){ if (G.st){ G.st.add = ev; renderBar(); } }
+}
+$('#gal_scroll').addEventListener('click', e=>{
+  const rt=e.target.closest('.retry'); if (rt){ e.stopPropagation(); delete G.failed[rt.dataset.id]; refreshCell(rt.dataset.id); G.vis.add(rt.dataset.id); requestThumbs(true); return; }
+  const hd=e.target.closest('.ghead'); if (hd){ G.collapsed[hd.dataset.g]=!G.collapsed[hd.dataset.g]; buildGallery(); return; }
+  $('#gal_scroll').focus({preventScroll:true});
+  const c=e.target.closest('.cell'); if (c) cellClick(c.dataset.id, e);          // 点空白处不清除选择
+});
+$('#gal').addEventListener('keydown', e=>{
+  const tag=(document.activeElement&&document.activeElement.tagName)||'';
+  if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='a' && tag!=='INPUT' && tag!=='SELECT'){ e.preventDefault(); selectAllShown(); }
+});
+$('#gal_q').oninput=()=>{ G.q=$('#gal_q').value; if (G.st) buildGallery(); };
+$('#gal_sort').onchange=()=>{ G.sort=$('#gal_sort').value; if (G.st) buildGallery(); };
+$('#gal_filter').onchange=()=>{ G.filter=$('#gal_filter').value; if (G.st) buildGallery(); };
+$('#gal_refresh').onclick=async()=>{ if (G.demo||!REAL()) return; gmsg(''); G.st=Object.assign({}, G.st, {state:'loading'}); buildGallery(); try { await gapi().library_refresh(); } catch(e){} };
+$('#gal_open').onclick=openBaseFolder;
+
+/* ---- settings dialog ---- */
+let SET = null, setConfirm = true;
+function setConfirmUI(v){ setConfirm=!!v; $('#s_confirm').classList.toggle('on', setConfirm); $('#s_confirm_t').textContent = setConfirm ? '开' : '关'; }
+$('#s_confirm').onclick=()=>setConfirmUI(!setConfirm);
+let setNotes = true;
+function setNotesUI(v){ setNotes=!!v; $('#s_notes').classList.toggle('on', setNotes); $('#s_notes_t').textContent = setNotes ? '开' : '关'; }
+$('#s_notes').onclick=()=>setNotesUI(!setNotes);
+let setAutoLr = false, lrChoice = null;     // lrChoice：null 不变 / 'pending' 用刚选的文件 / 'clear' 改回自动查找
+function setAutoLrUI(v){ setAutoLr=!!v; $('#s_autolr').classList.toggle('on', setAutoLr); $('#s_autolr_t').textContent = setAutoLr ? '开' : '关'; }
+$('#s_autolr').onclick=()=>setAutoLrUI(!setAutoLr);
+let setUpd = true;                          // 设置：启动时检查新版本（默认开）
+function setUpdUI(v){ setUpd=!!v; $('#s_upd').classList.toggle('on', setUpd); $('#s_upd_t').textContent = setUpd ? '开' : '关'; }
+$('#s_upd').onclick=()=>setUpdUI(!setUpd);
+function showLrPath(picked){
+  const saved = (SET && SET.settings.lightroom_path) || '', det = (SET && SET.lightroom_detected) || '';
+  const shown = lrChoice==='clear' ? '' : (picked || saved);
+  $('#s_lrpath').value = shown; $('#s_lrpath').placeholder = '自动查找';
+  $('#s_lrnote').textContent = shown ? '已指定上面这个 Lightroom 程序。' :
+    (det ? '已自动找到：' + det : '没有自动找到 Lightroom。你可以点“选择文件”，选中 Lightroom 安装目录里的 Lightroom.exe；找不到时，打开软件后请手动打开 Lightroom。');
+}
+$('#s_lrpick').onclick=async()=>{
+  $('#e_lrpath').textContent='';
+  const r = await window.pywebview.api.choose_lightroom_path();
+  if (r.ok){ lrChoice='pending'; showLrPath(r.path); } else if (r.message){ $('#e_lrpath').textContent = r.message; $('#e_lrpath').style.color=''; }
+};
+$('#s_lrclear').onclick=()=>{ lrChoice='clear'; showLrPath(''); };
+function showProviderState(){
+  const p = SET.providers.find(x=>x.id===$('#s_provider').value) || SET.providers[0];
+  const st = $('#s_pstate'); st.className = 'sub ' + (p.selectable ? (p.available ? 'ok' : 'bad') : '');
+  st.textContent = p.selectable ? p.reason + (p.next_step ? ' ' + p.next_step : '') : p.reason;
+  $('#s_pnote').style.display = (p.selectable && p.id !== SET.current_provider) ? '' : 'none';
+  const ex = $('#s_pexp'), pv = $('#s_ppriv');
+  ex.textContent = p.experimental ? (p.experimental_notice || '') : ''; ex.style.display = ex.textContent ? '' : 'none';
+  pv.textContent = p.privacy_notice || ''; pv.style.display = pv.textContent ? '' : 'none';
+}
+$('#s_provider').onchange=showProviderState;
+function fillSettings(r){
+  SET = r; const s = r.settings;
+  $('#s_folder').value = s.base_folder;
+  const sel = $('#s_provider'); sel.innerHTML='';
+  r.providers.forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.textContent=p.name + (p.experimental?'（实验性，未经真机验证）':'') + (p.selectable?'':'（后续提供）'); o.disabled=!p.selectable; sel.appendChild(o); });
+  sel.value = s.provider;
+  const ed = $('#s_edge'); ed.innerHTML=''; r.edges.forEach(e=>{ const o=document.createElement('option'); o.value=e; o.textContent='长边 '+e+' px'; ed.appendChild(o); }); ed.value = s.preview_edge;
+  setConfirmUI(s.confirm_default); setNotesUI(s.ai_use_notes!==false); showProviderState();
+  setAutoLrUI(s.auto_launch_lightroom===true); lrChoice=null; showLrPath('');
+  setUpdUI(s.check_updates!==false); updRender(UPD);
+  const a = r.about;
+  $('#a_app').textContent = a.app_version; $('#a_lr').textContent = a.lightroom_version || '未连接，无法读取';
+  $('#a_plugin').textContent = a.plugin_version || '未连接，无法读取'; $('#a_data').textContent = a.data_dir; $('#a_url').textContent = a.project_url;
+}
+function clearSettingsErrors(){ ['folder','provider','edge','lrpath'].forEach(k=>{ $('#e_'+k).textContent=''; }); $('#s_msg').textContent=''; $('#s_msg').className='msg-line'; }
+async function openSettings(){
+  if (!REAL()) return;
+  clearSettingsErrors(); $('#smask').classList.add('show');
+  $('#s_msg').textContent = '正在读取设置…';
+  try { fillSettings(await window.pywebview.api.get_settings(true)); $('#s_msg').textContent = SET.settings.base_folder ? '' : '请先选择照片工作文件夹。'; }
+  catch(e){ $('#s_msg').textContent='无法读取设置，请重试。'; $('#s_msg').className='msg-line bad'; }
+}
+function closeSettings(){ $('#smask').classList.remove('show'); }
+$('#s_cancel').onclick=closeSettings;
+$('#smask').onclick=e=>{ if(e.target.id==='smask') closeSettings(); };
+$('#s_pick').onclick=async()=>{
+  const r = await window.pywebview.api.choose_folder($('#s_folder').value);
+  if (!r.ok) return;
+  $('#s_folder').value = r.path; const v = await window.pywebview.api.check_folder(r.path);
+  $('#e_folder').textContent = v.ok ? (v.exists ? '' : '该文件夹尚不存在，保存时将询问是否创建。') : v.message;
+  $('#e_folder').style.color = v.ok ? 'var(--muted)' : '';
+};
+const FIELD_KEYS = {base_folder:'folder', provider:'provider', preview_edge:'edge', lightroom_path:'lrpath'};
+async function saveSettings(createMissing=false){
+  clearSettingsErrors();
+  const changes = {base_folder: $('#s_folder').value, provider: $('#s_provider').value,
+                   confirm_default: setConfirm, ai_use_notes: setNotes, preview_edge: parseInt($('#s_edge').value,10),
+                   auto_launch_lightroom: setAutoLr, check_updates: setUpd};
+  if (lrChoice) changes.lightroom_path_choice = lrChoice;
+  const r = await window.pywebview.api.save_settings(changes, createMissing);
+  if (r.ok){
+    SET.settings = r.settings; confirmDefault = r.settings.confirm_default;
+    $('#edge').value = String(r.settings.preview_edge);
+    closeSettings(); toast('设置已保存'); return;
+  }
+  if (r.needs_create){
+    if (await askDialog('创建文件夹', '文件夹不存在：\n' + $('#s_folder').value + '\n是否创建？', '创建')) return saveSettings(true);
+    $('#e_folder').textContent = '文件夹尚未创建，设置未保存。'; return;
+  }
+  let shown = false;
+  Object.entries(r.errors||{}).forEach(([k,m])=>{ const el = $('#e_'+(FIELD_KEYS[k]||'')); if (el){ el.textContent=m; el.style.color=''; shown=true; } });
+  const m = $('#s_msg'); m.className='msg-line bad';
+  m.textContent = (r.errors && r.errors._) ? r.errors._ : (shown ? '设置未保存，请修正标红项。' : '设置未保存。');
+}
+$('#s_save').onclick=()=>saveSettings(false);
+
+/* ---- update check (0.15.0)：只提示，点了才在浏览器里打开发布页；页面不传任何地址 ---- */
+let UPD = {state:'idle', latest:'', message:''};
+function updRender(u){ UPD = u || UPD;
+  const avail = UPD.state==='available';
+  $('#updnote').style.display = avail ? '' : 'none'; $('#updtxt').textContent = avail ? '有新版本 ' + UPD.latest : '';
+  const msg = {available:'有新版本 ' + UPD.latest, latest:'已是最新版本', unavailable:'暂时无法检查（可能没联网）', checking:'检查中…'}[UPD.state] || '';
+  $('#a_updtxt').textContent = msg; $('#a_updopen').style.display = avail ? '' : 'none'; $('#a_updcheck').disabled = UPD.state==='checking'; }
+async function updPoll(tries, ms){          // 取一次状态；还在检查中（或启动时后台还没查完）就隔一会儿再取
+  for (let i=0; i<tries; i++){
+    let u; try { u = await window.pywebview.api.update_state(); } catch(e){ return; }
+    updRender(u);
+    if (u.state!=='checking' && !(u.state==='idle' && u.enabled && i<4)) return;
+    await new Promise(x=>setTimeout(x, ms));
+  }
+}
+async function updOpen(){ try { await window.pywebview.api.open_update_page(); } catch(e){} }
+$('#updopen').onclick=updOpen; $('#a_updopen').onclick=updOpen;
+$('#a_updcheck').onclick=async()=>{
+  try { updRender(await window.pywebview.api.check_update_now()); } catch(e){ updRender({state:'unavailable'}); return; }
+  updPoll(40, 500);
+};
+
+/* ---- environment wizard (0.14.0)：四项只读检查；页面只能取状态、点按钮，不传路径 ---- */
+const WZ = {st:null, timer:null, busy:false, fresh:false};
+const WZ_ICON = {ready:'✓', todo:'!', wait:'…'}, WZ_TAG = {ready:'已就绪', todo:'需要处理', wait:'等待'};
+const WZ_ACTIONS = {choose_folder:'wizard_pick_folder', choose_lightroom:'wizard_pick_lightroom'};
+function wzMsg(t, bad){ const m=$('#w_msg'); m.textContent=t||''; m.className='msg-line'+(bad?' bad':''); }
+function wzRender(){
+  const st = WZ.st; if (!st) return;
+  const box = $('#w_list'); box.innerHTML=''; box.classList.toggle('checking', !!st.checking);
+  st.items.forEach(it=>{
+    const row=document.createElement('div'); row.className='wz-item '+it.state;
+    const ic=document.createElement('span'); ic.className='wz-ic'; ic.textContent=WZ_ICON[it.state]||'';
+    const head=document.createElement('div'); const tt=document.createElement('span'); tt.className='wz-title'; tt.textContent=it.title;
+    const tag=document.createElement('span'); tag.className='wz-tag'; tag.textContent=WZ_TAG[it.state]||''; head.append(tt, tag);
+    row.append(ic, head);
+    const tx=document.createElement('div'); tx.className='wz-text'; tx.textContent=it.text; row.append(tx);
+    if (it.hint){ const h=document.createElement('div'); h.className='wz-hint'; h.textContent=it.hint; row.append(h); }
+    if (it.action && WZ_ACTIONS[it.action]){
+      const b=document.createElement('button'); b.className='btn small wz-act'; b.textContent=it.action_label; b.disabled=WZ.busy;
+      b.onclick=()=>wzAct(it.action); row.append(b); }
+    box.append(row);
+  });
+  $('#w_all').style.display = (st.ready && !st.checking) ? '' : 'none';
+  $('#w_done').style.display = (st.ready && !st.checking) ? '' : 'none';
+  $('#w_re').disabled = !!st.checking || WZ.busy; $('#w_re').textContent = st.checking ? '检查中…' : '重新检查';
+  if (WZ.fresh){ WZ.fresh=false; $('#w_never').checked = !!st.wizard_done; }
+}
+async function wzLoad(refresh){
+  clearTimeout(WZ.timer);
+  try { WZ.st = await window.pywebview.api.wizard_state(!!refresh); }
+  catch(e){ wzMsg('暂时无法检查，请点“重新检查”。', true); return; }
+  wzRender();
+  if (WZ.st.checking && $('#wmask').classList.contains('show')) WZ.timer = setTimeout(()=>wzLoad(false), 600);
+}
+function openWizard(){
+  if (!REAL()) return;
+  wzMsg(''); WZ.fresh = true; $('#wmask').classList.add('show'); wzLoad(true);
+}
+function closeWizard(){
+  clearTimeout(WZ.timer); $('#wmask').classList.remove('show');
+  if ($('#w_never').checked && !(WZ.st && WZ.st.wizard_done)) window.pywebview.api.wizard_done(true).catch(()=>{});
+}
+async function wzAct(action){
+  if (WZ.busy) return; WZ.busy=true; wzMsg(''); wzRender();
+  try {
+    const r = await window.pywebview.api[WZ_ACTIONS[action]]();
+    if (r && r.message) wzMsg(r.message, true);
+    else if (r && r.ok && action==='choose_folder') loadGallery();
+  } catch(e){ wzMsg('没能完成选择，请再试一次。', true); }
+  WZ.busy=false; wzLoad(true);
+}
+$('#w_x').onclick=closeWizard;
+$('#wmask').onclick=e=>{ if(e.target.id==='wmask') closeWizard(); };
+$('#w_re').onclick=()=>{ wzMsg(''); wzLoad(true); };
+$('#w_done').onclick=()=>{ $('#w_never').checked=true; closeWizard(); };
+$('#s_wizard').onclick=openWizard;
+/* 启动时：没选工作文件夹必弹；第一次打开且有项目需要处理才弹；全部就绪就静默记为已完成。
+   “等待”（Lightroom 正在自动启动、插件正在连接）不算需要处理，所以隔几秒再看，最多约 50 秒。 */
+async function wizardStartup(){
+  for (let i=0; i<17; i++){
+    if ($('#wmask').classList.contains('show')) return;
+    let r; try { r = await window.pywebview.api.wizard_state(false); } catch(e){ return; }
+    if (!r.checking){
+      if (r.auto_open){ openWizard(); return; }
+      if (r.mark_done){ window.pywebview.api.wizard_done(true).catch(()=>{}); return; }
+      if (r.wizard_done || !r.items.some(x=>x.state==='wait')) return;
+    }
+    await new Promise(x=>setTimeout(x, r.checking ? 500 : 3000));
+  }
+}
+
+/* 真实模式：隐藏演示标记，显示 Lightroom 连接状态 */
+if (location.hash !== '#demo') window.addEventListener('pywebviewready', ()=>{
+  $('#demobadge').style.display='none';
+  $('#newchat').style.display=''; $('#setbtn').style.display='';
+  const ready=()=>{ try { window.pywebview.api.ui_ready(); } catch(e){} };   // 告诉软件主界面已准备好：关闭启动界面、显示主窗口
+  window.pywebview.api.get_settings(false).then(r=>{ confirmDefault=r.settings.confirm_default; setAsk(confirmDefault);
+    $('#edge').value=String(r.settings.preview_edge); ready(); wizardStartup(); updPoll(8, 2500); }).catch(ready);
+  const poll=()=>window.pywebview.api.status().then(s=>{ showStatus(s); if (s.photo && s.photo.name && s.photo.name!==photoName){ photoName=s.photo.name; renderStage(); } }).catch(()=>{});
+  window.pywebview.api.autolaunch_state().then(r=>{ if (r && r.state!=='idle') onLrLaunch(r); }).catch(()=>{});
+  window.pywebview.api.preview_state().then(r=>{ pv=r; renderStage(); }).catch(()=>{});
+  window.pywebview.api.selection_state().then(r=>{ SEL = r; updatePickBtn(); }).catch(()=>{});
+  poll(); setInterval(poll, 3000); renderParams(); renderStage(); loadGallery(); loadLib();
+  window.pywebview.api.import_state().then(st=>{   // 页面重新加载时接续导入界面
+    if (st.stage==='scanning'){ IM.stage='scanning'; imScanning(0); }
+    else if (st.stage==='ready'){ imConfirm(); }
+    else if (st.stage==='copying'&&st.progress){ IM.stage='copying'; imProgress(st.progress); }
+    else if (st.stage==='done'&&st.result){ imResult(st.result); } }).catch(()=>{}); });
+function renderAll(){ renderLeft(); renderFiles(); renderStage(); renderParams(); }
+renderAll();
+/* 截图用：地址后加 #demo 会自动演示一轮 */
+if (location.hash === '#demo') {
+  say('提高天空通透度，增强整体层次感', 'me');
+  say('已收到需求，正在分析照片并制定调整方案。（演示回复）');
+  runPlan(0);
+}
+</script>
+</body>
+</html>
