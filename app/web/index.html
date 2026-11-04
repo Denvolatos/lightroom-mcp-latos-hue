@@ -34,6 +34,7 @@
   .spacer { flex: 1; }
   .status { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .upd-note { color: var(--accent); margin-right: 6px; }   /* 有新版本时的温和提示：只提示，点了才去浏览器看 */
   .hint { color: var(--muted); font-size: 12px; max-width: 460px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #lrhint { max-width: 560px; white-space: normal; line-height: 1.35; }   /* 顶栏提示允许折成两三行，较长的排查提示才看得全 */
   /* ---------- three columns ---------- */
@@ -323,6 +324,7 @@
   <button class="btn" onclick="undo()">撤销</button>
   <button class="btn" id="newchat" onclick="newChat()" style="display:none">新对话</button>
   <span class="spacer"></span>
+  <span class="status upd-note" id="updnote" style="display:none"><span id="updtxt"></span><button class="btn small" id="updopen">查看新版本</button></span>
   <button class="btn" id="setbtn" style="display:none" onclick="openSettings()">设置</button>
   <span class="status"><span class="dot" id="lrdot"></span><span id="lrstat">Lightroom 已连接（示例）</span></span>
   <span class="hint" id="lrhint"></span>
@@ -461,11 +463,18 @@
           <span class="ferr" id="e_edge"></span></div>
       </div>
       <div class="sgroup">
+        <h4>更新</h4>
+        <div class="srow"><span class="lab">启动时检查新版本</span>
+          <span class="inline"><button class="switch on" id="s_upd" aria-label="启动时检查是否有新版本"></button><span id="s_upd_t">开</span></span>
+          <span class="sub">启动时检查是否有新版本（只会提示，不会自动下载或安装；检查只访问 GitHub，不发送任何个人信息）。</span></div>
+      </div>
+      <div class="sgroup">
         <h4>关于</h4>
         <div class="kv">
           <span>软件版本</span><span id="a_app"></span>
           <span>Lightroom 版本</span><span id="a_lr"></span>
           <span>插件版本</span><span id="a_plugin"></span>
+          <span>检查更新</span><span><button class="btn small" id="a_updcheck">检查更新</button> <span id="a_updtxt"></span> <button class="btn small" id="a_updopen" style="display:none">查看新版本</button></span>
           <span>数据位置</span><span id="a_data"></span>
           <span>项目主页</span><span id="a_url"></span>
         </div>
@@ -1567,6 +1576,9 @@ $('#s_notes').onclick=()=>setNotesUI(!setNotes);
 let setAutoLr = false, lrChoice = null;     // lrChoice：null 不变 / 'pending' 用刚选的文件 / 'clear' 改回自动查找
 function setAutoLrUI(v){ setAutoLr=!!v; $('#s_autolr').classList.toggle('on', setAutoLr); $('#s_autolr_t').textContent = setAutoLr ? '开' : '关'; }
 $('#s_autolr').onclick=()=>setAutoLrUI(!setAutoLr);
+let setUpd = true;                          // 设置：启动时检查新版本（默认开）
+function setUpdUI(v){ setUpd=!!v; $('#s_upd').classList.toggle('on', setUpd); $('#s_upd_t').textContent = setUpd ? '开' : '关'; }
+$('#s_upd').onclick=()=>setUpdUI(!setUpd);
 function showLrPath(picked){
   const saved = (SET && SET.settings.lightroom_path) || '', det = (SET && SET.lightroom_detected) || '';
   const shown = lrChoice==='clear' ? '' : (picked || saved);
@@ -1599,6 +1611,7 @@ function fillSettings(r){
   const ed = $('#s_edge'); ed.innerHTML=''; r.edges.forEach(e=>{ const o=document.createElement('option'); o.value=e; o.textContent='长边 '+e+' px'; ed.appendChild(o); }); ed.value = s.preview_edge;
   setConfirmUI(s.confirm_default); setNotesUI(s.ai_use_notes!==false); showProviderState();
   setAutoLrUI(s.auto_launch_lightroom===true); lrChoice=null; showLrPath('');
+  setUpdUI(s.check_updates!==false); updRender(UPD);
   const a = r.about;
   $('#a_app').textContent = a.app_version; $('#a_lr').textContent = a.lightroom_version || '未连接，无法读取';
   $('#a_plugin').textContent = a.plugin_version || '未连接，无法读取'; $('#a_data').textContent = a.data_dir; $('#a_url').textContent = a.project_url;
@@ -1626,7 +1639,7 @@ async function saveSettings(createMissing=false){
   clearSettingsErrors();
   const changes = {base_folder: $('#s_folder').value, provider: $('#s_provider').value,
                    confirm_default: setConfirm, ai_use_notes: setNotes, preview_edge: parseInt($('#s_edge').value,10),
-                   auto_launch_lightroom: setAutoLr};
+                   auto_launch_lightroom: setAutoLr, check_updates: setUpd};
   if (lrChoice) changes.lightroom_path_choice = lrChoice;
   const r = await window.pywebview.api.save_settings(changes, createMissing);
   if (r.ok){
@@ -1644,6 +1657,28 @@ async function saveSettings(createMissing=false){
   m.textContent = (r.errors && r.errors._) ? r.errors._ : (shown ? '设置未保存，请修正标红项。' : '设置未保存。');
 }
 $('#s_save').onclick=()=>saveSettings(false);
+
+/* ---- update check (0.15.0)：只提示，点了才在浏览器里打开发布页；页面不传任何地址 ---- */
+let UPD = {state:'idle', latest:'', message:''};
+function updRender(u){ UPD = u || UPD;
+  const avail = UPD.state==='available';
+  $('#updnote').style.display = avail ? '' : 'none'; $('#updtxt').textContent = avail ? '有新版本 ' + UPD.latest : '';
+  const msg = {available:'有新版本 ' + UPD.latest, latest:'已是最新版本', unavailable:'暂时无法检查（可能没联网）', checking:'检查中…'}[UPD.state] || '';
+  $('#a_updtxt').textContent = msg; $('#a_updopen').style.display = avail ? '' : 'none'; $('#a_updcheck').disabled = UPD.state==='checking'; }
+async function updPoll(tries, ms){          // 取一次状态；还在检查中（或启动时后台还没查完）就隔一会儿再取
+  for (let i=0; i<tries; i++){
+    let u; try { u = await window.pywebview.api.update_state(); } catch(e){ return; }
+    updRender(u);
+    if (u.state!=='checking' && !(u.state==='idle' && u.enabled && i<4)) return;
+    await new Promise(x=>setTimeout(x, ms));
+  }
+}
+async function updOpen(){ try { await window.pywebview.api.open_update_page(); } catch(e){} }
+$('#updopen').onclick=updOpen; $('#a_updopen').onclick=updOpen;
+$('#a_updcheck').onclick=async()=>{
+  try { updRender(await window.pywebview.api.check_update_now()); } catch(e){ updRender({state:'unavailable'}); return; }
+  updPoll(40, 500);
+};
 
 /* ---- environment wizard (0.14.0)：四项只读检查；页面只能取状态、点按钮，不传路径 ---- */
 const WZ = {st:null, timer:null, busy:false, fresh:false};
@@ -1721,7 +1756,7 @@ if (location.hash !== '#demo') window.addEventListener('pywebviewready', ()=>{
   $('#newchat').style.display=''; $('#setbtn').style.display='';
   const ready=()=>{ try { window.pywebview.api.ui_ready(); } catch(e){} };   // 告诉软件主界面已准备好：关闭启动界面、显示主窗口
   window.pywebview.api.get_settings(false).then(r=>{ confirmDefault=r.settings.confirm_default; setAsk(confirmDefault);
-    $('#edge').value=String(r.settings.preview_edge); ready(); wizardStartup(); }).catch(ready);
+    $('#edge').value=String(r.settings.preview_edge); ready(); wizardStartup(); updPoll(8, 2500); }).catch(ready);
   const poll=()=>window.pywebview.api.status().then(s=>{ showStatus(s); if (s.photo && s.photo.name && s.photo.name!==photoName){ photoName=s.photo.name; renderStage(); } }).catch(()=>{});
   window.pywebview.api.autolaunch_state().then(r=>{ if (r && r.state!=='idle') onLrLaunch(r); }).catch(()=>{});
   window.pywebview.api.preview_state().then(r=>{ pv=r; renderStage(); }).catch(()=>{});
