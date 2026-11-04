@@ -115,13 +115,62 @@ def test_copy_basic_preserves_source_and_time(tmp_path):
     assert not list(lib.glob("*.part*"))
 
 
-def test_copy_skips_same_name_same_size(tmp_path):
+def test_copy_skips_only_identical_same_name(tmp_path):
     src = make(tmp_path, "card/A.jpg", data=b"1234")
     lib = tmp_path / "lib"
-    make(lib, "A.jpg", data=b"abcd")                   # 同名同大小（内容不同也视为已导入）
+    make(lib, "A.jpg", data=b"1234")
     r = imp.copy_one(src, lib)
-    assert r["status"] == "skipped" and (lib / "A.jpg").read_bytes() == b"abcd"
+    assert r["status"] == "skipped" and (lib / "A.jpg").read_bytes() == b"1234"
     assert sorted(p.name for p in lib.iterdir()) == ["A.jpg"]
+
+
+def test_same_name_same_size_different_content_is_copied(tmp_path):
+    src = make(tmp_path, "card/A.jpg", data=b"1234")
+    lib = tmp_path / "lib"
+    make(lib, "A.jpg", data=b"abcd")
+    result = imp.copy_one(src, lib)
+    assert result["status"] == "copied" and result["dest"].endswith("A_2.jpg")
+    assert (lib / "A.jpg").read_bytes() == b"abcd"
+    assert (lib / "A_2.jpg").read_bytes() == b"1234"
+
+
+def test_copy_detects_same_size_corruption_and_removes_part(tmp_path, monkeypatch):
+    src = make(tmp_path, "card/A.jpg", data=b"1234")
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    real_hash = imp._hash_file
+    monkeypatch.setattr(imp, "_hash_file", lambda path: b"wrong" if ".part" in path.name else real_hash(path))
+    result = imp.copy_one(src, lib)
+    assert result["status"] == "failed" and "校验失败" in result["reason"]
+    assert list(lib.iterdir()) == [] and src.read_bytes() == b"1234"
+
+
+def test_duplicate_hash_read_error_does_not_skip_or_copy(tmp_path, monkeypatch):
+    src = make(tmp_path, "card/A.jpg", data=b"1234")
+    lib = tmp_path / "lib"
+    existing = make(lib, "A.jpg", data=b"1234")
+    def fail(_path):
+        raise OSError("read error")
+    monkeypatch.setattr(imp, "_hash_file", fail)
+    result = imp.copy_one(src, lib)
+    assert result["status"] == "failed" and existing.read_bytes() == b"1234"
+    assert sorted(p.name for p in lib.iterdir()) == ["A.jpg"]
+
+
+def test_duplicate_changed_during_hash_is_not_skipped(tmp_path, monkeypatch):
+    src = make(tmp_path, "card/A.jpg", data=b"1234")
+    lib = tmp_path / "lib"
+    existing = make(lib, "A.jpg", data=b"1234")
+    real_hash = imp._hash_file
+    def change_candidate(path):
+        digest = real_hash(path)
+        if path == existing:
+            path.write_bytes(b"abcd")
+            os.utime(path, ns=(1, 1))
+        return digest
+    monkeypatch.setattr(imp, "_hash_file", change_candidate)
+    assert imp.copy_one(src, lib)["status"] == "failed"
+    assert src.read_bytes() == b"1234" and not (lib / "A_2.jpg").exists()
 
 
 def test_copy_renames_when_size_differs_never_overwrites(tmp_path):

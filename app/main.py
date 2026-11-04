@@ -6,6 +6,7 @@ import json
 import os
 import secrets
 import sys
+import tempfile
 import threading
 from pathlib import Path
 
@@ -794,8 +795,22 @@ def main() -> None:
             if ctrl.splash is None:              # 没能创建启动窗口：直接显示主窗口
                 ctrl.finish()
         api._start_background()
-    webview.start(run, icon=icon)
-    api._shutdown()
+    base = api._settings.data["base_folder"]
+    cache = None
+    try:
+        if base and os.path.isdir(base):
+            # WebView's private data is temporary and lives on the chosen photo drive.
+            cache = tempfile.TemporaryDirectory(prefix=".latoshue-webview-", dir=base)
+        webview.start(run, icon=icon, storage_path=cache.name if cache else None)
+    finally:
+        try:
+            api._shutdown()
+        finally:
+            if cache is not None:
+                try:
+                    cache.cleanup()
+                except OSError:
+                    pass  # WebView may still have files open during shutdown.
 
 
 if __name__ == "__main__":

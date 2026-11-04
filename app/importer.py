@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -193,8 +194,25 @@ def _part_name(dest: Path, taken) -> Path:
     return dest.with_name(base)
 
 
-def _unique_dest(src_name: str, folder: Path, size: int) -> tuple[Path | None, bool]:
-    """返回 (目标路径, 是否已存在同名同大小)。同名不同大小则 _2、_3 ……，绝不覆盖。"""
+def _hash_file(path: Path) -> bytes:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(CHUNK), b""):
+            digest.update(block)
+    return digest.digest()
+
+
+def _unchanged(path: Path, before) -> bool:
+    after = path.lstat()
+    return (not _is_link_or_reparse(after) and stat.S_ISREG(after.st_mode)
+            and after.st_size == before.st_size and after.st_mtime_ns == before.st_mtime_ns
+            and after.st_ino == before.st_ino and after.st_dev == before.st_dev)
+
+
+def _unique_dest(src: Path, folder: Path, original) -> tuple[Path | None, bool]:
+    """Only skip a same-name, same-size file when its content matches."""
+    src_name, size = src.name, original.st_size
+    source_hash = None
     stem, dot, ext = src_name.rpartition(".")
     if not dot:
         stem, ext = src_name, ""
@@ -208,15 +226,22 @@ def _unique_dest(src_name: str, folder: Path, size: int) -> tuple[Path | None, b
         except OSError:
             return None, False
         if stat.S_ISREG(st.st_mode) and st.st_size == size and not _is_link_or_reparse(st):
-            return cand, True
+            if source_hash is None:
+                source_hash = _hash_file(src)
+                if not _unchanged(src, original):
+                    raise OSError("原文件在校验期间发生变化。")
+            candidate_hash = _hash_file(cand)
+            if not _unchanged(cand, st) or not _unchanged(src, original):
+                raise OSError("文件在校验期间发生变化。")
+            if source_hash == candidate_hash:
+                return cand, True
     return None, False
 
 
 def copy_one(src, folder, *, free_check=None) -> CopyResult:
     """把一个文件复制进 folder（必须已存在）。原文件只读。
 
-    同名且大小相同 -> skipped（视为已导入）；同名不同大小 -> 目标名加 _2、_3；先写 `名字.part`（独占创建），
-    写完核对大小，再改名为正式名；任何失败都只删除自己创建的 .part。"""
+    同名文件只有内容一致才跳过；不同内容自动改名。复制到临时文件并校验 SHA-256 后再改名。"""
     src, folder = Path(src), Path(folder)
     try:
         st = src.lstat()
@@ -225,11 +250,14 @@ def copy_one(src, folder, *, free_check=None) -> CopyResult:
     if _is_link_or_reparse(st) or not stat.S_ISREG(st.st_mode):
         return CopyResult(status="failed", dest="", reason="原文件不是普通文件（可能是快捷方式或链接），已跳过。")
     size = st.st_size
-    dest, exists = _unique_dest(src.name, folder, size)
+    try:
+        dest, exists = _unique_dest(src, folder, st)
+    except OSError as e:
+        return CopyResult(status="failed", dest="", reason=f"校验失败：{e.strerror or e}")
     if dest is None:
         return CopyResult(status="failed", dest="", reason="无法确定不重名的目标文件名。")
     if exists:
-        return CopyResult(status="skipped", dest=str(dest), reason="软件文件夹里已有同名同大小的文件，视为已导入。")
+        return CopyResult(status="skipped", dest=str(dest), reason="软件文件夹里已有同名且内容一致的文件，视为已导入。")
     if free_check is not None:
         free = free_check()
         if free is not None and free < size + SPACE_MARGIN // 8:
@@ -237,6 +265,7 @@ def copy_one(src, folder, *, free_check=None) -> CopyResult:
     part = _part_name(dest, lambda p: p.exists())
     created = False
     try:
+        digest = hashlib.sha256()
         with open(src, "rb") as fi:
             fo = open(part, "xb")                    # 独占创建：已有同名文件时报错而不是覆盖
             created = True
@@ -246,10 +275,12 @@ def copy_one(src, folder, *, free_check=None) -> CopyResult:
                     if not buf:
                         break
                     fo.write(buf)
+                    digest.update(buf)
         got = part.stat().st_size
-        now = src.lstat()
-        if got != size or now.st_size != size or now.st_mtime_ns != st.st_mtime_ns:
+        if got != size or not _unchanged(src, st):
             raise OSError("复制后文件大小与原文件不一致，或原文件在复制期间发生了变化。")
+        if _hash_file(part) != digest.digest() or not _unchanged(src, st):
+            raise OSError("复制后的内容校验失败，或原文件在校验期间发生了变化。")
         try:
             os.utime(part, ns=(st.st_atime_ns, st.st_mtime_ns))     # 保留拍摄/修改时间
         except OSError:
