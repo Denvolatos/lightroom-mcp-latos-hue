@@ -3,7 +3,15 @@
 桌面软件 **Latos Hue**（修图助手）的版本记录。版本号规则：开发阶段按 `0.x.0` 记录，**首个公开发布的版本为 1.0.0**。
 本文件记录的是软件本身；Lightroom 插件与服务端（LrMCP）有自己的版本线，见仓库根目录的 `CHANGELOG.md`（当前 0.15.0）。
 
-> 下面 0.1.0–0.16.0 都是开发中的内部版本，全部完成于 2026-11-03，**尚未发布**。每一项的详细过程、实测数字和未解决项见 `app/DEV_NOTES.md`。
+> 下面 0.1.0–0.17.0 都是开发中的内部版本，全部完成于 2026-11-03，**尚未发布**。每一项的详细过程、实测数字和未解决项见 `app/DEV_NOTES.md`。
+
+## 0.17.0 — 安装包
+- **双击安装：** 新增安装包 `LatosHue-Setup-0.17.0.exe`（约 37 MB），不需要管理员权限，默认装到 `%LOCALAPPDATA%\Programs\Latos Hue`；开始菜单快捷方式、可选的桌面快捷方式（默认不勾）、装完可直接运行。快捷方式指向窗口版，不会弹黑窗。构建：`powershell -ExecutionPolicy Bypass -File build_app.ps1 -Installer`。
+- **顺手装好 Lightroom 插件：** 把插件放进 `%APPDATA%\Adobe\Lightroom\Modules\LrMcp.lrplugin`（Lightroom 自动加载），已有同名插件就整个换新，结束页提示“请重启 Lightroom”。不登记到 Claude / Codex（软件自己启动 AI）。
+- **卸载：** 删除程序、快捷方式和上面这个插件文件夹；设置、经验笔记等个人数据（`%USERPROFILE%\LrMcp`）默认保留，卸载时会问“是否同时删除”，默认选“否”，静默卸载一律不删；不会动你的照片文件夹。
+- 安装前提示缺少 WebView2 运行库（只提示和给下载页，不自动下载）；安装说明用大白话写明开源、非 Adobe 产品、照片只在本机处理、预览图会发给你选的 AI 服务。
+- 测试开关：`/PLUGINDIR=<路径>` 改插件目标目录，`/NOPLUGIN` 跳过插件，便于不碰真实 Lightroom 地验证。
+- 没有代码改动；测试：app 899 个通过、1 个跳过，server 413 个通过。
 
 ## 0.16.0 — 免 Python 打包
 - **不用装 Python 就能运行：** 新增 `build_app.ps1`，把软件打成一个程序目录 `build\app_dist\LatosHue\`（约 76 MB，里面有 `LatosHue.exe` 窗口版和 `latoshue-helper.exe` 辅助版，WebView2 运行库仍用系统自带的）。这一步只做打包并验证能运行，安装包、卸载、插件安装是下一步。

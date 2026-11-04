@@ -775,3 +775,32 @@ photo_id 逐字取自第 ③ 项；按从好到坏排列；score 1–10；stars 
 5. 冻结后的 `运行时 PATH` 中 `claude` / `codex` 的查找、`LOCALAPPDATA` 下 Codex 目录。
 6. 程序放在带空格或中文的路径下（如 `C:\Program Files\...`）时命令行引用是否正确。
 7. 安装到只读目录时，自检/日志是否仍只写 `~/LrMcp`。
+
+## 第十八阶段：安装包（0.17.0）
+
+### 做了什么与取舍
+- **产物：** `installer/latoshue.iss`（Inno Setup 6.7.3）+ `installer/latoshue_before.txt`、`latoshue_after.txt`（中英双语说明）。构建：`powershell -ExecutionPolicy Bypass -File build_app.ps1 -Installer`（可加 `-SkipTests`）→ 先打 `buildpp_dist`，再把 `plugin\lrmcp.lrdevplugin`（排除 `DevRun.lua`、`devscripts`）暂存到 `build\stage_app\LrMcp.lrplugin`（故意不用 `build\stage`，那是 `build.ps1` 的），再 ISCC，输出 `build\installer\LatosHue-Setup-<APP_VERSION>.exe`（版本取 `app/settings.py`）。实测约 36.6 MB。
+- **按用户安装：** `PrivilegesRequired=lowest`，`{localappdata}\Programs\Latos Hue`，新 AppId，64 位。Inno 自带语言里没有简体中文，所以用英文向导 + `[CustomMessages]`/说明文件里的中英双语，没下载第三方语言文件。
+- **不登记 AI 客户端：** Latos Hue 自己启动 Claude/Codex，登记是 LrMCP 服务端安装包（`lrmcp.iss`）的职责。两个安装包用同一个插件路径与名字 `LrMcp.lrplugin`，互不冲突（后装的覆盖先装的）。
+- **插件走 Modules 自动加载：** 用 `[Files]` + `DestDir={code:PluginDir}`；`CurStepChanged(ssInstall)` 先把旧插件目录整个删掉再复制（更新=覆盖）。安全闸：目标目录只有在“不存在 / 为空 / 已有 Info.lua”时才会清理，路径过短（盘符根）也拒绝；否则不动它并在结束页说明。安装时把插件目标路径记进 `{app}\plugin-dir.txt`，卸载时只删记录的那个目录（且要有 Info.lua）。
+- **测试开关：** `/PLUGINDIR=<路径>` 覆盖插件目录；`/NOPLUGIN` 跳过插件。配合 `/DIR= /NOICONS` 可完全不碰真实 Lightroom 与开始菜单。
+- **运行中的软件：** `CloseApplications=yes` 且 `CloseApplicationsFilter=LatosHue.exe,latoshue-helper.exe`，只会提示关 Latos Hue，不会涉及 Lightroom。
+- **卸载：** 删程序目录、快捷方式、插件目录；`%USERPROFILE%\LrMcp`（设置、经验笔记、预设、收藏）默认保留，非静默卸载时弹确认（默认“否”），静默一律不删。代码里唯一的数据删除就是这个固定目录；照片工作文件夹从不涉及。
+- **WebView2：** 安装前读注册表（HKLM32 / HKCU 的 EdgeUpdate\Clients\{F3017226-…} 的 `pv`），没检测到就弹三选一（继续 / 打开官方下载页并退出 / 取消），静默安装不弹。**不自带、不下载 WebView2 安装程序**（许可与联网未验证）。
+- 不开机自启、不改系统设置，注册表只有 Inno 自带的 HKCU 卸载项和上面的只读检测。
+
+### 实测（没有弹任何窗口，没有碰真实 Lightroom / 开始菜单）
+- 静默安装到含空格和中文的路径（`Latos Hue 测试pp`，插件 `插件 目录\LrMcp.lrplugin`）：277 个文件齐全；插件目录有 `Info.lua`，无 `DevRun.lua`/`devscripts`，预置的陈旧文件被清除；精简 PATH 下 `LatosHue.exe --selftest`、`latoshue-helper.exe --selftest` 均通过。
+- `/NOPLUGIN`：不创建插件目录，也不写记录文件。
+- 静默卸载：程序目录与插件目录删除，Inno 的 HKCU 卸载项移除；`%USERPROFILE%\LrMcp` 前后文件数 209、修改时间一致；真实 `%APPDATA%\Adobe\Lightroom\Modules` 前后都不存在；开始菜单无变化。
+- 测试：app 899 通过 1 跳过，server 413 通过（lupa 测试未跳过）。
+
+### 未验证清单
+1. 沙盒/干净机器上的完整图形界面安装（向导各页外观、许可证页、桌面快捷方式勾选、“立即运行”、结束页提示）。
+2. 真实 Lightroom 是否认到发布版插件，以及发布版插件（`LrMcp.lrplugin`）与开发版 `lrmcp.lrdevplugin` 同时存在时的标识冲突怎么处理（两者 Info.lua 里的插件标识若相同，Lightroom 的表现）。
+3. WebView2 缺失时的表现（安装前三选一弹窗没有真实触发过；软件本身在没有运行库时的报错）。
+4. 杀毒误报与 SmartScreen 对未签名安装包的警告（未签名，可能需要代码签名）。
+5. 安装到带空格/中文路径后，软件真窗口启动（本次只验证了 `--selftest`）。
+6. 升级覆盖安装（旧版运行中时的关闭提示、同一 AppId 覆盖、插件整体替换）。
+7. 非静默卸载时“是否删除个人数据”确认框的实际显示与“默认否”。
+8. 两个安装包（LrMCP 与 Latos Hue）先后安装、卸载其中一个时，插件目录被删导致另一个失效的情况。
