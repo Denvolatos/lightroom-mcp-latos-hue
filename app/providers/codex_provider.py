@@ -50,7 +50,7 @@ def check_login(path: str, run=subprocess.run) -> bool | None:
 
 def build_command(path: str, thread_id: str | None, workdir: Path, prompt: str) -> list[str]:
     cmd = [path, "exec", "resume"] if thread_id else [path, "exec"]
-    cmd += ["--json", "--ignore-user-config", "--ignore-rules", "--strict-config"]
+    cmd += ["--json", "--ignore-user-config", "--ignore-rules", "--strict-config", "--skip-git-repo-check"]
     for feature in ("shell_tool", "apps", "view_image", "multi_agent", "goals", "hooks",
                     "shell_snapshot", "skill_mcp_dependency_install"):
         cmd += ["--disable", feature]
@@ -60,7 +60,7 @@ def build_command(path: str, thread_id: str | None, workdir: Path, prompt: str) 
             "-c", 'mcp_servers.lightroom_mcp.env_vars=["LRAPP_PORT", "LRAPP_TOKEN"]',
             "-c", f"mcp_servers.lightroom_mcp.enabled_tools={json.dumps(TOOLS)}",
             "-c", "mcp_servers.lightroom_mcp.required=true"]
-    cmd += [thread_id, "-"] if thread_id else ["--sandbox", "read-only", "--skip-git-repo-check",
+    cmd += [thread_id, "-"] if thread_id else ["--sandbox", "read-only",
                                               "-C", str(workdir), "-"]
     return cmd
 
