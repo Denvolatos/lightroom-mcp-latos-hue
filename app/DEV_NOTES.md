@@ -842,3 +842,10 @@ photo_id 逐字取自第 ③ 项；按从好到坏排列；score 1–10；stars 
 - **用户可见链接**（README、README.en、AI_GUIDE、llms.txt、issue 模板配置、`PROJECT_URL`、安装包 `AppPublisherURL`）已改成新地址；CHANGELOG/DEV_NOTES/docs/release 里描述过去发布的文字保持原样。
 - **版本统一（追加）：** 项目所有者决定“一个产品、一个版本号、一个发布”：服务端 `__version__`、插件 `Version.lua`/`Info.lua` 都升到 1.0.1，与 Latos Hue 同号，今后每次发布 `v*` 标签、两个安装包（`LatosHue-Setup-X.exe`、`LrMCP-Setup-vX.exe`）。`update_check` 的标签前缀改为 `("hue-v", "v")`；历史 `v0.x.0` 数字小于 1.0.1，不会被当成更新。
 - **待办（下次发布时）：** `server/lightroom_mcp/update.py` 的 `LATEST_URL` / `RELEASES_PAGE` 以及 `server/pyproject.toml` 的 Homepage/Issues 仍是旧地址（已发布的 0.15.0 带旧地址，靠 GitHub 跳转仍可用；1.0.1 这次也没动它），下次发布时改成 `lightroom-mcp-latos-hue`。
+
+# 1.0.2：软件拉起的 Lightroom 不能继承软件目录（2026-11-04）
+
+- **现象（真机）：** 用户把软件装在 `D:\Latos Hue` 后，覆盖安装时报“拒绝访问”。原因：软件自动拉起的 Lightroom 继承了软件的环境变量（PATH 等含软件目录），把软件目录里的 `VCRUNTIME140.dll` 加载进了 Lightroom 进程，文件一直被占着。
+- **修复：** `app/lr_autostart.py` 拉起 Lightroom 时用 `clean_environment()` 给它干净的环境变量，不再传软件自己的目录。
+- **排查方法：** PowerShell 执行 `(Get-Process Lightroom).Modules | Where-Object FileName -like '<软件安装目录>*'`，看 Lightroom 的已加载模块里是否有来自软件安装目录的文件；有就说明又泄漏了。
+- **真机待验证：** 1.0.2 装好后让软件自动启动 Lightroom，再查 Lightroom 的 Modules，不应再有软件目录里的文件。
