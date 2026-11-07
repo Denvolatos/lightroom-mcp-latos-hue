@@ -136,6 +136,7 @@ def test_ai_ready_uses_provider_text():
     ck, _ = make(provider=prov(reason="已安装并已登录。"))
     it = item(ck, "ai")
     assert it["state"] == "ready" and "Claude Code 命令行" in it["text"] and "已安装并已登录" in it["text"]
+    assert it["action"] == "choose_ai" and it["action_label"] == "更换 AI 来源"
 
 
 def test_ai_unknown_login_but_available_is_ready_with_next_step():
@@ -147,10 +148,11 @@ def test_ai_unknown_login_but_available_is_ready_with_next_step():
 @pytest.mark.parametrize("state,reason,step", [
     ("not_installed", "未安装 Claude Code 命令行。", "请安装 Claude Code，并在终端运行 claude，输入 /login 完成登录。"),
     ("not_logged_in", "已安装，但尚未登录。", "请在终端运行 claude，输入 /login 完成登录。")])
-def test_ai_unavailable_shows_reason_and_next_step_without_action(state, reason, step):
+def test_ai_unavailable_shows_reason_and_change_source_action(state, reason, step):
     ck, _ = make(provider=prov(False, state, reason, step))
     it = item(ck, "ai")
-    assert it["state"] == "todo" and reason in it["text"] and it["hint"] == step and it["action"] == ""
+    assert it["state"] == "todo" and reason in it["text"] and it["hint"] == step
+    assert it["action"] == "choose_ai" and it["action_label"] == "更换 AI 来源"
 
 
 def test_ai_unavailable_without_next_step_has_fallback():

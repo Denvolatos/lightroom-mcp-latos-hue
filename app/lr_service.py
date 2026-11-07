@@ -87,6 +87,7 @@ class LrService:
         self._restart_hook = restart_hook
         self._lock = threading.Lock()
         self.start_error: str | None = None
+        self.last_selected_error: str | None = None
         self.started_at: float | None = None          # time.monotonic()，最近一次（重新）启动
         self.restart_count = 0
 
@@ -154,7 +155,7 @@ class LrService:
         if not self.connected:
             return None
         try:
-            r = self._bridge.call("list_selected", {"limit": 1}, timeout=8)
+            r = self._bridge.call("list_selected", {"limit": 1}, timeout=40)
         except Exception:
             return None
         pid = r.get("active_id")
@@ -169,7 +170,7 @@ class LrService:
         if not self.connected:
             return None
         try:
-            r = self._bridge.call("list_selected", {"limit": max(1, min(int(limit), 20))}, timeout=8)
+            r = self._bridge.call("list_selected", {"limit": max(1, min(int(limit), 20))}, timeout=40)
         except Exception:
             return None
         photos = [{"id": p.get("id"), "name": p.get("name"), "rating": p.get("rating") or 0, "flag": p.get("flag") or "none"}
@@ -183,8 +184,10 @@ class LrService:
         if not self.connected:
             return None
         try:
-            r = self._bridge.call("list_selected", {"limit": 20}, timeout=8)
-        except Exception:
+            r = self._bridge.call("list_selected", {"limit": 20}, timeout=40)
+            self.last_selected_error = None
+        except Exception as e:
+            self.last_selected_error = str(e)
             return None
         pid = r.get("active_id")
         if not pid:
@@ -194,7 +197,7 @@ class LrService:
 
     def develop_of(self, photo_id: str) -> dict:
         """读取一张照片的调整参数（用来判断“编辑版本”是否变化）。出错直接抛异常，由调用方处理。"""
-        return self._bridge.call("get_develop", {"photo": photo_id}, timeout=15)
+        return self._bridge.call("get_develop", {"photo": photo_id}, timeout=40)
 
     def preview_bytes(self, photo_id: str, long_edge: int) -> tuple[bytes, str | None]:
         """让插件渲染一张预览并读回 JPEG 字节；只接受预览目录内的文件，读完删除（文件名每次唯一，只属于本次请求）。"""
@@ -365,3 +368,57 @@ class LrService:
 
     def restore_original(self, force: bool = False) -> dict:
         return self._run(lambda svc: svc.restore_original("selected", False, bool(force)))
+
+    def versions(self) -> dict:
+        return self._run(lambda svc: svc.list_versions("selected"))
+
+    def version_record(self, name: str) -> dict:
+        def read(svc):
+            photo_id, _ = svc.photo_id_of("selected")
+            record = svc.versions.get(photo_id, name)
+            current = svc.call("snapshot", {"photo": photo_id}, timeout=60).get("settings", {})
+            changed = [k for k, v in record.get("settings", {}).items()
+                       if k in current and not svc._same(current[k], v)]
+            return {"photo_id": photo_id, "name": record["name"], "changed": changed,
+                    "current": {k: current[k] for k in changed},
+                    "target": {k: record["settings"][k] for k in changed}}
+        return self._run(read)
+
+    def version_picture(self, name: str) -> dict:
+        def read(svc):
+            photo_id, _ = svc.photo_id_of("selected")
+            path = svc.versions.thumbnail_path(photo_id, name)
+            return {"photo_id": photo_id, "bytes": path.read_bytes() if path else None}
+        return self._run(read)
+
+    def save_version(self, name: str, note: str = "") -> dict:
+        def save(svc):
+            photo_id, _ = svc.photo_id_of("selected")
+            try:
+                thumbnail, _ = self.preview_bytes(photo_id, 512)
+            except (OSError, RuntimeError, ValueError):
+                thumbnail = None
+            return svc.save_version(name, note, "selected", thumbnail)
+        return self._run(save)
+
+    def apply_version(self, name: str, photo_id: str, expected_current: dict, expected_target: dict) -> dict:
+        def apply(svc):
+            selected, _ = svc.photo_id_of("selected")
+            if selected != photo_id:
+                raise ValueError("选中的照片已改变，请重新查看版本。")
+            now = svc.call("snapshot", {"photo": selected}, timeout=60).get("settings", {})
+            if not isinstance(expected_current, dict) or any(k not in now or not svc._same(now[k], v)
+                                                               for k, v in expected_current.items()):
+                raise ValueError("照片的调整已改变，请重新查看版本差异。")
+            saved = svc.versions.get(selected, name).get("settings", {})
+            if not isinstance(expected_target, dict) or any(k not in saved or not svc._same(saved[k], v)
+                                                              for k, v in expected_target.items()):
+                raise ValueError("保存的版本已改变，请重新查看版本差异。")
+            return svc.apply_version(name, photo="selected")
+        return self._run(apply)
+
+    def batch_plan_from_edit(self, edit_id: str) -> dict:
+        return self._run(lambda svc: svc.batch_plan_from_edit(edit_id, "selected"))
+
+    def batch_apply(self, plan_id: str) -> dict:
+        return self._run(lambda svc: svc.batch_apply(plan_id))

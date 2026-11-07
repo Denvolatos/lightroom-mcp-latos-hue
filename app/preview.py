@@ -255,7 +255,9 @@ class PreviewManager:
             return self._publish({"state": "error", "message": MSG_ERROR})
         detail = self.lr.selected_detail()
         if detail is None:
-            return self._publish({"state": "error", "message": MSG_ERROR})
+            reason = getattr(self.lr, "last_selected_error", None)
+            message = f"无法读取当前照片：{reason}" if reason else MSG_ERROR
+            return self._publish({"state": "error", "message": message})
         pid = detail.get("id")
         if not pid:
             return self._publish({"state": "none", "message": MSG_NONE})
@@ -270,8 +272,8 @@ class PreviewManager:
                 self.last_fetch_seconds = round(time.monotonic() - t0, 3)
                 self.fetch_count += 1
                 entry = self.store.put(pid, edge, version, raw, jpeg_size(raw))
-        except Exception:
-            return self._publish({"state": "error", "message": MSG_ERROR, "photo": {"id": pid, **info_of(detail)}})
+        except Exception as e:
+            return self._publish({"state": "error", "message": f"无法读取预览：{e}", "photo": {"id": pid, **info_of(detail)}})
         initial = self.store.initial(pid)
         if initial is None:                      # 软件第一次看到这张照片：这一张就是"初始（首次打开时）"
             self.store.set_initial(pid, entry)

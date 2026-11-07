@@ -20,7 +20,7 @@ EDIT_DIR = DATA_DIR / "edits"            # one JSON file per change: the old val
 READONLY_FILE = DATA_DIR / "readonly"    # if this file exists, every write is refused (also checked by the plug-in)
 MAX_KEYS_PER_EDIT = 30
 
-POLL_HOLD_SECONDS = 10.0        # how long /poll waits for a job before answering "none"
+POLL_HOLD_SECONDS = 1.0         # short polls keep multiple Lightroom sessions responsive
 PLUGIN_SEEN_SECONDS = 25.0      # plug-in counts as connected if it polled within this time
 CONNECT_WAIT_SECONDS = 6.0      # a call waits this long for a plug-in that is still (re)connecting
 PREVIEW_MAX_AGE_SECONDS = 24 * 3600

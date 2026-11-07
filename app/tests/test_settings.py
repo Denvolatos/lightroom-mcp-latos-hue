@@ -11,8 +11,31 @@ from providers import is_selectable
 
 
 @pytest.fixture
-def store(tmp_path):
+def store(tmp_path, monkeypatch):
+    monkeypatch.setattr(st, "default_provider", lambda: "claude")
     return st.SettingsStore(tmp_path / "app_settings.json", restrict=lambda p: None)
+
+
+def test_fresh_setup_prefers_the_only_installed_provider(monkeypatch):
+    import claude_bridge
+    from providers import codex_provider
+
+    monkeypatch.setattr(claude_bridge, "find_claude", lambda: None)
+    monkeypatch.setattr(codex_provider, "find_codex", lambda: "D:/Codex/codex.exe")
+    assert st.default_provider() == "codex"
+    monkeypatch.setattr(claude_bridge, "find_claude", lambda: "D:/Claude/claude.exe")
+    assert st.default_provider() == "claude"
+
+
+def test_gallery_folder_is_separate_from_import_folder(store, tmp_path):
+    import_folder = tmp_path / "import"
+    browse_folder = tmp_path / "browse"
+    import_folder.mkdir()
+    browse_folder.mkdir()
+    assert store.update({"base_folder": str(import_folder)})["ok"]
+    assert store.update({"gallery_folder": str(browse_folder)})["ok"]
+    assert store.data["base_folder"] == str(import_folder)
+    assert store.data["gallery_folder"] == str(browse_folder)
 
 
 # ---------------------------------------------------------------- 读写
@@ -190,6 +213,7 @@ def test_provider_selection_rules(store):
 # ---------------------------------------------------------------- 后端接口（Api）
 @pytest.fixture
 def api(tmp_path, monkeypatch):
+    monkeypatch.setattr(st, "default_provider", lambda: "claude")
     monkeypatch.setattr(st, "SETTINGS_FILE", tmp_path / "app_settings.json")
     monkeypatch.setattr(st, "restrict_to_current_user", lambda p: None)
     monkeypatch.setattr(st.SettingsStore.__init__, "__defaults__", (None, lambda p: None))
