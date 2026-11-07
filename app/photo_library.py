@@ -224,7 +224,7 @@ class PhotoLibrary:
 
     def refresh_sync(self) -> None:
         t0 = time.perf_counter()
-        base = str(self.settings.data["base_folder"])
+        base = str(self.settings.data.get("gallery_folder") or self.settings.data["base_folder"])
         exists = os.path.isdir(base)
         with self._lock:
             self.base, self.base_exists = base, exists
@@ -522,7 +522,7 @@ class PhotoLibrary:
         if active is not None and (not isinstance(active, str) or active not in ids):
             return {"ok": False, "status": "refused", "message": "当前照片必须是所选照片之一。",
                     "selected": list(self.sel_ids), "active": self.active}
-        base = str(self.settings.data["base_folder"])
+        base = str(self.settings.data.get("gallery_folder") or self.settings.data["base_folder"])
         with self._select_lock:
             self._selecting = True
             try:

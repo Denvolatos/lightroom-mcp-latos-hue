@@ -261,10 +261,11 @@ class Bridge:
             if remaining <= 0:
                 break
             try:
-                _, line = self._jobs.get(timeout=min(0.2, remaining))
+                job_id, line = self._jobs.get(timeout=min(0.2, remaining))
             except queue.Empty:
                 continue
-            return line
+            if job_id in self._events:  # a timed-out caller no longer needs this command
+                return line
         return "none"
 
     def _store_result(self, job_id: int, body: str) -> None:

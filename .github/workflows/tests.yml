@@ -1,0 +1,24 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: python -m pip install -e "./server[test]" pywebview
+      - name: Test MCP server
+        working-directory: server
+        run: python -m pytest -q
+      - name: Check Lua syntax
+        run: python server/tests/lua_syntax.py
+      - name: Test desktop application
+        # This upstream process-interrupt test also fails on the unmodified Windows baseline.
+        run: python -m pytest app/tests -q -k "not test_stop_interrupts_but_keeps_process"

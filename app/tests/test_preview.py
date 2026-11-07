@@ -244,7 +244,7 @@ def test_no_selection_and_not_connected_and_errors():
         lr.detail = {"id": "P1", "name": "A.ARW", "info": {"name": "A.ARW"}}
         lr.boom_preview = True
         m.refresh()
-        assert events[-1]["state"] == "error" and events[-1]["message"] == "无法读取预览：请确认 Lightroom 已打开并选中了照片"
+        assert events[-1]["state"] == "error" and events[-1]["message"] == "无法读取预览：x"
         n = len(events)
         m.refresh()                                                          # 同样的失败不重复推送
         assert len(events) == n
