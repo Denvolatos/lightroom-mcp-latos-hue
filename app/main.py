@@ -96,6 +96,8 @@ class Api:
         self._splash = None                      # 启动界面控制器（main() 里设置；没有启动界面时为空）
         self._pending_lr_path = ""               # 用户在文件对话框里点选、尚未保存的 Lightroom 路径
         self._ctx_pending = True                 # 新对话的第一条消息带上"经验库"资料块（见 send / reset）
+        self._batch_pending = ""                 # 页面已看过的单次批量预演计划
+        self._batch_photo_ids = []
         self._lib = LibraryService(self._lr, libstore.PresetStore(), libstore.NoteStore(), libstore.FavStore(), self._emit,
                                    on_applied=self._lib_applied, photo_fn=lambda: self._backend.photo,
                                    send_fn=self._pick_send, stop_fn=self._pick_stop, status_fn=lambda: self._provider.status(),
@@ -120,7 +122,7 @@ class Api:
         self._preview.start()
         self._photolib.server.start()
         self._photolib.start()
-        self._photolib.refresh()                # 软件启动时读一次图库（之后只在导入完成、加入完成、手动刷新时读）
+        self._photolib.refresh()                # 软件启动时读一次；连接恢复后再补读
         self._backend.start()
         self._splash_text(splashmod.TEXT_CONNECT_LR if launching else splashmod.TEXT_LOADING)
 
@@ -201,7 +203,9 @@ class Api:
         if lib is None:
             return
         t = ev.get("type")
-        if t == "selection":
+        if t == "status" and ev.get("connected"):
+            lib.refresh()
+        elif t == "selection":
             lib.on_lr_selection(ev)
         elif t == "import_done":
             lib.refresh()
@@ -361,6 +365,61 @@ class Api:
             self._thumbs_stale()
         return {"ok": r["ok"], "conflict": r["conflict"], "message": r["message"]}
 
+    def versions_state(self) -> dict:
+        return self._lr.versions()
+
+    def version_preview(self, name: str) -> dict:
+        result = self._lr.version_picture(name)
+        if not result["ok"]:
+            return result
+        data = result["result"]
+        if not data["bytes"]:
+            return {"ok": False, "message": "这个版本没有预览图。"}
+        entry = self._preview.server.store.put(data["photo_id"], 512, "saved:" + name, data["bytes"])
+        return {"ok": True, "result": {"photo_id": data["photo_id"], "url": self._preview.server.url_for(entry)}}
+
+    def version_plan(self, name: str) -> dict:
+        return self._lr.version_record(name)
+
+    def version_save(self, name: str) -> dict:
+        return self._lr.save_version(name)
+
+    def version_apply(self, name: str, photo_id: str, expected_current: dict, expected_target: dict) -> dict:
+        result = self._lr.apply_version(name, photo_id, expected_current, expected_target)
+        if result["ok"] and result["result"].get("edit_id"):
+            data = result["result"]
+            changes = [{"key": c["parameter"], "before": c["before"], "after": c["after"]}
+                       for c in data.get("changes", [])]
+            self._lib_applied(data["edit_id"], data["photo_id"], "版本：" + name, changes)
+        return result
+
+    def batch_plan_from_edit(self, edit_id: str) -> dict:
+        self._batch_pending = ""
+        self._batch_photo_ids = []
+        result = self._lr.batch_plan_from_edit(edit_id)
+        if result["ok"]:
+            self._batch_pending = result["result"].get("plan_id") or ""
+            self._batch_photo_ids = [p["photo_id"] for p in result["result"].get("photos", []) if p.get("will_change")]
+        return result
+
+    def batch_apply(self, plan_id: str) -> dict:
+        if not plan_id or plan_id != self._batch_pending:
+            return {"ok": False, "message": "请先重新预演这批照片。"}
+        self._batch_pending = ""
+        photo_ids, self._batch_photo_ids = self._batch_photo_ids, []
+        result = self._lr.batch_apply(plan_id)
+        if result["ok"] and result["result"].get("changed"):
+            self._preview.request()
+            self._thumbs_stale(*photo_ids)
+        return result
+
+    def batch_undo(self, batch_id: str) -> dict:
+        result = self._lr.undo(batch_id)
+        if result["ok"]:
+            self._preview.request()
+            self._thumbs_stale()
+        return result
+
     # ---- 设置 ------------------------------------------------------
     def get_settings(self, include_status: bool = True) -> dict:
         """当前设置、AI 来源列表（含状态）、关于信息。include_status=False（启动时）不做登录检测，只取设置值。"""
@@ -377,7 +436,7 @@ class Api:
         lr_ver = None
         try:
             if self._lr.connected and getattr(self._lr, "_bridge", None) is not None:
-                lr_ver = str(self._lr._bridge.call("status", timeout=3).get("lightroom_version") or "") or None
+                lr_ver = str(self._lr._bridge.call("status", timeout=10).get("lightroom_version") or "") or None
         except Exception:
             lr_ver = None
         return {"app_version": appsettings.APP_VERSION, "lightroom_version": lr_ver,
@@ -466,6 +525,17 @@ class Api:
             return {"ok": False, "cancelled": False, "message": next(iter(saved["errors"].values()), "设置未保存。")}
         self._wizard.invalidate()
         self._photolib.refresh()                 # 工作文件夹变了：图库按新文件夹重新读取
+        return {"ok": True, "cancelled": False, "message": ""}
+
+    def gallery_pick_folder(self) -> dict:
+        """选择要浏览的照片文件夹，不改变导入副本的保存位置。"""
+        r = self.choose_folder(self._settings.data.get("gallery_folder") or self._settings.data.get("base_folder") or "")
+        if not r.get("ok"):
+            return {"ok": False, "cancelled": True, "message": ""}
+        saved = self._settings.update({"gallery_folder": r["path"]}, selectable=is_selectable)
+        if not saved["ok"]:
+            return {"ok": False, "cancelled": False, "message": next(iter(saved["errors"].values()), "目录未保存。")}
+        self._photolib.refresh()
         return {"ok": True, "cancelled": False, "message": ""}
 
     def wizard_pick_lightroom(self) -> dict:
@@ -565,8 +635,8 @@ class Api:
         return self._import.library(limit)
 
     def open_library(self) -> dict:
-        """在资源管理器中打开软件文件夹（只打开设置里的软件文件夹，不接受页面传入的路径）。"""
-        base = self._settings.data["base_folder"]
+        """在资源管理器中打开当前浏览文件夹，不接受页面传入的路径。"""
+        base = self._settings.data.get("gallery_folder") or self._settings.data["base_folder"]
         if not os.path.isdir(base):
             return {"ok": False, "message": "软件文件夹尚不存在。完成一次导入后会自动创建，或在设置中更换。"}
         try:

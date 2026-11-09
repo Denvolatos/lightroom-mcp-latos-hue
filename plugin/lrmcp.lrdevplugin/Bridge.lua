@@ -126,7 +126,10 @@ local function execute(command, params)
 end
 
 local function post(base, token, id, text)
-	LrHttp.post(base .. "/result?id=" .. id, text, authHeaders(token), "POST", 20)
+	local _, hdrs = LrHttp.post(base .. "/result?id=" .. id, text, authHeaders(token), "POST", 20)
+	if not hdrs or hdrs.status ~= 200 then
+		log(string.format("result post to %s failed: %s", base, tostring(hdrs and hdrs.status or "no response")))
+	end
 end
 
 -- Reads the announcement of one port (never logs the token). Returns: "gone" when the file is missing,

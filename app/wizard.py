@@ -22,8 +22,8 @@ TITLES = {FOLDER: "照片工作文件夹", LIGHTROOM: "Lightroom", PLUGIN: "Ligh
 STALE_SECONDS = 5.0                    # 结果超过这么久，下一次取状态时顺带在后台重新检查
 
 # 界面上的按钮对应的动作（页面只能点按钮，不能传路径）
-ACT_FOLDER, ACT_LIGHTROOM = "choose_folder", "choose_lightroom"
-LABELS = {ACT_FOLDER: "选择文件夹", ACT_LIGHTROOM: "选择 Lightroom 程序"}
+ACT_FOLDER, ACT_LIGHTROOM, ACT_AI = "choose_folder", "choose_lightroom", "choose_ai"
+LABELS = {ACT_FOLDER: "选择文件夹", ACT_LIGHTROOM: "选择 Lightroom 程序", ACT_AI: "更换 AI 来源"}
 
 MSG_CHECKING = "检查中…"
 MSG_FAILED = "这一项暂时没能检查，请点“重新检查”。"
@@ -193,6 +193,6 @@ class WizardChecker:
         name = p.get("name") or "AI 来源"
         title_text = f"{name}：" + (p.get("reason") or "状态未知。")
         if p.get("available"):
-            return _item(AI, READY, title_text, p.get("next_step") or "")
+            return _item(AI, READY, title_text, p.get("next_step") or "", ACT_AI)
         hint = p.get("next_step") or "请到设置里换一个可用的 AI 来源，或按上面的提示处理。"
-        return _item(AI, TODO, title_text, hint)
+        return _item(AI, TODO, title_text, hint, ACT_AI)

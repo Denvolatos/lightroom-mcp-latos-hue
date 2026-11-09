@@ -848,6 +848,26 @@ def test_api_import_done_event_refreshes_library(api):
     assert len(api._photolib.lr.list_calls) == n
 
 
+def test_api_reconnect_refreshes_library(api):
+    touch(api._base / "A.jpg")
+    api._photolib.lr.catalog = [cat(1, api._base / "A.jpg")]
+    api._emit({"type": "status", "connected": True})
+    assert api.library_state()["state"] == "ready"
+    assert api.library_state()["total"] == 1
+
+
+def test_api_gallery_picker_changes_browsing_only(api, tmp_path):
+    browse = tmp_path / "existing"
+    browse.mkdir()
+    touch(browse / "B.jpg")
+    api._photolib.lr.catalog = [cat(2, browse / "B.jpg")]
+    api.choose_folder = lambda start="": {"ok": True, "path": str(browse)}
+    assert api.gallery_pick_folder()["ok"]
+    assert api._settings.data["base_folder"] == str(api._base)
+    assert api.library_state()["base"] == str(browse)
+    assert api.library_state()["total"] == 1
+
+
 def test_api_lightroom_selection_event_updates_library(api):
     touch(api._base / "A.jpg")
     touch(api._base / "B.jpg")

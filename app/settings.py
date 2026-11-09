@@ -26,6 +26,18 @@ DATA_DIR_TEXT = "~/LrMcp"
 EDGE_CHOICES = (768, 1024, 1536, 2048)  # 与界面里"预览清晰度"的可选档位一致
 DEFAULT_PROVIDER = "claude"
 
+
+def default_provider() -> str:
+    """On a fresh setup, use the installed CLI when only one is present."""
+    from claude_bridge import find_claude
+    from providers.codex_provider import find_codex
+
+    claude = find_claude()
+    codex = find_codex()
+    if codex and not claude:
+        return "codex"
+    return DEFAULT_PROVIDER
+
 # 导出对话框的默认值与取值范围（服务端 export_photo_for_app 的范围相同）
 EXPORT_FORMATS = ("jpeg", "tiff")
 EXPORT_METADATA = ("minimal", "all")
@@ -40,7 +52,7 @@ def default_base_folder() -> str:
 
 
 def defaults() -> dict:
-    return {"schema": SCHEMA_VERSION, "base_folder": default_base_folder(), "provider": DEFAULT_PROVIDER,
+    return {"schema": SCHEMA_VERSION, "base_folder": default_base_folder(), "gallery_folder": "", "provider": default_provider(),
             "confirm_default": True, "preview_edge": 1024,
             "export_last_folder": "", "export_format": "jpeg", "export_size": 0, "export_quality": 92,
             "export_bit_depth": 16, "export_metadata": "minimal", "ai_use_notes": True,
@@ -107,6 +119,22 @@ def validate_folder(path: str) -> dict:
     if not _writable(anc):
         return bad("无法在该位置创建文件夹（没有写入权限）。")
     return {"ok": True, "message": "", "exists": False, "path": str(p)}
+
+
+def validate_gallery_folder(path: str) -> dict:
+    """A browsing folder must exist, but does not need write permission."""
+    raw = (path or "").strip()
+    p = Path(raw)
+    if not raw or raw.startswith(("\\\\", "//")) or not p.is_absolute() or not p.drive or p.parent == p:
+        return {"ok": False, "message": "请选择已存在的本机照片文件夹。", "path": raw}
+    try:
+        p = p.resolve()
+        valid = p.is_dir() and not any(_is_within(p, root) for root in _protected_roots())
+    except (OSError, RuntimeError, ValueError):
+        valid = False
+    if not valid:
+        return {"ok": False, "message": "请选择已存在的本机照片文件夹。", "path": raw}
+    return {"ok": True, "message": "", "path": str(p)}
 
 
 def _writable(directory: Path) -> bool:
@@ -190,6 +218,9 @@ def sanitize(data) -> dict:
     out["schema"] = SCHEMA_VERSION
     bf = out.get("base_folder")
     out["base_folder"] = bf.strip() if isinstance(bf, str) and bf.strip() and validate_folder(bf)["ok"] else d["base_folder"]
+    gf = out.get("gallery_folder")
+    gallery = validate_gallery_folder(gf) if isinstance(gf, str) else {"ok": False}
+    out["gallery_folder"] = gallery["path"] if gallery["ok"] else ""
     pv = out.get("provider")
     out["provider"] = pv if isinstance(pv, str) and pv else d["provider"]
     out["confirm_default"] = out["confirm_default"] if isinstance(out.get("confirm_default"), bool) else d["confirm_default"]
@@ -263,6 +294,16 @@ class SettingsStore:
                     errors["base_folder"] = "该文件夹尚不存在。"
             else:
                 new["base_folder"] = v["path"]
+        if "gallery_folder" in changes:
+            folder = changes["gallery_folder"]
+            if folder == "":
+                new["gallery_folder"] = ""
+            else:
+                gallery = validate_gallery_folder(folder) if isinstance(folder, str) else {"ok": False}
+                if gallery["ok"]:
+                    new["gallery_folder"] = gallery["path"]
+                else:
+                    errors["gallery_folder"] = "请选择已存在的本机照片文件夹。"
         if "provider" in changes:
             pid = changes["provider"]
             if not isinstance(pid, str) or not selectable(pid):

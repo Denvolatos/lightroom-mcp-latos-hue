@@ -29,6 +29,7 @@ FAKE_CODEX = str(Path(__file__).with_name("fake_codex.py"))
 @pytest.fixture
 def api(tmp_path, monkeypatch):
     monkeypatch.setattr(st, "SETTINGS_FILE", tmp_path / "app_settings.json")
+    monkeypatch.setattr(st, "default_provider", lambda: "claude")
     monkeypatch.setattr(st, "restrict_to_current_user", lambda p: None)
     monkeypatch.setattr(st.SettingsStore.__init__, "__defaults__", (None, lambda p: None))
     import main

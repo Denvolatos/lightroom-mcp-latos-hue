@@ -180,6 +180,13 @@ def test_timeout_raises(bridge):
         bridge.call("status", timeout=0.5)
 
 
+def test_poll_skips_command_after_caller_times_out(bridge):
+    bridge.last_seen = time.time()
+    with pytest.raises(BridgeError, match="没有在"):
+        bridge.call("status", timeout=0.1)
+    assert request(bridge, "GET", "/poll", headers={"X-Gen": "1"})[1] == "none"
+
+
 def test_bad_parameters_are_rejected(bridge):
     bridge.last_seen = time.time()
     with pytest.raises(ValueError):
