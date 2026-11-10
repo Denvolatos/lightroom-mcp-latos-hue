@@ -1,20 +1,29 @@
+<div align="center">
+
 # 📸 Latos Hue（修图助手）
+
+**让 AI 帮你在一个窗口里挑片、修图、导出。**<br>
+Lightroom Classic 在后台当引擎，原片不会被改动，每一步修改都能撤销。
+
+[![下载最新版（Windows）](https://img.shields.io/badge/%E2%AC%87%EF%B8%8F_%E4%B8%8B%E8%BD%BD%E6%9C%80%E6%96%B0%E7%89%88-Windows-2d6fd6?style=for-the-badge)](https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases/latest)
+
+[![Latest release](https://img.shields.io/github/v/release/Denvolatos/lightroom-mcp-latos-hue?label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC)](https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases/latest) [![Downloads](https://img.shields.io/github/downloads/Denvolatos/lightroom-mcp-latos-hue/total?label=%E4%B8%8B%E8%BD%BD%E9%87%8F)](https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)
+
+[English](README.en.md) · [更新日志（软件）](app/CHANGELOG.md) · [安全说明](SECURITY.md) · [参与贡献](CONTRIBUTING.md) · [LrMCP（给 AI 客户端用的服务端）](#lrmcp给-ai-客户端直接用的服务端)
+
+![Latos Hue：AI 挑片，给出排名和星级建议，确认后才写入（示例照片）](app/docs/pick_result.png)
+
+<sub>截图里的照片和文件夹都是测试用的示例。</sub>
+
+</div>
 
 **Latos Hue 是基于 Adobe Lightroom Classic 的 Windows AI 照片编辑软件：使用 Claude 或 Codex 导入、挑选、修图和导出照片。** Lightroom Classic 在后台作为修图引擎。
 
 项目还提供 **LrMCP**：可独立安装的 Lightroom Classic 插件与 MCP（Model Context Protocol）服务端，供支持 MCP 的 AI 客户端使用，无需安装 Latos Hue 桌面软件。
 
-![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) [![Latest release](https://img.shields.io/github/v/release/Denvolatos/lightroom-mcp-latos-hue)](https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases/latest)
-
-[English](README.en.md) · [更新日志（软件）](app/CHANGELOG.md) · [安全说明](SECURITY.md) · [参与贡献](CONTRIBUTING.md) · [LrMCP（给 AI 客户端用的服务端）](#lrmcp给-ai-客户端直接用的服务端)
-
 > 🤖 **你是 AI 助手，用户让你看这个仓库？** 请读 [`AI_GUIDE.md`](AI_GUIDE.md)（那是 LrMCP 服务端的安装和使用步骤）。
 
 ![Latos Hue：图库里按文件夹分组浏览照片（示例照片）](app/docs/gallery_groups.png)
-
-![Latos Hue：AI 挑片，给出排名和星级建议，确认后才写入（示例照片）](app/docs/pick_result.png)
-
-*截图里的照片和文件夹都是测试用的示例。*
 
 ## ✨ 能做什么
 

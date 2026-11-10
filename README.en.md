@@ -1,20 +1,29 @@
+<div align="center">
+
 # 📸 Latos Hue
+
+**Let AI pick, retouch and export your photos in one window.**<br>
+Lightroom Classic works in the background as the engine; your originals are never changed and every edit can be undone.
+
+[![Download the latest version (Windows)](https://img.shields.io/badge/%E2%AC%87%EF%B8%8F_Download_latest-Windows-2d6fd6?style=for-the-badge)](https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases/latest)
+
+[![Latest release](https://img.shields.io/github/v/release/Denvolatos/lightroom-mcp-latos-hue)](https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases/latest) [![Downloads](https://img.shields.io/github/downloads/Denvolatos/lightroom-mcp-latos-hue/total?label=downloads)](https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) ![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)
+
+[中文说明](README.md) · [Changelog (app)](app/CHANGELOG.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [LrMCP (server for AI clients)](#lrmcp-the-server-for-ai-clients)
+
+![Latos Hue: AI photo picking gives a ranking and star suggestions, written only after you confirm (sample photos)](app/docs/pick_result.png)
+
+<sub>The photos and folders in the screenshots are test samples. The interface is in Chinese.</sub>
+
+</div>
 
 **Latos Hue is a Windows AI photo editing app for Adobe Lightroom Classic: import, select, retouch and export photos with Claude or Codex.** Lightroom Classic works in the background as the editing engine.
 
 The project also provides **LrMCP**, a standalone Lightroom Classic plug-in and MCP (Model Context Protocol) server for compatible AI clients. It can be installed without the Latos Hue desktop app.
 
-![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue) ![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey) [![Latest release](https://img.shields.io/github/v/release/Denvolatos/lightroom-mcp-latos-hue)](https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases/latest)
-
-[中文说明](README.md) · [Changelog (app)](app/CHANGELOG.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [LrMCP (server for AI clients)](#lrmcp-the-server-for-ai-clients)
-
 > 🤖 **AI assistant reading this for a user?** Read [`AI_GUIDE.md`](AI_GUIDE.md) (it covers installing and using the LrMCP server).
 
 ![Latos Hue: browsing photos grouped by folder in the gallery (sample photos)](app/docs/gallery_groups.png)
-
-![Latos Hue: AI photo picking gives a ranking and star suggestions, written only after you confirm (sample photos)](app/docs/pick_result.png)
-
-*The photos and folders in the screenshots are test samples. The interface is in Chinese.*
 
 ## ✨ What it does
 
