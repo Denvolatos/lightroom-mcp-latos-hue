@@ -871,12 +871,12 @@ photo_id 逐字取自第 ③ 项；按从好到坏排列；score 1–10；stars 
 - **向导：** AI 项在未选择时是“需要处理：请选择要使用的 AI”，带 `need_choice` 和 `choices`（每个可选来源一个按钮“使用 Claude / 使用 Codex”，旁边是来源自己的状态文案和 Codex 的数据去向提示；未安装的也能选）。`decide()`：`need_choice` 时必弹，不受 `wizard_done` 影响（与“没选工作文件夹必弹”同一规则）。
 - **选择接口 `wizard_choose_ai(provider_id)`：** 只接受注册表里可选的 id（`is_selectable`，与设置保存用的是同一个校验）；已选过的拒绝（要换去设置）；AI 忙时拒绝。保存 `provider` + `provider_chosen=True` 后调用现有的 `_apply_provider_choice()`，也就是“新对话时切换来源”那条路径（含 Claude 常驻会话与 Codex 每轮启动之间的通道重建），没有另起一套。
 - **设置对话框：** 未选择时来源下拉框显示“尚未选择”且不可用，并提示去环境检查；`save_settings` 在未选择时丢弃页面带上的 `provider`（对话框每次保存都会带上下拉框的值，不能把它当成用户的选择），`provider_chosen` 永远不接受页面直接改。已选择之后，设置里切换来源的行为不变（下一次“新对话”生效），向导保留 PR 的“更换 AI 来源”按钮。
-- **状态探测：** 未选择时向导要显示两个来源各自的安装/登录状态，用 `providers.StatusProbe`（每个来源一个实例，沿用各自 30 秒缓存）。它只运行命令行自带的本地登录检测（`claude auth status --json`、`codex login status`），不调用模型、不启动会话。**注意：** “未选择期间不启动任何 AI 命令行进程”在实现上指的是不启动会话、不预热；为了显示“已安装并已登录 / 未登录”，这两个本地检测命令仍会在打开环境检查时运行（原来的向导和设置也是这样做的）。如果连这个也不想要，只能把状态降级成“已安装 / 未安装”（只找可执行文件），留给所有者决定。
+- **状态探测：** 未选择时向导要显示两个来源各自的安装/登录状态，用 `providers.StatusProbe`（每个来源一个实例，沿用各自 30 秒缓存）。它只运行命令行自带的本地登录检测（`claude auth status --json`、`codex login status`），不调用模型、不启动会话。**注意：** “未选择期间不启动任何 AI 命令行进程”在实现上指的是不启动会话、不预热；为了显示“已安装并已登录 / 未登录”，这两个本地检测命令仍会在打开环境检查时运行（原来的向导和设置也是这样做的）。所有者决定保持现状。
 
 ## 二、界面直接触发的写入：与现有保护对齐
 PR 新增的 `version_save / version_apply / batch_plan_from_edit / batch_apply / batch_undo` 是页面直接触发的。
 - **AI 忙时拒绝（新增）。** `Api._write_block()`：`_busy`（对话、AI 挑片、“记成经验”共用；挑片期间确认服务还处于 `deny_all`）或来源自己的 `busy` 为真时，上述五个接口返回大白话“AI 正在处理……请等它完成”。批量应用被拒时保留已预演的计划，AI 忙完可以直接再点。
-  - **与“我的预设”套用的差别（待所有者决定）：** 任务要求“与预设套用的现有行为对齐，以代码为准”。查代码：`LibraryService.apply_prepare/apply_confirm` 目前**没有**后端的 AI 忙检查（只查连接、只读、照片是否变了、令牌），`undo` / `restore_original` 也没有。本次只给新接口加了忙检查，没有改预设套用和撤销的现有行为。是否把同样的检查补到预设套用上，留给所有者决定。
+  - **补齐（所有者决定）：** “我的预设”套用（`lib_apply_prepare/confirm`）、`undo`、`restore_original` 也接上同样的 `_write_block()`（`Api._busy_refusal`），提示用同一句“AI 正在处理……”。确认清单在被拒时保留。AI 自己发起的写入走确认服务（`confirm_hub`），不经过这些页面接口，不受影响（有测试）。
 - **只读开关：** 由 server 的 `EditService.check_writable()` 拦截（`apply_version`、`batch_plan`、`batch_apply`、`restore`）。`LrService._run` 以前把所有 `ReadOnlyError` 都翻成“无法还原”，对版本/批量不合适，现在这几条用“只读模式已开启，不允许修改照片。要修改，请先关闭只读模式。”（不带本机路径），并在结果里带 `readonly` / `uncertain` 标记。`save_version` 只写软件自己的版本记录、不改照片，server 不拦，这里也不拦。有测试。
 - **参数校验在后端：** 版本名用 server 的 `versions.clean_name`（1–40 字、无控制字符）；`edit_id` / `batch_id` 用 server 的 `EDIT_ID` 格式；`plan_id`、令牌必须是字符串并用 `secrets.compare_digest` 比较。`batch_undo` 只接受本次运行里软件自己执行过的批次（PR 里它等于任意 `undo(edit_id)`）。
 - **`version_apply` 改成一次性令牌。** PR 让页面回传 `expected_current / expected_target` 两个参数字典做一致性校验。现在 `version_plan` 在后端记下“给页面看过的方案”（照片 id、当前值、目标值）并发一个令牌；`version_apply(token)` 只收令牌，照片/当前参数/版本内容与当时不一致就拒绝（`LrService.apply_version` 的三项检查保留）。页面拿到的只有显示用的条目（中文参数名 + 格式化好的数值），不再拿到原始参数字典。令牌用错一次即作废。
@@ -914,7 +914,7 @@ PR 新增的 `version_save / version_apply / batch_plan_from_edit / batch_apply 
   - 对该目录只读：扫描用 `importer.scan_folder`（只列文件，不跟随符号链接/联接点，跳过隐藏和系统目录）。
   - “加入 Lightroom”是原地添加：`PhotoLibrary.add_missing` 的路径只来自后端上一次扫描，逐张调 `EditService.import_photo`，插件端 `checkImportPath` 的限制仍然生效（本机盘符路径、无 `..`、不在系统目录和本工具数据目录、是照片格式的已存在文件），不移动、不复制、不删除。
   - AI 修图的修改写在 Lightroom 目录里（可撤销），原片文件不被改动。导入副本仍只写 `base_folder`（`ImportService` 没有用 `gallery_folder`）。
-- 已知小事：浏览目录所在的盘没接上时，`sanitize()` 会在内存里把它清空、退回工作文件夹；下次保存任何设置时这个清空会被写进文件，需要重新“换目录”。
+- 浏览目录所在的盘暂时没接上：`sanitize()` 对“格式合法但目录现在不存在”的值保留（`validate_gallery_folder(must_exist=False)`），保存其他设置不会清空它；图库运行时显示“浏览目录暂时无法访问，请检查磁盘，或点“换目录”重新选择。”。用户新选择目录时仍然严格要求目录存在。
 
 ## 八、其余逐项
 - **重连后刷新图库：** `status` 事件只在状态变化时推送（`Backend._push_status` 去重），所以不是每 2 秒刷新一次；`PhotoLibrary.refresh` 自带合并。
