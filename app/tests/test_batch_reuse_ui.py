@@ -143,3 +143,47 @@ def test_readonly_switch_refuses_batch_with_plain_message():
         assert r["ok"] is False and r["readonly"] is True
         assert r["message"] == "只读模式已开启，不允许修改照片。要修改，请先关闭只读模式。"
         assert "C:\\" not in r["message"]                           # 不把本机路径带到界面
+
+
+# ---------------------------------------------------------------- 套用预设、撤销、还原：同样的“AI 忙时拒绝”
+class FakeLib:
+    def __init__(self):
+        self.calls = []
+
+    def apply_prepare(self, kind, ref, strength=100):
+        self.calls.append("prepare")
+        return {"ok": True, "token": "t"}
+
+    def apply_confirm(self, token):
+        self.calls.append("confirm")
+        return {"ok": True}
+
+
+class FakeLr2(FakeLr):
+    def restore_original(self, force=False):
+        self.calls.append(("restore_original",))
+        return {"ok": False, "conflict": False, "message": ""}
+
+
+@pytest.mark.parametrize("how", ["chat_or_pick", "session"])
+def test_preset_apply_undo_restore_are_refused_while_ai_is_working(how):
+    api = make_api()
+    api._lr, api._lib = FakeLr2(), FakeLib()
+    if how == "chat_or_pick":
+        api._busy = True
+    else:
+        api._session.busy = True
+    for r in (api.lib_apply_prepare("mine", "p1"), api.lib_apply_confirm("t"), api.undo(EDIT), api.restore_original()):
+        assert r["ok"] is False and r["busy"] is True and "AI 正在处理" in r["message"]
+    assert api._lib.calls == [] and api._lr.calls == []              # 没有任何调用到达 Lightroom / 预设服务
+    api._busy, api._session.busy = False, False
+    assert api.lib_apply_prepare("mine", "p1")["ok"] and api.lib_apply_confirm("t")["ok"]      # 空闲时照常
+    assert api._lib.calls == ["prepare", "confirm"]
+
+
+def test_ai_side_writes_do_not_go_through_the_page_busy_check():
+    """AI 自己发起的写入经确认服务（confirm_hub），与 Api._write_block 无关：busy 时确认服务照常工作。"""
+    import inspect
+
+    import confirm_hub
+    assert "_write_block" not in inspect.getsource(confirm_hub)

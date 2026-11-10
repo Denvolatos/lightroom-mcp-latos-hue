@@ -367,7 +367,20 @@ class Api:
         st["photo"] = self._backend.photo
         return st
 
+    def _busy_refusal(self, plain: bool = False) -> dict | None:
+        """页面直接触发的写入（套用预设、撤销、还原到原始状态）在 AI 处理中 / AI 挑片进行中时拒绝。
+        只拦这几个页面接口；AI 自己发起的写入走确认服务（confirm_hub），不经过这里。"""
+        block = self._write_block()
+        if not block:
+            return None
+        if plain:
+            return {"ok": False, "busy": True, "message": block}
+        return {"ok": False, "conflict": False, "busy": True, "message": block}
+
     def undo(self, edit_id: str, force: bool = False) -> dict:
+        refused = self._busy_refusal()
+        if refused:
+            return refused
         r = self._lr.undo(edit_id, bool(force))
         if r["ok"]:
             with self._lock:
@@ -378,6 +391,9 @@ class Api:
         return {"ok": r["ok"], "conflict": r["conflict"], "message": r["message"]}
 
     def restore_original(self, force: bool = False) -> dict:
+        refused = self._busy_refusal()
+        if refused:
+            return refused
         r = self._lr.restore_original(bool(force))
         if r["ok"]:
             undone = set((r.get("result") or {}).get("edits_undone") or [])
@@ -965,9 +981,15 @@ class Api:
         return self._lib.lr_presets(query)
 
     def lib_apply_prepare(self, kind: str, ref: str, strength: int = 100) -> dict:
+        refused = self._busy_refusal(plain=True)
+        if refused:
+            return refused
         return self._lib.apply_prepare(kind, ref, strength)
 
     def lib_apply_confirm(self, token: str) -> dict:
+        refused = self._busy_refusal(plain=True)
+        if refused:
+            return refused                       # 确认清单保留：AI 忙完后可以直接再点“确认套用”
         return self._lib.apply_confirm(token)
 
     def lib_apply_cancel(self) -> dict:
