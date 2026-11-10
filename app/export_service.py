@@ -20,6 +20,7 @@ from pathlib import Path
 
 import importer as imp
 import settings as appsettings
+from lr_service import patient
 
 DATA_DIR = Path.home() / "LrMcp"
 EXPORT_TIMEOUT = 120.0          # 秒；超过按"状态不确定"处理
@@ -165,7 +166,8 @@ class ExportService:
             return out
         detail = None
         try:
-            detail = self.lr.selected_detail()
+            with patient(self.lr):                  # 用户点开导出对话框：可以等，用长超时
+                detail = self.lr.selected_detail()
         except Exception:
             detail = None
         if detail is None:
@@ -197,7 +199,8 @@ class ExportService:
         if not folder:
             return {"ok": False, "message": fmsg}
         try:
-            detail = self.lr.selected_detail()
+            with patient(self.lr):
+                detail = self.lr.selected_detail()
         except Exception:
             detail = None
         if detail is None:

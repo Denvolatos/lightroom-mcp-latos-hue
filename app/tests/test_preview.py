@@ -8,6 +8,7 @@ import urllib.request
 import pytest
 
 import preview as pv
+from lr_service import MSG_READ_FAILED
 from preview import PreviewManager, PreviewServer, PreviewStore, develop_version
 
 
@@ -244,7 +245,7 @@ def test_no_selection_and_not_connected_and_errors():
         lr.detail = {"id": "P1", "name": "A.ARW", "info": {"name": "A.ARW"}}
         lr.boom_preview = True
         m.refresh()
-        assert events[-1]["state"] == "error" and events[-1]["message"] == "无法读取预览：x"
+        assert events[-1]["state"] == "error" and events[-1]["message"] == "无法读取预览：" + MSG_READ_FAILED     # 异常原文（这里是 "x"）不上界面
         n = len(events)
         m.refresh()                                                          # 同样的失败不重复推送
         assert len(events) == n

@@ -7,6 +7,8 @@
 """
 from __future__ import annotations
 
+import contextlib
+import logging
 import sys
 import threading
 import time
@@ -16,6 +18,63 @@ from ports import clean_stale_announcements, note_port_used, port_order
 
 REPO = Path(__file__).resolve().parent.parent
 CONFLICT_MARK = "又发生变化"
+log = logging.getLogger("latoshue.lr")
+
+# 读取类调用的超时（秒）。原则：周期性调用（巡检线程每 3 秒读选中照片、预览线程每几秒查一次）用短超时，
+# Lightroom 卡住时它们很快放弃、下一轮再试，不会把状态更新拖住几十秒；用户自己点出来、可以等一会儿的操作
+# （导出、AI 挑片、保存/套用预设）用长超时，见 patient()。
+POLL_READ_TIMEOUT = 10          # list_selected（PR #7 之前是 8）
+DEVELOP_READ_TIMEOUT = 20       # get_develop，只有预览线程在用（PR #7 之前是 15）
+USER_READ_TIMEOUT = 40          # 用户主动触发的读取（PR #7 把所有读取都放宽到了 40）
+
+MSG_READ_TIMEOUT = "Lightroom 没有在时限内回应，可能正忙。稍后会自动重试。"
+MSG_READ_OFFLINE = "Lightroom 插件未连接。请确认 Lightroom 已打开且插件已启用。"
+MSG_READ_FAILED = "Lightroom 没能完成这次读取。请稍后再试；一直不行的话，在 Lightroom 里重新选中这张照片。"
+MSG_READONLY_WRITE = "只读模式已开启，不允许修改照片。要修改，请先关闭只读模式。"
+
+
+def friendly_read_error(e: BaseException) -> str:
+    """把读取失败翻成可以直接给用户看的一句话。异常原文可能带本机路径、端口等内部信息，只写进日志，不上界面。"""
+    name = type(e).__name__
+    if name == "BridgeTimeout":
+        return MSG_READ_TIMEOUT
+    if name == "PluginNotConnected":
+        return MSG_READ_OFFLINE
+    return MSG_READ_FAILED
+
+
+@contextlib.contextmanager
+def patient(lr):
+    """用户主动触发、可以等的操作：这段代码里 lr 的读取用长超时（USER_READ_TIMEOUT）。
+    只对当前线程生效；lr 是测试里的假对象（没有这个开关）时什么也不做。"""
+    tl = getattr(lr, "_patience", None)
+    if tl is None:
+        yield
+        return
+    old = getattr(tl, "on", False)
+    tl.on = True
+    try:
+        yield
+    finally:
+        tl.on = old
+
+
+def version_name_error(name) -> str | None:
+    """版本名不合规时返回原因（规则与 server 的 VersionStore 相同：1–40 个字、不含换行等控制字符），合规返回 None。"""
+    _import_server()
+    from lightroom_mcp import versions
+    try:
+        versions.clean_name(name)
+    except versions.VersionError as e:
+        return str(e)
+    return None
+
+
+def valid_edit_id(value) -> bool:
+    """修改编号 / 批次编号的格式（形如 20261102-120000-ab12），与 server 的 EditStore 相同。"""
+    _import_server()
+    from lightroom_mcp import edits
+    return isinstance(value, str) and bool(edits.EDIT_ID.match(value))
 
 
 def _import_server():
@@ -86,6 +145,7 @@ class LrService:
         self._library_svc = library_service       # 测试时可传入假的图库服务
         self._restart_hook = restart_hook
         self._lock = threading.Lock()
+        self._patience = threading.local()            # 见 patient()：当前线程是否在做“用户可以等”的操作
         self.start_error: str | None = None
         self.last_selected_error: str | None = None
         self.started_at: float | None = None          # time.monotonic()，最近一次（重新）启动
@@ -150,12 +210,15 @@ class LrService:
             time.sleep(0.2)
         return self.connected
 
+    def _read_timeout(self, short: float) -> float:
+        return USER_READ_TIMEOUT if getattr(self._patience, "on", False) else short
+
     def selected_photo(self) -> dict | None:
         """当前选中（活动）照片：{"id", "name"}；读不到返回 None。"""
         if not self.connected:
             return None
         try:
-            r = self._bridge.call("list_selected", {"limit": 1}, timeout=40)
+            r = self._bridge.call("list_selected", {"limit": 1}, timeout=self._read_timeout(POLL_READ_TIMEOUT))
         except Exception:
             return None
         pid = r.get("active_id")
@@ -170,7 +233,8 @@ class LrService:
         if not self.connected:
             return None
         try:
-            r = self._bridge.call("list_selected", {"limit": max(1, min(int(limit), 20))}, timeout=40)
+            r = self._bridge.call("list_selected", {"limit": max(1, min(int(limit), 20))},
+                                  timeout=self._read_timeout(POLL_READ_TIMEOUT))
         except Exception:
             return None
         photos = [{"id": p.get("id"), "name": p.get("name"), "rating": p.get("rating") or 0, "flag": p.get("flag") or "none"}
@@ -184,10 +248,11 @@ class LrService:
         if not self.connected:
             return None
         try:
-            r = self._bridge.call("list_selected", {"limit": 20}, timeout=40)
+            r = self._bridge.call("list_selected", {"limit": 20}, timeout=self._read_timeout(POLL_READ_TIMEOUT))
             self.last_selected_error = None
         except Exception as e:
-            self.last_selected_error = str(e)
+            log.warning("list_selected failed: %s: %s", type(e).__name__, e)
+            self.last_selected_error = friendly_read_error(e)      # 给界面的一句话；原文只进日志
             return None
         pid = r.get("active_id")
         if not pid:
@@ -197,7 +262,7 @@ class LrService:
 
     def develop_of(self, photo_id: str) -> dict:
         """读取一张照片的调整参数（用来判断“编辑版本”是否变化）。出错直接抛异常，由调用方处理。"""
-        return self._bridge.call("get_develop", {"photo": photo_id}, timeout=40)
+        return self._bridge.call("get_develop", {"photo": photo_id}, timeout=self._read_timeout(DEVELOP_READ_TIMEOUT))
 
     def preview_bytes(self, photo_id: str, long_edge: int) -> tuple[bytes, str | None]:
         """让插件渲染一张预览并读回 JPEG 字节；只接受预览目录内的文件，读完删除（文件名每次唯一，只属于本次请求）。"""

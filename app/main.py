@@ -430,13 +430,16 @@ class Api:
                 "providers": available_providers(cur if self._provider.id == "claude" or not include_status else None,
                                                  cur if self._provider.id == "codex" or not include_status else None),
                 "current_provider": self._provider.id, "edges": list(appsettings.EDGE_CHOICES),
-                "default_base_folder": appsettings.default_base_folder(), "about": self._about()}
+                "default_base_folder": appsettings.default_base_folder(),
+                "about": self._about(10 if include_status else 3)}
 
-    def _about(self) -> dict:
+    def _about(self, timeout: float = 3) -> dict:
+        """关于信息。timeout：向 Lightroom 问版本号最多等多久。启动时（界面等着它才显示）用 3 秒，
+        用户打开设置时用 10 秒（PR #7 放宽的值）。"""
         lr_ver = None
         try:
             if self._lr.connected and getattr(self._lr, "_bridge", None) is not None:
-                lr_ver = str(self._lr._bridge.call("status", timeout=10).get("lightroom_version") or "") or None
+                lr_ver = str(self._lr._bridge.call("status", timeout=timeout).get("lightroom_version") or "") or None
         except Exception:
             lr_ver = None
         return {"app_version": appsettings.APP_VERSION, "lightroom_version": lr_ver,

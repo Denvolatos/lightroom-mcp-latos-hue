@@ -12,12 +12,17 @@ import hashlib
 import hmac
 import io
 import json
+import logging
 import re
 import secrets
 import threading
 import time
 from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from lr_service import friendly_read_error
+
+log = logging.getLogger("latoshue.preview")
 
 EDGE_MIN, EDGE_MAX, EDGE_DEFAULT = 256, 2048, 1024      # 沿用服务端 config 的限制
 DEBOUNCE_SECONDS = 0.6                                    # 连续调整合并为一次刷新
@@ -255,7 +260,7 @@ class PreviewManager:
             return self._publish({"state": "error", "message": MSG_ERROR})
         detail = self.lr.selected_detail()
         if detail is None:
-            reason = getattr(self.lr, "last_selected_error", None)
+            reason = getattr(self.lr, "last_selected_error", None)      # 已经是给用户看的一句话（见 lr_service）
             message = f"无法读取当前照片：{reason}" if reason else MSG_ERROR
             return self._publish({"state": "error", "message": message})
         pid = detail.get("id")
@@ -273,7 +278,10 @@ class PreviewManager:
                 self.fetch_count += 1
                 entry = self.store.put(pid, edge, version, raw, jpeg_size(raw))
         except Exception as e:
-            return self._publish({"state": "error", "message": f"无法读取预览：{e}", "photo": {"id": pid, **info_of(detail)}})
+            # 异常原文（可能带本机路径、端口）只进日志；界面上只给一句分好类的原因
+            log.warning("preview refresh failed: %s: %s", type(e).__name__, e)
+            return self._publish({"state": "error", "message": "无法读取预览：" + friendly_read_error(e),
+                                  "photo": {"id": pid, **info_of(detail)}})
         initial = self.store.initial(pid)
         if initial is None:                      # 软件第一次看到这张照片：这一张就是"初始（首次打开时）"
             self.store.set_initial(pid, entry)

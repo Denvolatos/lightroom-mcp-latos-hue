@@ -21,6 +21,7 @@ import time
 import claude_bridge as cb
 import library_store as ls
 from adjustments import fmt_value
+from lr_service import patient
 from names import param_name
 
 MSG_NO_LR = "Lightroom 未连接。请确认 Lightroom 已打开且插件已启用。"
@@ -268,7 +269,8 @@ class LibraryService:
                 return {"ok": False, "exists": True, "message": f"已有名为“{name}”的预设。是否覆盖？"}
             if not self.lr.connected:
                 return {"ok": False, "message": MSG_NO_LR}
-            snap = self.lr.current_photo_settings()
+            with patient(self.lr):                  # 用户点的“保存预设”：可以等，用长超时
+                snap = self.lr.current_photo_settings()
             if snap is None:
                 return {"ok": False, "message": MSG_NO_PHOTO}
             settings, dropped = self._pick_settings(snap["settings"], groups)
@@ -384,7 +386,8 @@ class LibraryService:
         ro = self.lr.readonly_error()
         if ro:
             return {"ok": False, "readonly": True, "message": MSG_READONLY}
-        snap = self.lr.current_photo_settings()
+        with patient(self.lr):                      # 用户点的“套用”：可以等，用长超时
+            snap = self.lr.current_photo_settings()
         if snap is None:
             return {"ok": False, "message": MSG_NO_PHOTO}
         token = secrets.token_urlsafe(12)

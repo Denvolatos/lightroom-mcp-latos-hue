@@ -18,6 +18,7 @@ import threading
 import time
 
 import claude_bridge as cb
+from lr_service import patient
 
 MAX_PHOTOS = 10                # lr_review_selected 一次最多 10 张（server/lightroom_mcp/tools.py）
 LIST_SHOW = 24                 # 左栏最多显示的名字数
@@ -300,7 +301,8 @@ class PickService:
             return {"ok": True, "stage": "running"}
         if not self.lr.connected:
             return {"ok": False, "message": MSG_NO_LR}
-        sel = self.lr.selected_all()
+        with patient(self.lr):                      # 用户点的“AI 挑片”：可以等，用长超时
+            sel = self.lr.selected_all()
         if sel is None:
             return {"ok": False, "message": "无法读取 Lightroom 中选中的照片，请稍后重试。"}
         count = sel.get("count", 0)
@@ -375,7 +377,8 @@ class PickService:
             return {"ok": False, "changed": True, "message": MSG_CHANGED}
         if not self.lr.connected:
             return {"ok": False, "message": MSG_NO_LR}
-        sel = self.lr.selected_all()
+        with patient(self.lr):                      # 用户点的“AI 挑片”：可以等，用长超时
+            sel = self.lr.selected_all()
         if sel is None:
             return {"ok": False, "message": "无法读取 Lightroom 中选中的照片，请稍后重试。"}
         if sel.get("count", 0) == 0 or not sel["photos"]:

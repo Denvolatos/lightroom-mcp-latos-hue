@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+# The workflow only reads the repository and runs tests; it never needs to write anything back.
+permissions:
+  contents: read
+
 jobs:
   windows:
     runs-on: windows-latest
@@ -13,12 +17,14 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install test dependencies
+        # ./server[test] brings mcp, pillow, pytest and lupa (lupa runs the plug-in's Lua tests; without it they are skipped).
+        # pywebview is the only extra package the desktop app's tests import (app/main.py).
         run: python -m pip install -e "./server[test]" pywebview
       - name: Test MCP server
         working-directory: server
-        run: python -m pytest -q
+        # -rs lists skipped tests, so a missing lupa (skipped Lua tests) shows up in the log
+        run: python -m pytest -q -rs
       - name: Check Lua syntax
         run: python server/tests/lua_syntax.py
       - name: Test desktop application
-        # This upstream process-interrupt test also fails on the unmodified Windows baseline.
-        run: python -m pytest app/tests -q -k "not test_stop_interrupts_but_keeps_process"
+        run: python -m pytest app/tests -q -rs
