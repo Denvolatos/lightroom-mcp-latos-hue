@@ -38,7 +38,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "server"))
 
 from lightroom_mcp.bridge import Bridge, BridgeBusy  # noqa: E402
-from lightroom_mcp.edits import EditService, EditStore  # noqa: E402
+from lightroom_mcp.edits import VOLATILE_PRESET_KEYS, EditService, EditStore  # noqa: E402
 
 CATALOG_MARK = "ceshi"
 STEP = 0.10                     # 小改动：曝光 +0.10
@@ -64,8 +64,10 @@ def close(a, b) -> bool:
 
 
 def differences(expected: dict, now: dict) -> list[str]:
-    """expected 里有、而现在不一样的参数名（开始时不存在的键是 Lightroom 的内部值，不计）。"""
-    return sorted(k for k in expected if not close(expected.get(k), now.get(k)))
+    """expected 里有、而现在不一样的参数名（开始时不存在的键是 Lightroom 的内部值，不计）。
+    LensBlur（镜头模糊）不计：Lightroom 渲染预览时会自己改写它的数值（深度图的焦点范围等），与我们的写入无关，
+    服务端对预设同样把它当作"易变键"（VOLATILE_PRESET_KEYS）。真机教训：1.1.0 首次验收时它在没有被我们写入的照片上"变了"。"""
+    return sorted(k for k in expected if k not in VOLATILE_PRESET_KEYS and not close(expected.get(k), now.get(k)))
 
 
 def main() -> int:
