@@ -34,6 +34,7 @@ def check_login(claude_path: str, run=subprocess.run) -> bool | None:
 class ClaudeProvider(AIProvider):
     id = "claude"
     display_name = "Claude Code 命令行"
+    short_name = "Claude"
     supports_images = True
 
     def __init__(self, session=None, state_file=None, persistent: bool = True, *, find=None, login_check=None,

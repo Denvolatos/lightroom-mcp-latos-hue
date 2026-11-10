@@ -25,6 +25,7 @@ import secrets
 
 import importer as imp
 from preview import PreviewStore
+from settings import browse_folder
 
 MAX_PHOTOS = 2000                 # 图库最多显示的照片数
 PAGE = 500                        # 每页向 Lightroom 取的张数（插件上限 500）
@@ -224,7 +225,7 @@ class PhotoLibrary:
 
     def refresh_sync(self) -> None:
         t0 = time.perf_counter()
-        base = str(self.settings.data.get("gallery_folder") or self.settings.data["base_folder"])
+        base = browse_folder(self.settings.data)
         exists = os.path.isdir(base)
         with self._lock:
             self.base, self.base_exists = base, exists
@@ -522,7 +523,7 @@ class PhotoLibrary:
         if active is not None and (not isinstance(active, str) or active not in ids):
             return {"ok": False, "status": "refused", "message": "当前照片必须是所选照片之一。",
                     "selected": list(self.sel_ids), "active": self.active}
-        base = str(self.settings.data.get("gallery_folder") or self.settings.data["base_folder"])
+        base = browse_folder(self.settings.data)
         with self._select_lock:
             self._selecting = True
             try:

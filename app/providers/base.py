@@ -59,6 +59,7 @@ class AIProvider(ABC):
 
     id: str = ""                    # 稳定的英文标识，用于设置文件与注册表
     display_name: str = ""          # 界面显示名（中文）
+    short_name: str = ""            # 按钮上的短名（如“使用 Claude”）；为空时用 display_name
     supports_images: bool = False   # 能否看图（lr_get_preview 返回的预览图）
     experimental: bool = False      # 实验性来源：设置里会标注，并显示 experimental_notice
     experimental_notice: str = ""   # 实验性来源的正式提示（界面原样显示）

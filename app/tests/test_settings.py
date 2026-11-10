@@ -11,20 +11,22 @@ from providers import is_selectable
 
 
 @pytest.fixture
-def store(tmp_path, monkeypatch):
-    monkeypatch.setattr(st, "default_provider", lambda: "claude")
+def store(tmp_path):
     return st.SettingsStore(tmp_path / "app_settings.json", restrict=lambda p: None)
 
 
-def test_fresh_setup_prefers_the_only_installed_provider(monkeypatch):
+def test_defaults_do_not_probe_installed_tools(monkeypatch):
+    """defaults() 被 sanitize 等处频繁调用：不能去找命令行，默认来源是固定值，且“尚未选择”。"""
     import claude_bridge
     from providers import codex_provider
 
-    monkeypatch.setattr(claude_bridge, "find_claude", lambda: None)
-    monkeypatch.setattr(codex_provider, "find_codex", lambda: "D:/Codex/codex.exe")
-    assert st.default_provider() == "codex"
-    monkeypatch.setattr(claude_bridge, "find_claude", lambda: "D:/Claude/claude.exe")
-    assert st.default_provider() == "claude"
+    def boom():
+        raise AssertionError("defaults() 不应该查找已安装的命令行")
+    monkeypatch.setattr(claude_bridge, "find_claude", boom)
+    monkeypatch.setattr(codex_provider, "find_codex", boom)
+    d = st.defaults()
+    assert d["provider"] == st.DEFAULT_PROVIDER == "claude" and d["provider_chosen"] is False
+    assert not hasattr(st, "default_provider")
 
 
 def test_gallery_folder_is_separate_from_import_folder(store, tmp_path):
@@ -58,7 +60,7 @@ def test_missing_and_invalid_fields_fall_back(tmp_path):
     p.write_text(json.dumps({"schema": 1, "confirm_default": "yes", "preview_edge": 999, "provider": 5,
                              "base_folder": "relative/path"}), encoding="utf-8")
     d = st.SettingsStore(p, restrict=lambda x: None).data
-    assert d == st.defaults()
+    assert d == {**st.defaults(), "provider_chosen": True}      # 文件存在 = 升级用户：视为已选择
 
 
 def test_unknown_fields_are_kept_and_valid_ones_loaded(tmp_path):
@@ -213,7 +215,8 @@ def test_provider_selection_rules(store):
 # ---------------------------------------------------------------- 后端接口（Api）
 @pytest.fixture
 def api(tmp_path, monkeypatch):
-    monkeypatch.setattr(st, "default_provider", lambda: "claude")
+    # 已有设置文件 = 升级用户：视为已经选过 AI 来源（全新安装的“请先选择”见 test_provider_choice.py）
+    (tmp_path / "app_settings.json").write_text('{"provider": "claude"}', encoding="utf-8")
     monkeypatch.setattr(st, "SETTINGS_FILE", tmp_path / "app_settings.json")
     monkeypatch.setattr(st, "restrict_to_current_user", lambda p: None)
     monkeypatch.setattr(st.SettingsStore.__init__, "__defaults__", (None, lambda p: None))

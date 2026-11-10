@@ -19,24 +19,13 @@ from lr_autostart import valid_lightroom_path
 
 SCHEMA_VERSION = 1
 SETTINGS_FILE = Path.home() / "LrMcp" / "app_settings.json"
-APP_VERSION = "1.0.3"                   # 桌面软件 Latos Hue 的版本（发布标签 v1.0.3）
+APP_VERSION = "1.1.0"                   # 桌面软件 Latos Hue 的版本（发布标签 v1.1.0）
 PROJECT_URL = "https://github.com/Denvolatos/lightroom-mcp-latos-hue"
 DATA_DIR_TEXT = "~/LrMcp"
 
 EDGE_CHOICES = (768, 1024, 1536, 2048)  # 与界面里"预览清晰度"的可选档位一致
 DEFAULT_PROVIDER = "claude"
 
-
-def default_provider() -> str:
-    """On a fresh setup, use the installed CLI when only one is present."""
-    from claude_bridge import find_claude
-    from providers.codex_provider import find_codex
-
-    claude = find_claude()
-    codex = find_codex()
-    if codex and not claude:
-        return "codex"
-    return DEFAULT_PROVIDER
 
 # 导出对话框的默认值与取值范围（服务端 export_photo_for_app 的范围相同）
 EXPORT_FORMATS = ("jpeg", "tiff")
@@ -52,7 +41,10 @@ def default_base_folder() -> str:
 
 
 def defaults() -> dict:
-    return {"schema": SCHEMA_VERSION, "base_folder": default_base_folder(), "gallery_folder": "", "provider": default_provider(),
+    """全新安装的默认值。这里不能做任何文件系统 / PATH 查找（sanitize 等处会频繁调用）。
+    provider_chosen=False：AI 来源由用户第一次打开时在“环境检查”里自己选，软件不替用户决定。"""
+    return {"schema": SCHEMA_VERSION, "base_folder": default_base_folder(), "gallery_folder": "", "provider": DEFAULT_PROVIDER,
+            "provider_chosen": False,
             "confirm_default": True, "preview_edge": 1024,
             "export_last_folder": "", "export_format": "jpeg", "export_size": 0, "export_quality": 92,
             "export_bit_depth": 16, "export_metadata": "minimal", "ai_use_notes": True,
@@ -121,8 +113,15 @@ def validate_folder(path: str) -> dict:
     return {"ok": True, "message": "", "exists": False, "path": str(p)}
 
 
+def browse_folder(data: dict) -> str:
+    """图库当前浏览的文件夹：用户另选了浏览目录（gallery_folder）就用它，否则是照片工作文件夹（base_folder）。
+    所有“当前浏览目录”都从这里取（图库扫描、在 Lightroom 里显示文件夹、打开文件夹），不要各处自己拼。
+    导入副本只写到 base_folder，与这里无关。"""
+    return str(data.get("gallery_folder") or data.get("base_folder") or "")
+
+
 def validate_gallery_folder(path: str) -> dict:
-    """A browsing folder must exist, but does not need write permission."""
+    """浏览目录：必须是已存在的本机文件夹（不要求可写，软件只读取它）；拒绝网络路径、磁盘根目录、系统与程序目录。"""
     raw = (path or "").strip()
     p = Path(raw)
     if not raw or raw.startswith(("\\\\", "//")) or not p.is_absolute() or not p.drive or p.parent == p:
@@ -212,8 +211,11 @@ EXPORT_FIELD_LABELS = {"export_last_folder": "导出文件夹", "export_format":
 
 
 def sanitize(data) -> dict:
-    """把读到的内容整理成合法设置：非法/缺失字段回退默认值，未知字段保留。"""
-    out = dict(data) if isinstance(data, dict) else {}
+    """把读到的内容整理成合法设置：非法/缺失字段回退默认值，未知字段保留。
+    provider_chosen 的迁移：data 是字典（= 已有设置文件，升级用户）而没有这个键时视为已选择，沿用其 provider；
+    data 不是字典（没有设置文件，或文件读不出来）时为 False，由用户在“环境检查”里选。"""
+    existing = isinstance(data, dict)
+    out = dict(data) if existing else {}
     d = defaults()
     out["schema"] = SCHEMA_VERSION
     bf = out.get("base_folder")
@@ -223,6 +225,8 @@ def sanitize(data) -> dict:
     out["gallery_folder"] = gallery["path"] if gallery["ok"] else ""
     pv = out.get("provider")
     out["provider"] = pv if isinstance(pv, str) and pv else d["provider"]
+    pc = out.get("provider_chosen")
+    out["provider_chosen"] = pc if isinstance(pc, bool) else existing
     out["confirm_default"] = out["confirm_default"] if isinstance(out.get("confirm_default"), bool) else d["confirm_default"]
     out["preview_edge"] = _clean_edge(out.get("preview_edge")) or d["preview_edge"]
     out["ai_use_notes"] = out["ai_use_notes"] if isinstance(out.get("ai_use_notes"), bool) else d["ai_use_notes"]
@@ -310,6 +314,11 @@ class SettingsStore:
                 errors["provider"] = "该 AI 来源后续提供，暂不可选。"
             else:
                 new["provider"] = pid
+        if "provider_chosen" in changes:
+            if isinstance(changes["provider_chosen"], bool):
+                new["provider_chosen"] = changes["provider_chosen"]
+            else:
+                errors["provider_chosen"] = "请选择是或否。"
         if "confirm_default" in changes:
             if isinstance(changes["confirm_default"], bool):
                 new["confirm_default"] = changes["confirm_default"]

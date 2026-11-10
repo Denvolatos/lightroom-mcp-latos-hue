@@ -16,15 +16,17 @@ import webview
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import frozen  # noqa: E402
-from adjustments import AdjustmentTracker  # noqa: E402
+from adjustments import AdjustmentTracker, fmt_value  # noqa: E402
+from names import param_name  # noqa: E402
 import lr_autostart  # noqa: E402
 import splash as splashmod  # noqa: E402
 import update_check as updatemod  # noqa: E402
 import wizard as wizardmod  # noqa: E402
 from backend import Backend  # noqa: E402
 from confirm_hub import ConfirmHub  # noqa: E402
-from lr_service import LrService  # noqa: E402
-from providers import available_providers, create_provider, is_selectable  # noqa: E402
+from lr_service import LrService, valid_edit_id, version_name_error  # noqa: E402
+from providers import (MSG_CHOOSE_AI, NotChosenProvider, StatusProbe, available_providers, create_provider,  # noqa: E402
+                       is_selectable)
 import settings as appsettings  # noqa: E402
 from import_service import ImportService  # noqa: E402
 from export_service import ExportService  # noqa: E402
@@ -37,6 +39,9 @@ from photo_library import PhotoLibrary, ThumbStore  # noqa: E402
 from ports import STATE_DIR  # noqa: E402
 
 WEB = frozen.web_dir() / "index.html"
+MSG_AI_BUSY = "AI 正在处理（对话、AI 挑片或“记成经验”还没结束）。请等它完成，或先点“停止”，再试一次。"
+MSG_PLAN_STALE = "请先重新预演这批照片。"
+MSG_VERSION_STALE = "版本内容已经变了，或者这次确认已经用过。请重新点“应用版本”查看差异。"
 
 
 class Api:
@@ -55,11 +60,15 @@ class Api:
         self._tracker = AdjustmentTracker()
         self._rpc_token = secrets.token_urlsafe(24)
         self._settings = appsettings.SettingsStore()
-        self._persistent = self._preferred_persistent and self._settings.data["provider"] == "claude"
+        # 还没选 AI 来源（全新安装）：用占位来源，不启动任何 AI 命令行；窗口自己起 Bridge 连 Lightroom，
+        # 图库、导入、导出、预设照常可用。用户在“环境检查”里选了之后，由 wizard_choose_ai 换成真正的来源。
+        chosen = self._ai_chosen()
+        self._persistent = chosen and self._preferred_persistent and self._settings.data["provider"] == "claude"
         state_file = STATE_DIR / "claude_side.json" if self._persistent else None
         # AI 来源经注册表取得；切换来源在下一次“新对话”时生效
-        self._provider = create_provider(self._settings.data["provider"], state_file=state_file,
-                                         persistent=self._persistent)
+        self._provider = (create_provider(self._settings.data["provider"], state_file=state_file, persistent=self._persistent)
+                          if chosen else NotChosenProvider())
+        self._probe = None                       # 未选择时用来显示各来源“已安装 / 已登录”的探测器（用到才建）
         self._state_file = state_file
         self._session = self._provider           # 兼容旧名：Backend / LrService 只用 alive、busy、restart 等
         # 常驻模式：窗口不单独起 Bridge，借用助手里那个服务的通道（Lightroom 插件同时轮询 3 个以上服务会变慢，见 DEV_NOTES）
@@ -98,6 +107,8 @@ class Api:
         self._ctx_pending = True                 # 新对话的第一条消息带上"经验库"资料块（见 send / reset）
         self._batch_pending = ""                 # 页面已看过的单次批量预演计划
         self._batch_photo_ids = []
+        self._batch_done = set()                 # 本次运行里由软件执行的批次编号：只有它们能“整批还原”
+        self._version_pending = None             # 页面已看过的版本差异（一次性令牌 + 当时的照片与参数），见 version_plan
         self._lib = LibraryService(self._lr, libstore.PresetStore(), libstore.NoteStore(), libstore.FavStore(), self._emit,
                                    on_applied=self._lib_applied, photo_fn=lambda: self._backend.photo,
                                    send_fn=self._pick_send, stop_fn=self._pick_stop, status_fn=lambda: self._provider.status(),
@@ -136,6 +147,16 @@ class Api:
             self._splash.finish()
         return {"ok": True}
 
+    def _ai_chosen(self) -> bool:
+        return self._settings.data.get("provider_chosen") is True
+
+    def _write_block(self) -> str | None:
+        """软件界面直接触发的写入（版本、批量复用）能不能现在做。AI 正在处理一轮对话、AI 挑片或“记成经验”进行中
+        （共用 _busy，挑片期间确认服务还处于 deny_all）时拒绝，避免软件和 AI 同时改同一张照片。返回原因或 None。"""
+        if self._busy or bool(getattr(self._session, "busy", False)):
+            return MSG_AI_BUSY
+        return None
+
     def _provider_env(self) -> dict:
         token = self._hub.begin_session()
         return {"LRAPP_PORT": str(self._hub.port), "LRAPP_TOKEN": token, "LRAPP_RPC_TOKEN": self._rpc_token}
@@ -143,7 +164,7 @@ class Api:
     def _apply_provider_choice(self) -> bool:
         """“新对话”时，若设置里的 AI 来源与当前不同，换成新来源并启动。返回是否已换（换了就不必再 reset）。"""
         want = self._settings.data["provider"]
-        if want == self._provider.id or not is_selectable(want):
+        if not self._ai_chosen() or want == self._provider.id or not is_selectable(want):
             return False
         next_persistent = (self._preferred_persistent and want == "claude") if want in ("claude", "codex") else self._persistent
         old = self._provider
@@ -265,6 +286,8 @@ class Api:
         self._emit({"type": "adjust", "rows": rows})
 
     def send(self, text: str, confirm: bool = True) -> dict:
+        if not self._ai_chosen():
+            return {"ok": False, "need_ai_choice": True, "message": MSG_CHOOSE_AI}
         if self._busy:
             return {"ok": False, "message": "上一条请求仍在处理，请稍候。"}
         text = (text or "").strip()
@@ -365,10 +388,15 @@ class Api:
             self._thumbs_stale()
         return {"ok": r["ok"], "conflict": r["conflict"], "message": r["message"]}
 
+    # ---- 多版本（0.x 起的服务端功能，1.1.0 接到界面）---------------
+    # 页面只能传版本名和一次性令牌；照片一律是 Lightroom 当前选中的那张，参数差异由后端自己记住。
     def versions_state(self) -> dict:
         return self._lr.versions()
 
     def version_preview(self, name: str) -> dict:
+        bad = version_name_error(name)
+        if bad:
+            return {"ok": False, "message": bad}
         result = self._lr.version_picture(name)
         if not result["ok"]:
             return result
@@ -379,13 +407,46 @@ class Api:
         return {"ok": True, "result": {"photo_id": data["photo_id"], "url": self._preview.server.url_for(entry)}}
 
     def version_plan(self, name: str) -> dict:
-        return self._lr.version_record(name)
+        """当前照片与这个版本的差异（只读）。同时记下“给页面看过的方案”和一个一次性令牌：
+        之后 version_apply 只认这个令牌，照片、当前参数、版本内容都以这里记下的为准，不由页面回传。"""
+        self._version_pending = None
+        bad = version_name_error(name)
+        if bad:
+            return {"ok": False, "message": bad}
+        result = self._lr.version_record(name)
+        if result["ok"]:
+            data = result["result"]
+            token = secrets.token_urlsafe(12)
+            self._version_pending = {"token": token, "name": data["name"], "photo_id": data["photo_id"],
+                                     "current": dict(data["current"]), "target": dict(data["target"])}
+            # 页面只需要“显示用”的条目（中文名 + 格式化好的数值）和令牌；参数字典留在后端
+            items = [{"label": param_name(k), "before": fmt_value(data["current"].get(k)),
+                      "after": fmt_value(data["target"].get(k))} for k in data["changed"]]
+            result["result"] = {"photo_id": data["photo_id"], "name": data["name"], "count": len(items),
+                                "items": items, "token": token}
+        return result
 
     def version_save(self, name: str) -> dict:
-        return self._lr.save_version(name)
+        """把当前照片的参数存成一个命名版本（只写软件自己的版本记录，不改照片）。"""
+        bad = version_name_error(name)
+        if bad:
+            return {"ok": False, "message": bad}
+        block = self._write_block()
+        if block:
+            return {"ok": False, "busy": True, "message": block}
+        return self._lr.save_version(name.strip())
 
-    def version_apply(self, name: str, photo_id: str, expected_current: dict, expected_target: dict) -> dict:
-        result = self._lr.apply_version(name, photo_id, expected_current, expected_target)
+    def version_apply(self, token: str) -> dict:
+        """用户在确认对话框里点了“应用”：只接受 version_plan 给出的令牌（一次性）。"""
+        pending, self._version_pending = self._version_pending, None
+        if (pending is None or not isinstance(token, str)
+                or not secrets.compare_digest(token.encode("utf-8"), pending["token"].encode("utf-8"))):
+            return {"ok": False, "stale": True, "message": MSG_VERSION_STALE}
+        block = self._write_block()
+        if block:
+            return {"ok": False, "busy": True, "message": block}
+        name = pending["name"]
+        result = self._lr.apply_version(name, pending["photo_id"], pending["current"], pending["target"])
         if result["ok"] and result["result"].get("edit_id"):
             data = result["result"]
             changes = [{"key": c["parameter"], "before": c["before"], "after": c["after"]}
@@ -393,29 +454,59 @@ class Api:
             self._lib_applied(data["edit_id"], data["photo_id"], "版本：" + name, changes)
         return result
 
+    # ---- 批量复用单张调整：预演 → 确认 → 应用 → 整批还原 -----------
     def batch_plan_from_edit(self, edit_id: str) -> dict:
-        self._batch_pending = ""
+        if not valid_edit_id(edit_id):
+            return {"ok": False, "message": "这条调整记录无效，请刷新后再试。"}
+        block = self._write_block()
+        if block:
+            return {"ok": False, "busy": True, "message": block}
+        self._batch_pending = ""                 # 新的预演开始：上一份计划作废
         self._batch_photo_ids = []
         result = self._lr.batch_plan_from_edit(edit_id)
         if result["ok"]:
-            self._batch_pending = result["result"].get("plan_id") or ""
-            self._batch_photo_ids = [p["photo_id"] for p in result["result"].get("photos", []) if p.get("will_change")]
+            plan = result["result"]
+            self._batch_pending = plan.get("plan_id") or ""
+            self._batch_photo_ids = [p["photo_id"] for p in plan.get("photos", []) if p.get("will_change")]
+            for p in plan.get("photos", []):         # 显示用：参数中文名 + 格式化好的数值
+                for c in p.get("changes") or []:
+                    c["label"] = param_name(c.get("parameter") or "")
+                    c["before_text"], c["after_text"] = fmt_value(c.get("before")), fmt_value(c.get("after"))
+            plan["skipped_labels"] = [param_name(k) for k in plan.get("skipped_parameters") or []]
+            plan["delta_items"] = [{"label": param_name(k), "delta": ("+" if v > 0 else "") + fmt_value(v)}
+                                   for k, v in (plan.get("deltas") or {}).items()]
         return result
 
     def batch_apply(self, plan_id: str) -> dict:
-        if not plan_id or plan_id != self._batch_pending:
-            return {"ok": False, "message": "请先重新预演这批照片。"}
+        if (not isinstance(plan_id, str) or not plan_id or not self._batch_pending
+                or not secrets.compare_digest(plan_id.encode("utf-8"), self._batch_pending.encode("utf-8"))):
+            return {"ok": False, "stale": True, "message": MSG_PLAN_STALE}
+        block = self._write_block()
+        if block:                                # 计划保留：等 AI 忙完可以直接再点一次
+            return {"ok": False, "busy": True, "message": block}
         self._batch_pending = ""
         photo_ids, self._batch_photo_ids = self._batch_photo_ids, []
         result = self._lr.batch_apply(plan_id)
-        if result["ok"] and result["result"].get("changed"):
-            self._preview.request()
-            self._thumbs_stale(*photo_ids)
+        if result["ok"]:
+            batch_id = result["result"].get("batch_id")
+            if valid_edit_id(batch_id):
+                self._batch_done.add(batch_id)
+            if result["result"].get("changed"):
+                self._preview.request()
+                self._thumbs_stale(*photo_ids)
         return result
 
     def batch_undo(self, batch_id: str) -> dict:
+        """整批还原：只接受本次运行里软件自己执行过的批次编号（不是任意一条修改记录）。"""
+        if not valid_edit_id(batch_id) or batch_id not in self._batch_done:
+            return {"ok": False, "message": "找不到这一批修改。请在“本次调整”里逐张撤销。"}
+        block = self._write_block()
+        if block:
+            return {"ok": False, "busy": True, "message": block}
         result = self._lr.undo(batch_id)
         if result["ok"]:
+            if not (result.get("result") or {}).get("problems"):
+                self._batch_done.discard(batch_id)
             self._preview.request()
             self._thumbs_stale()
         return result
@@ -467,7 +558,10 @@ class Api:
             return {"ok": False, "errors": {"_": "设置内容无效。"}, "needs_create": False}
         # Lightroom 路径不接受页面直接传入：只能是用户刚在文件对话框里点选的那个（pending），或清除
         choice = changes.get("lightroom_path_choice")
-        changes = {k: v for k, v in changes.items() if k not in ("lightroom_path", "lightroom_path_choice")}
+        changes = {k: v for k, v in changes.items() if k not in ("lightroom_path", "lightroom_path_choice", "provider_chosen")}
+        if not self._ai_chosen():
+            # 第一次选 AI 来源只能在“环境检查”里点按钮（wizard_choose_ai）；设置对话框保存时带上的下拉框默认值不算选择
+            changes.pop("provider", None)
         if choice == "clear":
             changes["lightroom_path"] = ""
         elif choice == "pending" and self._pending_lr_path:
@@ -499,7 +593,12 @@ class Api:
 
     # ---- 环境检查向导 ----------------------------------------------
     def _wizard_provider(self) -> dict:
-        """设置里选中的 AI 来源的状态（名称 + available/state/reason/next_step）；与 get_settings 用同一套文案。"""
+        """设置里选中的 AI 来源的状态（名称 + available/state/reason/next_step）；与 get_settings 用同一套文案。
+        还没选择时返回 {"chosen": False, "choices": [...]}：每个可选来源一项，带安装/登录状态和数据去向说明。"""
+        if not self._ai_chosen():
+            if self._probe is None:
+                self._probe = StatusProbe()
+            return {"chosen": False, "choices": [p for p in self._probe.rows() if p.get("selectable")]}
         want = self._settings.data["provider"]
         cur = self._provider.status()
         for p in available_providers(cur if self._provider.id == "claude" else None, cur if self._provider.id == "codex" else None):
@@ -518,6 +617,28 @@ class Api:
         r = self._settings.update({"wizard_done": flag}, selectable=is_selectable)
         return {"ok": r["ok"], "wizard_done": r["settings"].get("wizard_done", False)}
 
+    def wizard_choose_ai(self, provider_id: str) -> dict:
+        """向导里点“使用 Claude / 使用 Codex”：第一次选择 AI 来源。只接受注册表里可选的来源 id；
+        保存 provider 并把 provider_chosen 置真，然后走和“切换来源”同一条路径（_apply_provider_choice）立即生效。
+        已经选过的不在这里改（到设置里换，下一次“新对话”生效）。"""
+        if not isinstance(provider_id, str) or not is_selectable(provider_id):
+            return {"ok": False, "message": "这个 AI 来源暂时不能选。"}
+        if self._ai_chosen():
+            return {"ok": False, "message": "已经选择过 AI 来源。要更换，请到“设置”里修改。"}
+        if self._busy:
+            return {"ok": False, "message": MSG_AI_BUSY}
+        saved = self._settings.update({"provider": provider_id, "provider_chosen": True}, selectable=is_selectable)
+        if not saved["ok"]:
+            return {"ok": False, "message": next(iter(saved["errors"].values()), "设置未保存。")}
+        self._ctx_pending = True
+        try:
+            self._apply_provider_choice()
+        except Exception as e:                   # noqa: BLE001 - 选择已保存；启动失败的原因会在向导的 AI 项里显示
+            self._wizard.invalidate()
+            return {"ok": True, "message": f"已选择，但 AI 没能启动：{type(e).__name__}。请点“重新检查”。"}
+        self._wizard.invalidate()
+        return {"ok": True, "message": ""}
+
     def wizard_pick_folder(self) -> dict:
         """向导第 1 项的按钮：弹出系统文件夹对话框，选中后直接保存为照片工作文件夹。路径只来自这次点击。"""
         r = self.choose_folder(self._settings.data.get("base_folder") or "")
@@ -532,7 +653,7 @@ class Api:
 
     def gallery_pick_folder(self) -> dict:
         """选择要浏览的照片文件夹，不改变导入副本的保存位置。"""
-        r = self.choose_folder(self._settings.data.get("gallery_folder") or self._settings.data.get("base_folder") or "")
+        r = self.choose_folder(appsettings.browse_folder(self._settings.data))
         if not r.get("ok"):
             return {"ok": False, "cancelled": True, "message": ""}
         saved = self._settings.update({"gallery_folder": r["path"]}, selectable=is_selectable)
@@ -639,7 +760,7 @@ class Api:
 
     def open_library(self) -> dict:
         """在资源管理器中打开当前浏览文件夹，不接受页面传入的路径。"""
-        base = self._settings.data.get("gallery_folder") or self._settings.data["base_folder"]
+        base = appsettings.browse_folder(self._settings.data)
         if not os.path.isdir(base):
             return {"ok": False, "message": "软件文件夹尚不存在。完成一次导入后会自动创建，或在设置中更换。"}
         try:
@@ -713,10 +834,14 @@ class Api:
 
     def pick_prepare(self) -> dict:
         """点"AI 挑片"：读取 Lightroom 当前选中的照片并检查张数。"""
+        if not self._ai_chosen():
+            return {"ok": False, "need_ai_choice": True, "message": MSG_CHOOSE_AI}
         return self._pick.prepare()
 
     def pick_start(self, options: dict) -> dict:
         """开始比较。options 只含评判标准、自定义文字、结果数量；照片由后端自己从 Lightroom 读取。结果经 pick_done 事件给出。"""
+        if not self._ai_chosen():
+            return {"ok": False, "need_ai_choice": True, "message": MSG_CHOOSE_AI}
         return self._pick.start(options)
 
     def pick_stop(self) -> dict:
@@ -873,6 +998,8 @@ class Api:
         return {"ok": self._lib.record_available()}
 
     def lib_record_start(self) -> dict:
+        if not self._ai_chosen():
+            return {"ok": False, "need_ai_choice": True, "message": MSG_CHOOSE_AI}
         return self._lib.record_start()
 
     def lib_record_stop(self) -> dict:

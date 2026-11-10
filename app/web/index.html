@@ -161,7 +161,30 @@
   .field select, .field input { background: var(--bg); color: var(--text); border: 1px solid var(--line);
     border-radius: 6px; padding: 5px 8px; font: inherit; }
   .dialog .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-  .batch-plan { max-height: 55vh; overflow: auto; white-space: pre-wrap; line-height: 1.55; }
+  /* ---------- 多版本 / 批量复用（1.1.0）：确认清单与命名输入 ---------- */
+  .plan-intro { color: var(--muted); font-size: 12px; line-height: 1.5; margin-bottom: 8px; user-select: text; }
+  .plan-list { max-height: 50vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; user-select: text; }
+  .plan-list table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .plan-list td, .plan-list th { padding: 4px 8px; border-top: 1px solid var(--line); text-align: left; word-break: break-all; }
+  .plan-list tr:first-child td, .plan-list tr:first-child th { border-top: none; }
+  .plan-list th { color: var(--muted); font-weight: 400; background: var(--panel2); position: sticky; top: 0; }
+  .plan-list td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .plan-list tr.photo td { font-weight: 600; background: var(--panel2); }
+  .plan-list tr.skip td { color: var(--muted); }
+  .plan-more { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .dialog.small { max-width: calc(100vw - 40px); }
+  .dialog input.name-input { width: 100%; box-sizing: border-box; margin-top: 10px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; font: inherit; user-select: text; outline: none; }
+  .dialog input.name-input:focus { border-color: var(--accent); }
+  .dialog .ferr2 { color: var(--bad); font-size: 12px; min-height: 16px; margin-top: 4px; }
+  #versiontools select { max-width: 220px; }
+  #s_provider:disabled { opacity: .55; cursor: not-allowed; }
+  /* 环境检查：首次选择 AI 来源 */
+  .wz-item .wz-choices { grid-column: 2; display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+  .wz-choice { display: grid; grid-template-columns: 124px 1fr; gap: 2px 10px; align-items: center; }
+  .wz-choice .btn { justify-self: stretch; }
+  .wz-choice .cs { font-size: 12px; user-select: text; } .wz-choice .cs.ok { color: var(--ok); } .wz-choice .cs.bad { color: var(--warn); }
+  .wz-choice .cp { grid-column: 2; font-size: 12px; color: var(--muted); line-height: 1.4; user-select: text; }
   /* ---------- export dialog (0.8.0) ---------- */
   .dialog.exp { width: 560px; max-width: calc(100vw - 40px); max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
   .dialog.exp .body { overflow: auto; margin: 0 -6px; padding: 0 6px; }
@@ -292,7 +315,10 @@
   /* ---------- 图库（左栏下方） ---------- */
   .galhead { display: flex; align-items: center; gap: 6px; padding: 8px 10px 4px; flex: none; }
   .galtitle { font-weight: 600; }
-  .galscope { padding: 0 10px 6px; color: var(--muted); font-size: 11px; line-height: 1.4; word-break: break-all; }
+  .galtitle { white-space: nowrap; }
+  .galscope { display: flex; align-items: flex-start; gap: 8px; padding: 0 10px 6px; color: var(--muted); font-size: 11px; line-height: 1.4; flex: none; }
+  .galscope > span { flex: 1; min-width: 0; word-break: break-all; user-select: text; }
+  .galscope > .btn { flex: none; }
   .galtools { display: flex; gap: 6px; padding: 2px 10px 6px; flex: none; }
   .galtools input[type=text] { flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; font: inherit; font-size: 12px; user-select: text; }
   .galtools select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; font: inherit; font-size: 12px; }
@@ -367,10 +393,10 @@
     </div>
     <div class="lower" id="gal">
       <div class="galhead"><span class="galtitle" id="gal_title">浏览照片</span><span class="spacer"></span>
-        <button class="btn small" id="gal_change" title="选择要浏览的照片文件夹，不更改导入副本的保存位置">换目录</button>
-        <button class="btn small" id="gal_refresh" title="重新读取软件文件夹和 Lightroom 目录">刷新</button>
-        <button class="btn small" id="gal_open" title="在资源管理器中打开软件文件夹">打开文件夹</button></div>
-      <div class="galscope" id="gal_scope">选择照片文件夹后，可浏览其中及子文件夹的照片</div>
+        <button class="btn small" id="gal_refresh" title="重新读取当前浏览的文件夹和 Lightroom 目录">刷新</button>
+        <button class="btn small" id="gal_open" title="在资源管理器中打开当前浏览的文件夹">打开文件夹</button></div>
+      <div class="galscope"><span id="gal_scope">选择照片文件夹后，可浏览其中及子文件夹的照片</span>
+        <button class="btn small" id="gal_change" title="选择要浏览的照片文件夹（只是浏览，不移动照片，也不改变导入副本的保存位置）">换目录</button></div>
       <div class="galtools"><input type="text" id="gal_q" placeholder="搜索文件名" maxlength="60" autocomplete="off">
         <select id="gal_sort" title="排序"><option value="name">按文件名</option><option value="time">按拍摄时间</option></select>
         <select id="gal_filter" title="筛选"><option value="all">全部</option><option value="rated">已评星</option><option value="pick">留用</option><option value="new">尚未加入</option></select></div>
@@ -801,21 +827,29 @@ function renderFiles(){ if (REAL()) { updatePickBtn(); return; } loadGallery(); 
 function nApplied(){ return REAL() ? rows.filter(r=>r.status==='已应用').length : steps.length; }
 const DEMO = location.hash === '#demo';
 let pv = null, actual = false, noBackend = false;   // pv = 后端推送的最近一次预览内容
-let viewMode='pair', versionPhoto='', versionRows=[], versionImage='', versionUndo='', versionDifference=null;
+let viewMode='pair', versionPhoto='', versionRows=[], versionImage='', versionUndo='', versionDifference=null, versionBusy=false;
+function versionButtons(){
+  const has = versionRows.length>0;
+  $('#versionpick').style.display = has ? '' : 'none';
+  $('#versionapply').disabled = !has || versionBusy; $('#versionsave').disabled = versionBusy;
+  $('#versionundo').style.display = versionUndo ? '' : 'none'; $('#versionundo').disabled = versionBusy;
+}
 async function loadVersions(){
   if (!REAL() || viewMode!=='multi') return;
   const r=await window.pywebview.api.versions_state();
-  if (!r.ok){ $('#infobar').textContent=r.message||'无法读取版本'; return; }
+  if (!r.ok){ versionRows=[]; versionPhoto=''; versionButtons(); renderStage(); $('#infobar').textContent=r.message||'无法读取版本'; return; }
+  if (versionPhoto!==r.result.photo_id) versionUndo='';         // 换了照片：上一张的“撤销应用”不再显示（仍可在“本次调整”里撤销）
   versionPhoto=r.result.photo_id; versionRows=r.result.versions||[];
   const select=$('#versionpick'), old=select.value;
   select.innerHTML=versionRows.map(v=>`<option value="${esc(v.name)}">${esc(v.name)} · ${esc(v.created||'')}</option>`).join('');
   if (versionRows.some(v=>v.name===old)) select.value=old;
+  versionButtons();
   await loadVersionPicture();
 }
 async function loadVersionPicture(){
   versionImage=''; versionDifference=null;
   const name=$('#versionpick').value;
-  if (name){
+  if (name && versionRows.length){
     const picture=await window.pywebview.api.version_preview(name);
     const plan=await window.pywebview.api.version_plan(name);
     if (name!==$('#versionpick').value) return;
@@ -830,37 +864,69 @@ $('#modes').onclick=e=>{
   viewMode=mode;
   $('#modes').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.m===mode));
   $('#versiontools').style.display=mode==='multi'?'flex':'none';
+  versionButtons();
   renderStage(); if(mode==='multi') loadVersions().catch(()=>{ $('#infobar').textContent='无法读取版本'; });
 };
 $('#versionpick').onchange=()=>loadVersionPicture();
+/* 命名输入框：与 askDialog 同一风格；回车确认、Esc 取消；返回去掉首尾空格的文字，取消返回 null */
+function inputDialog(title, text, placeholder, okLabel, maxLen){ return new Promise(res=>{
+  const mk=document.createElement('div'); mk.className='mask show';
+  mk.innerHTML=`<div class="dialog small" role="dialog" aria-label="${esc(title)}"><h3>${esc(title)}</h3><p>${esc(text)}</p><input class="name-input" type="text" maxlength="${Number(maxLen)||40}" placeholder="${esc(placeholder||'')}" autocomplete="off"><div class="ferr2"></div><div class="row"><button class="btn">取消</button><button class="btn primary">${esc(okLabel)}</button></div></div>`;
+  document.body.appendChild(mk);
+  const inp=mk.querySelector('input'), err=mk.querySelector('.ferr2'), [c,o]=mk.querySelectorAll('button');
+  const done=v=>{ mk.remove(); res(v); };
+  const ok=()=>{ const v=inp.value.trim(); if(!v){ err.textContent='请先写一个名字。'; inp.focus(); return; } done(v); };
+  c.onclick=()=>done(null); o.onclick=ok;
+  inp.onkeydown=e=>{ if(e.key==='Enter') ok(); else if(e.key==='Escape') done(null); };
+  inp.oninput=()=>{ err.textContent=''; };
+  setTimeout(()=>inp.focus(), 0); }); }
+/* 确认清单：标题 + 一句说明 + “项目 / 现在 / 改成”表格；所有文字都经 esc 转义 */
+function planDialog(title, intro, items, okLabel, more){ return new Promise(res=>{
+  const mk=document.createElement('div'); mk.className='mask show';
+  const rowsHtml=items.map(i=>`<tr><td>${esc(i.label)}</td><td class="num">${esc(i.before)}</td><td class="num">${esc(i.after)}</td></tr>`).join('');
+  mk.innerHTML=`<div class="dialog exp" role="dialog" aria-label="${esc(title)}"><h3>${esc(title)}</h3><div class="plan-intro">${esc(intro)}</div><div class="plan-list body"><table><tr><th>项目</th><th>现在</th><th>改成</th></tr>${rowsHtml}</table></div>${more?`<div class="plan-more">${esc(more)}</div>`:''}<div class="row"><button class="btn">取消</button><button class="btn primary">${esc(okLabel)}</button></div></div>`;
+  document.body.appendChild(mk); const [c,o]=mk.querySelectorAll('.row button');
+  c.onclick=()=>{ mk.remove(); res(false); }; o.onclick=()=>{ mk.remove(); res(true); }; }); }
 $('#versionsave').onclick=async()=>{
-  const name=window.prompt('给当前照片的版本命名（最多 40 字）：');
+  if (versionBusy) return;
+  const name=await inputDialog('保存当前版本','给这张照片现在的样子起个名字（最多 40 个字）。保存的是当前的调整参数，照片本身不会被改动；以后可以随时回到这个版本。','例如：暖色调','保存',40);
   if (name===null) return;
-  const r=await window.pywebview.api.version_save(name);
-  if (!r.ok) return toast(r.message||'保存失败');
-  toast('版本已保存'); await loadVersions();
+  versionBusy=true; versionButtons();
+  try {
+    const r=await window.pywebview.api.version_save(name);
+    if (!r.ok) return toast(r.message||'保存失败');
+    toast('版本已保存'); await loadVersions(); $('#versionpick').value=name; await loadVersionPicture();
+  } catch(e){ toast('保存没有完成，请检查与 Lightroom 的连接后再试。'); }
+  finally { versionBusy=false; versionButtons(); }
 };
 $('#versionapply').onclick=async()=>{
+  if (versionBusy) return;
   const name=$('#versionpick').value; if(!name) return toast('请先选择版本');
-  const plan=await window.pywebview.api.version_plan(name);
-  if(!plan.ok) return toast(plan.message||'无法读取版本');
-  const d=plan.result;
-  if(d.photo_id!==versionPhoto) return toast('选中的照片已改变，请重新查看版本');
-  if(!d.changed.length) return toast('当前照片已经是这个版本');
-  const lines=d.changed.slice(0,12).map(k=>`${k}: ${JSON.stringify(d.current[k])} → ${JSON.stringify(d.target[k])}`);
-  const extra=d.changed.length>12?`\n另有 ${d.changed.length-12} 项调整。`:'';
-  if(!window.confirm(`将当前照片应用版本“${name}”？\n共 ${d.changed.length} 项调整：\n${lines.join('\n')}${extra}\n可以撤销。`)) return;
-  const r=await window.pywebview.api.version_apply(name,d.photo_id,d.current,d.target);
-  if(!r.ok) return toast(r.message||'应用失败');
-  versionUndo=r.result.edit_id||'';
-  $('#versionundo').style.display=versionUndo?'':'none';
-  toast('版本已应用'); renderStage();
+  versionBusy=true; versionButtons();
+  try {
+    const plan=await window.pywebview.api.version_plan(name);
+    if(!plan.ok) return toast(plan.message||'无法读取版本');
+    const d=plan.result;
+    if(d.photo_id!==versionPhoto){ toast('选中的照片已改变，已为你重新读取版本。'); await loadVersions(); return; }
+    if(!d.count) return toast('当前照片已经是这个版本的样子，不需要应用。');
+    const shown=d.items.slice(0,40), more=d.count>shown.length?`另有 ${d.count-shown.length} 项没有列出，也会一起改。`:'';
+    if(!await planDialog(`应用版本“${name}”`, `将把当前照片改回这个版本保存时的样子，共 ${d.count} 项调整。改之前会自动备份，应用后可以点“撤销应用”或在“本次调整”里撤销。`, shown, '应用', more)) return;
+    const r=await window.pywebview.api.version_apply(d.token);
+    if(!r.ok){ toast(r.message||'应用失败'); if(r.stale) await loadVersions(); return; }
+    versionUndo=r.result.edit_id||'';
+    toast(versionUndo?'版本已应用':'当前照片已经是这个版本的样子，没有改动。'); await loadVersionPicture();
+  } catch(e){ toast('应用没有完成，请检查与 Lightroom 的连接，并在 Lightroom 里确认这张照片的状态。'); }
+  finally { versionBusy=false; versionButtons(); }
 };
 $('#versionundo').onclick=async()=>{
-  if(!versionUndo) return;
-  const r=await window.pywebview.api.undo(versionUndo);
-  if(!r.ok) return toast(r.message||'撤销失败');
-  versionUndo=''; $('#versionundo').style.display='none'; toast('已撤销版本应用');
+  if(!versionUndo || versionBusy) return;
+  versionBusy=true; versionButtons();
+  try {
+    const r=await window.pywebview.api.undo(versionUndo);
+    if(!r.ok) return toast(r.message||'撤销失败');
+    versionUndo=''; toast('已撤销版本应用'); await loadVersionPicture();
+  } catch(e){ toast('撤销没有完成，请稍后在“本次调整”里再试。'); }
+  finally { versionBusy=false; versionButtons(); }
 };
 const PH_INITIAL = '初始（首次打开时）';
 const PH_INITIAL_TIP = '软件第一次读取该照片时的状态。若照片此前已在 Lightroom 中调整过，则不等同于原片。';
@@ -881,12 +947,12 @@ function renderStage(){
       s.ondblclick=toggleZoom;
     }
     const p=pv||{}, same=versionPhoto && versionPhoto===(p.photo||{}).id;
-    setFrame('fi',{url:same?versionImage:'',text:versionRows.length?'该版本没有预览图':'请保存或选择一个版本'});
-    setFrame('fc',{url:same && p.state==='ok'?p.current.url:'',text:'正在读取当前照片'});
+    setFrame('fi',{url:same?versionImage:'',text:versionRows.length?'这个版本没有预览图（参数仍然可以应用）':'这张照片还没有保存过版本。点上方“保存当前”，把现在的样子存下来。'});
+    setFrame('fc',{url:same && p.state==='ok'?p.current.url:'',text:p.state==='ok'?'正在读取当前照片':(p.message||'正在读取当前照片')});
     const v=versionRows.find(x=>x.name===$('#versionpick').value);
     const diff=versionDifference && versionDifference.name===$('#versionpick').value ? versionDifference : null;
-    const examples=diff ? diff.changed.slice(0,5).map(k=>`${k}: ${JSON.stringify(diff.current[k])} → ${JSON.stringify(diff.target[k])}`).join('；') : '';
-    $('#infobar').textContent=v?`版本：${v.name} · ${v.created||''}${v.note?' · '+v.note:''}。${diff?`与当前相差 ${diff.changed.length} 项${examples?'：'+examples:''}`:'正在读取参数差异…'}`:'当前照片还没有保存的版本。';
+    const examples=diff ? diff.items.slice(0,5).map(i=>`${i.label} ${i.before} → ${i.after}`).join('；') : '';
+    $('#infobar').textContent=v?`版本：${v.name} · ${v.created||''}${v.note?' · '+v.note:''}。${diff?(diff.count?`与当前相差 ${diff.count} 项${examples?'：'+examples:''}${diff.count>5?' 等':''}`:'与当前完全相同'):'正在读取参数差异…'}`:'这张照片还没有保存过版本。';
     $('#cur').textContent=(p.photo||{}).name||photoName||'';
     $('#pvctl').style.display='none'; return;
   }
@@ -1028,7 +1094,7 @@ window.onClaudeEvent = function(ev){
 function send(){ const v=$('#inp').value.trim(); if(!v || busy) return; $('#inp').value=''; say(v,'me');
   if (REAL()){
     setBusy(true); cur=null; note('正在处理请求');
-    window.pywebview.api.send(v, ask).then(r=>{ if(r && !r.ok){ say(r.message,'err'); setBusy(false); } })
+    window.pywebview.api.send(v, ask).then(r=>{ if(r && !r.ok){ say(r.message,'err'); setBusy(false); if(r.need_ai_choice) openWizard(); } })
       .catch(()=>{ say('无法连接后台，请重新启动程序。','err'); setBusy(false); });
     return;
   }
@@ -1048,18 +1114,17 @@ function askDialog(title, text, okLabel){ return new Promise(res=>{
 let batchBusy=false;
 function confirmBatch(plan){ return new Promise(resolve=>{
   const mk=document.createElement('div'); mk.className='mask show';
-  mk.innerHTML='<div class="dialog exp"><h3>复用单张调整</h3><div class="batch-plan"></div><div class="row"><button class="btn">取消</button><button class="btn primary">确认应用</button></div></div>';
-  const lines=[`来源：${plan.source_photo||'当前调整'}。相对改动将加到每张照片自己的当前值上。`,
-    `可修改 ${plan.will_change} 张，跳过 ${plan.skipped} 张。`];
-  if((plan.skipped_parameters||[]).length) lines.push('不支持批量复用：'+plan.skipped_parameters.join('、'));
+  const deltas=(plan.delta_items||[]).map(d=>`${d.label} ${d.delta}`).join('、');
+  let h='';
   for(const p of plan.photos||[]){
-    lines.push(`\n${p.photo||p.photo_id}：${p.will_change?'将修改':'跳过'}`);
-    if(p.will_change) for(const c of p.changes||[]) lines.push(`  ${c.parameter}: ${c.before} → ${c.after}`);
-    else lines.push('  '+(p.reason_skipped||'不适用'));
+    h+=`<tr class="photo${p.will_change?'':' skip'}"><td colspan="3">${esc(p.photo||'（未命名照片）')}　${p.will_change?'将修改':'跳过'}</td></tr>`;
+    if(p.will_change) for(const c of p.changes||[]) h+=`<tr><td>${esc(c.label||c.parameter)}</td><td class="num">${esc(c.before_text)}</td><td class="num">${esc(c.after_text)}</td></tr>`;
+    else h+=`<tr class="skip"><td colspan="3">${esc(p.reason_skipped||'这张照片不适用。')}</td></tr>`;
   }
-  mk.querySelector('.batch-plan').textContent=lines.join('\n');
+  const skipped=(plan.skipped_labels||[]).length?`这些项目不能批量复用，不会带过去：${plan.skipped_labels.join('、')}。`:'';
+  mk.innerHTML=`<div class="dialog exp" role="dialog" aria-label="复用到其他选中照片"><h3>复用到其他选中照片</h3><div class="plan-intro">把“${esc(plan.source_photo||'当前照片')}”上的这次调整（${esc(deltas||'滑块改动')}）用到其他选中的照片上：每张照片在自己现在的数值上加减同样的量。将修改 ${Number(plan.will_change)||0} 张，跳过 ${Number(plan.skipped)||0} 张。现在还没有改任何东西；确认后才会写入，之后可以整批还原。</div><div class="plan-list body"><table><tr><th>项目</th><th>现在</th><th>改成</th></tr>${h}</table></div>${skipped?`<div class="plan-more">${esc(skipped)}</div>`:''}<div class="row"><button class="btn">取消</button><button class="btn primary">确认应用</button></div></div>`;
   document.body.appendChild(mk);
-  const [cancel,ok]=mk.querySelectorAll('button');
+  const [cancel,ok]=mk.querySelectorAll('.row button');
   cancel.onclick=()=>{mk.remove(); resolve(false);};
   ok.onclick=()=>{mk.remove(); resolve(true);};
 }); }
@@ -1076,7 +1141,7 @@ async function reuseEdit(editId){
     if(!applied.ok) return toast(applied.message||'批量修改失败');
     const result=applied.result;
     const failed=(result.results||[]).find(x=>x.error);
-    const summary=say(`批量调整：成功 ${result.changed} 张${result.stopped_early_at?'；在“'+result.stopped_early_at+'”处停止':''}${failed?'：'+failed.error:''}。`);
+    const summary=say(`批量复用：已修改 ${result.changed} 张${result.stopped_early_at?'；在“'+result.stopped_early_at+'”这张停下了，后面的 '+(result.not_done||0)+' 张没有改':''}${failed?'。原因：'+failed.error:''}。`);
     if(result.batch_id && result.changed){
       const undo=document.createElement('button'); undo.className='btn small'; undo.textContent='还原这批照片';
       undo.onclick=async()=>{
@@ -1757,7 +1822,11 @@ function showProviderState(){
   const p = SET.providers.find(x=>x.id===$('#s_provider').value) || SET.providers[0];
   const st = $('#s_pstate'); st.className = 'sub ' + (p.selectable ? (p.available ? 'ok' : 'bad') : '');
   st.textContent = p.selectable ? p.reason + (p.next_step ? ' ' + p.next_step : '') : p.reason;
-  $('#s_pnote').style.display = (p.selectable && p.id !== SET.current_provider) ? '' : 'none';
+  const chosen = SET.settings.provider_chosen !== false;
+  $('#s_provider').disabled = !chosen;
+  $('#s_pnote').textContent = chosen ? '保存后点击顶部“新对话”，开始使用所选来源。' : '还没有选择 AI 来源。请点上面的“打开环境检查”，在那里选择要使用的 AI。';
+  $('#s_pnote').style.display = (!chosen || (p.selectable && p.id !== SET.current_provider)) ? '' : 'none';
+  if (!chosen){ st.className='sub'; st.textContent=''; }
   const ex = $('#s_pexp'), pv = $('#s_ppriv');
   ex.textContent = p.experimental ? (p.experimental_notice || '') : ''; ex.style.display = ex.textContent ? '' : 'none';
   pv.textContent = p.privacy_notice || ''; pv.style.display = pv.textContent ? '' : 'none';
@@ -1768,7 +1837,8 @@ function fillSettings(r){
   $('#s_folder').value = s.base_folder;
   const sel = $('#s_provider'); sel.innerHTML='';
   r.providers.forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.textContent=p.name + (p.experimental?'（实验性，未经真机验证）':'') + (p.selectable?'':'（后续提供）'); o.disabled=!p.selectable; sel.appendChild(o); });
-  sel.value = s.provider;
+  if (s.provider_chosen === false){ const o=document.createElement('option'); o.value=''; o.textContent='尚未选择'; sel.insertBefore(o, sel.firstChild); sel.value=''; }
+  else sel.value = s.provider;
   const ed = $('#s_edge'); ed.innerHTML=''; r.edges.forEach(e=>{ const o=document.createElement('option'); o.value=e; o.textContent='长边 '+e+' px'; ed.appendChild(o); }); ed.value = s.preview_edge;
   setConfirmUI(s.confirm_default); setNotesUI(s.ai_use_notes!==false); showProviderState();
   setAutoLrUI(s.auto_launch_lightroom===true); lrChoice=null; showLrPath('');
@@ -1857,6 +1927,17 @@ function wzRender(){
     row.append(ic, head);
     const tx=document.createElement('div'); tx.className='wz-text'; tx.textContent=it.text; row.append(tx);
     if (it.hint){ const h=document.createElement('div'); h.className='wz-hint'; h.textContent=it.hint; row.append(h); }
+    if (it.need_choice && (it.choices||[]).length){
+      const box2=document.createElement('div'); box2.className='wz-choices';
+      it.choices.forEach(c=>{
+        const line=document.createElement('div'); line.className='wz-choice';
+        const b=document.createElement('button'); b.className='btn small primary'; b.textContent=c.label; b.disabled=WZ.busy;
+        b.onclick=()=>wzChooseAi(c.id);
+        const cs=document.createElement('span'); cs.className='cs '+(c.ok?'ok':'bad'); cs.textContent=c.name+'：'+c.status;
+        line.append(b, cs);
+        if (c.privacy){ const cp=document.createElement('span'); cp.className='cp'; cp.textContent=c.privacy; line.append(cp); }
+        box2.append(line); });
+      row.append(box2); }
     if (it.action && WZ_ACTIONS[it.action]){
       const b=document.createElement('button'); b.className='btn small wz-act'; b.textContent=it.action_label; b.disabled=WZ.busy;
       b.onclick=()=>wzAct(it.action); row.append(b); }
@@ -1881,6 +1962,14 @@ function openWizard(){
 function closeWizard(){
   clearTimeout(WZ.timer); $('#wmask').classList.remove('show');
   if ($('#w_never').checked && !(WZ.st && WZ.st.wizard_done)) window.pywebview.api.wizard_done(true).catch(()=>{});
+}
+async function wzChooseAi(id){
+  if (WZ.busy) return; WZ.busy=true; wzMsg(''); wzRender();
+  try {
+    const r = await window.pywebview.api.wizard_choose_ai(id);
+    if (r && r.message) wzMsg(r.message, true);
+  } catch(e){ wzMsg('没能保存选择，请再试一次。', true); }
+  WZ.busy=false; wzLoad(true);
 }
 async function wzAct(action){
   if (WZ.busy) return; WZ.busy=true; wzMsg(''); wzRender();

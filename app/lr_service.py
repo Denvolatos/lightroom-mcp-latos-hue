@@ -410,8 +410,8 @@ class LrService:
         return self._edits.list_presets(query, limit)
 
     # ---- 撤销 ------------------------------------------------------
-    def _run(self, fn) -> dict:
-        """统一把异常翻成 {"ok", "conflict", "message"}。"""
+    def _run(self, fn, readonly_msg: str = "只读模式已开启，无法还原。") -> dict:
+        """统一把异常翻成 {"ok", "conflict", "message"}（另带 readonly / uncertain 两个标记，供界面区分）。"""
         if not self.start() or self._edits is None:
             return {"ok": False, "conflict": False, "message": "无法建立与 Lightroom 的连接：" + (self.start_error or "")}
         try:
@@ -425,8 +425,9 @@ class LrService:
             elif name == "BridgeTimeout":
                 msg = "Lightroom 未在规定时间内响应，操作结果待确认。请检查照片当前状态。"
             elif name == "ReadOnlyError":
-                msg = "只读模式已开启，无法还原。"
-            return {"ok": False, "conflict": CONFLICT_MARK in msg, "message": msg}
+                msg = readonly_msg
+            return {"ok": False, "conflict": CONFLICT_MARK in msg, "readonly": name == "ReadOnlyError",
+                    "uncertain": name == "BridgeTimeout", "message": msg}
 
     def undo(self, edit_id: str, force: bool = False) -> dict:
         return self._run(lambda svc: svc.restore(edit_id, bool(force)))
@@ -434,10 +435,12 @@ class LrService:
     def restore_original(self, force: bool = False) -> dict:
         return self._run(lambda svc: svc.restore_original("selected", False, bool(force)))
 
+    # ---- 多版本 / 批量复用（软件界面直接触发；写入都走 server 的 EditService，只读开关、改前存盘、还原保护沿用它的） ----
     def versions(self) -> dict:
         return self._run(lambda svc: svc.list_versions("selected"))
 
     def version_record(self, name: str) -> dict:
+        """当前照片与一个已保存版本的差异（只读）：{"photo_id","name","changed","current","target"}。"""
         def read(svc):
             photo_id, _ = svc.photo_id_of("selected")
             record = svc.versions.get(photo_id, name)
@@ -461,12 +464,15 @@ class LrService:
             photo_id, _ = svc.photo_id_of("selected")
             try:
                 thumbnail, _ = self.preview_bytes(photo_id, 512)
-            except (OSError, RuntimeError, ValueError):
+            except Exception as e:                  # noqa: BLE001 - 没有预览图也能保存版本（参数才是版本本身）
+                log.warning("version thumbnail failed: %s: %s", type(e).__name__, e)
                 thumbnail = None
-            return svc.save_version(name, note, "selected", thumbnail)
+            return svc.save_version(name, note, photo_id, thumbnail)   # 用上面那张照片的 id，不再读一次“选中”
         return self._run(save)
 
     def apply_version(self, name: str, photo_id: str, expected_current: dict, expected_target: dict) -> dict:
+        """套用一个版本。expected_* 是后端上次给页面看过的差异（由 main.Api 自己保存，不由页面回传）：
+        选中的照片、照片当前参数、保存的版本，三者任一与当时不同就拒绝，让用户重新查看。"""
         def apply(svc):
             selected, _ = svc.photo_id_of("selected")
             if selected != photo_id:
@@ -479,11 +485,11 @@ class LrService:
             if not isinstance(expected_target, dict) or any(k not in saved or not svc._same(saved[k], v)
                                                               for k, v in expected_target.items()):
                 raise ValueError("保存的版本已改变，请重新查看版本差异。")
-            return svc.apply_version(name, photo="selected")
-        return self._run(apply)
+            return svc.apply_version(name, photo=selected)
+        return self._run(apply, MSG_READONLY_WRITE)
 
     def batch_plan_from_edit(self, edit_id: str) -> dict:
-        return self._run(lambda svc: svc.batch_plan_from_edit(edit_id, "selected"))
+        return self._run(lambda svc: svc.batch_plan_from_edit(edit_id, "selected"), MSG_READONLY_WRITE)
 
     def batch_apply(self, plan_id: str) -> dict:
-        return self._run(lambda svc: svc.batch_apply(plan_id))
+        return self._run(lambda svc: svc.batch_apply(plan_id), MSG_READONLY_WRITE)

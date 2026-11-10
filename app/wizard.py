@@ -24,6 +24,9 @@ STALE_SECONDS = 5.0                    # 结果超过这么久，下一次取状
 # 界面上的按钮对应的动作（页面只能点按钮，不能传路径）
 ACT_FOLDER, ACT_LIGHTROOM, ACT_AI = "choose_folder", "choose_lightroom", "choose_ai"
 LABELS = {ACT_FOLDER: "选择文件夹", ACT_LIGHTROOM: "选择 Lightroom 程序", ACT_AI: "更换 AI 来源"}
+MSG_CHOOSE_AI = "请选择要使用的 AI。"
+HINT_CHOOSE_AI = ("软件用的是你电脑上已经安装并登录的 AI 命令行，不保存你的账号。点下面的按钮选一个；"
+                  "还没安装的也可以先选，选了之后这里会告诉你下一步怎么装、怎么登录。以后可以在“设置”里更换。")
 
 MSG_CHECKING = "检查中…"
 MSG_FAILED = "这一项暂时没能检查，请点“重新检查”。"
@@ -41,13 +44,14 @@ def _item(key: str, state: str, text: str, hint: str = "", action: str = "") -> 
 
 def decide(wizard_done: bool, items: list[dict]) -> dict:
     """启动时的决定。open：要不要自动弹出向导；mark_done：全部就绪时把 wizard_done 置真（不弹）。
-    没选工作文件夹时必弹，不管 wizard_done；其余情况只在第一次（wizard_done 为假）且有任一项需要处理时弹。
+    没选工作文件夹、或还没选 AI 来源时必弹，不管 wizard_done；其余情况只在第一次（wizard_done 为假）且有任一项需要处理时弹。
     “等待”不算需要处理（比如 Lightroom 正在自动启动、插件正在连接），避免白白弹出。"""
     by_id = {i["id"]: i for i in items}
     folder_bad = by_id.get(FOLDER, {}).get("state") == TODO
+    ai_unchosen = bool(by_id.get(AI, {}).get("need_choice"))
     any_todo = any(i["state"] == TODO for i in items)
     all_ready = bool(items) and all(i["state"] == READY for i in items)
-    opening = folder_bad or (not wizard_done and any_todo)
+    opening = folder_bad or ai_unchosen or (not wizard_done and any_todo)
     return {"open": opening, "mark_done": (not opening) and (not wizard_done) and all_ready}
 
 
@@ -58,7 +62,8 @@ class WizardChecker:
     find_lightroom(custom)-> Lightroom.exe 路径或 None
     is_running()          -> Lightroom 是否在运行
     get_connection()      -> Backend.status() 的结果（state/connected/plugin_version）
-    get_provider()        -> {"name","available","state","reason","next_step"}（当前选中的 AI 来源）
+    get_provider()        -> {"name","available","state","reason","next_step"}（当前选中的 AI 来源）；
+                             还没选择时是 {"chosen": False, "choices": [每个可选来源的 id/name/short_name/状态/privacy_notice]}
     get_autolaunch()      -> AutoLaunch.state()：自动启动进行中时，Lightroom/插件显示“等待”而不是“需要处理”
     spawn(fn)             -> 起后台线程（测试里可换成同步或手动执行）
     """
@@ -188,8 +193,21 @@ class WizardChecker:
             return _item(PLUGIN, WAIT, "正在连接 Lightroom 的插件，请稍候…")
         return _item(PLUGIN, TODO, "Lightroom 已经打开，但插件还没连上。", HINT_PLUGIN)
 
+    @staticmethod
+    def _choice(c: dict) -> dict:
+        """向导里的一个可选来源：按钮文字、状态（已安装并已登录 / 已安装但尚未登录 / 未安装，用来源自己的文案）、数据去向提示。"""
+        short = c.get("short_name") or c.get("name") or c["id"]
+        return {"id": c["id"], "label": f"使用 {short}", "name": c.get("name") or short,
+                "status": c.get("reason") or "状态未知。", "ok": bool(c.get("available")),
+                "privacy": c.get("privacy_notice") or ""}
+
     def _check_ai(self) -> dict:
         p = self._provider() or {}
+        if p.get("chosen") is False:                     # 第一次使用：由用户自己选，软件不替用户定
+            item = _item(AI, TODO, MSG_CHOOSE_AI, HINT_CHOOSE_AI)
+            item["need_choice"] = True
+            item["choices"] = [self._choice(c) for c in p.get("choices") or [] if isinstance(c, dict) and c.get("id")]
+            return item
         name = p.get("name") or "AI 来源"
         title_text = f"{name}：" + (p.get("reason") or "状态未知。")
         if p.get("available"):

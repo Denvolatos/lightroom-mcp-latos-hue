@@ -76,6 +76,7 @@ def _tool_text(result: dict) -> str:
 class CodexProvider(AIProvider):
     id = "codex"
     display_name = "Codex 命令行"
+    short_name = "Codex"
     supports_images = True
     experimental = False             # 贡献者已在真机验收（PR #5/#6 的验证报告）；标记机制保留给以后的新来源
     privacy_notice = "使用 Codex 时，选中照片的预览会发送至所选的 Codex 服务。"

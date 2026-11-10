@@ -29,7 +29,8 @@ FAKE_CODEX = str(Path(__file__).with_name("fake_codex.py"))
 @pytest.fixture
 def api(tmp_path, monkeypatch):
     monkeypatch.setattr(st, "SETTINGS_FILE", tmp_path / "app_settings.json")
-    monkeypatch.setattr(st, "default_provider", lambda: "claude")
+    # 已有设置文件 = 升级用户：视为已经选过 AI 来源（全新安装的“请先选择”见 test_provider_choice.py）
+    (tmp_path / "app_settings.json").write_text('{"provider": "claude"}', encoding="utf-8")
     monkeypatch.setattr(st, "restrict_to_current_user", lambda p: None)
     monkeypatch.setattr(st.SettingsStore.__init__, "__defaults__", (None, lambda p: None))
     import main

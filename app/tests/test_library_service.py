@@ -553,7 +553,7 @@ def test_settings_ai_use_notes_default_validation_and_roundtrip(tmp_path):
     assert store.update({"ai_use_notes": False})["ok"] and st.SettingsStore(tmp_path / "s.json", restrict=lambda p: None).data["ai_use_notes"] is False
     bad = store.update({"ai_use_notes": "no"})
     assert not bad["ok"] and "ai_use_notes" in bad["errors"]
-    assert st.sanitize({"ai_use_notes": 3})["ai_use_notes"] is True and st.APP_VERSION == "1.0.3"
+    assert st.sanitize({"ai_use_notes": 3})["ai_use_notes"] is True and st.APP_VERSION == "1.1.0"
 
 
 def test_api_prepends_notes_block_only_on_the_first_message_of_a_conversation(tmp_path, monkeypatch):
