@@ -120,15 +120,17 @@ def browse_folder(data: dict) -> str:
     return str(data.get("gallery_folder") or data.get("base_folder") or "")
 
 
-def validate_gallery_folder(path: str) -> dict:
-    """浏览目录：必须是已存在的本机文件夹（不要求可写，软件只读取它）；拒绝网络路径、磁盘根目录、系统与程序目录。"""
+def validate_gallery_folder(path: str, must_exist: bool = True) -> dict:
+    """浏览目录：必须是本机文件夹（不要求可写，软件只读取它）；拒绝网络路径、磁盘根目录、系统与程序目录。
+    must_exist=True（用户新选择时）还要求它现在存在；读取已保存的设置时用 False：移动硬盘暂时没接上也要保留这个值，
+    图库运行时把它当作“暂时无法访问”（见 photo_library.refresh_sync），不改设置。"""
     raw = (path or "").strip()
     p = Path(raw)
     if not raw or raw.startswith(("\\\\", "//")) or not p.is_absolute() or not p.drive or p.parent == p:
         return {"ok": False, "message": "请选择已存在的本机照片文件夹。", "path": raw}
     try:
         p = p.resolve()
-        valid = p.is_dir() and not any(_is_within(p, root) for root in _protected_roots())
+        valid = (p.is_dir() or not must_exist) and not any(_is_within(p, root) for root in _protected_roots())
     except (OSError, RuntimeError, ValueError):
         valid = False
     if not valid:
@@ -221,7 +223,7 @@ def sanitize(data) -> dict:
     bf = out.get("base_folder")
     out["base_folder"] = bf.strip() if isinstance(bf, str) and bf.strip() and validate_folder(bf)["ok"] else d["base_folder"]
     gf = out.get("gallery_folder")
-    gallery = validate_gallery_folder(gf) if isinstance(gf, str) else {"ok": False}
+    gallery = validate_gallery_folder(gf, must_exist=False) if isinstance(gf, str) else {"ok": False}
     out["gallery_folder"] = gallery["path"] if gallery["ok"] else ""
     pv = out.get("provider")
     out["provider"] = pv if isinstance(pv, str) and pv else d["provider"]

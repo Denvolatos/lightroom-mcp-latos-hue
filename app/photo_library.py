@@ -40,6 +40,7 @@ DIRTY_DELAY = 1.0                 # 照片被调整后，等这么久（让 Ligh
 GROUP_ROOT = "（未分类）"
 UID_RE = re.compile(r"^[A-Za-z0-9\-]{1,64}$")
 
+MSG_BROWSE_GONE = "浏览目录暂时无法访问，请检查磁盘，或点“换目录”重新选择。"
 MSG_OFFLINE = "Lightroom 未连接，无法显示照片信息"
 MSG_TIMEOUT = "Lightroom 没有在时限内回复，可能正忙。请稍后再试。"
 MSG_TRUNCATED = f"仅显示前 {MAX_PHOTOS} 张。"
@@ -229,6 +230,8 @@ class PhotoLibrary:
         exists = os.path.isdir(base)
         with self._lock:
             self.base, self.base_exists = base, exists
+        if not exists and self.settings.data.get("gallery_folder"):      # 另选的浏览目录暂时不在（比如移动硬盘没接）：设置保留
+            return self._set_error(MSG_BROWSE_GONE)
         if not self.lr.connected:
             return self._set_error(MSG_OFFLINE)
         cat_photos: list[dict] = []

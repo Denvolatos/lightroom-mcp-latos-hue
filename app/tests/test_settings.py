@@ -303,3 +303,40 @@ def test_switch_to_codex_updates_import_and_export_services(api, monkeypatch):
     api._settings.data["provider"] = "codex"
     assert api._apply_provider_choice()
     assert api._import.lr is new_lr and api._export.lr is new_lr
+
+
+# ---------------------------------------------------------------- 浏览目录暂时不在：设置保留，只在运行时当作不可用
+def test_sanitize_keeps_a_valid_looking_gallery_folder_that_does_not_exist_now(tmp_path):
+    gone = tmp_path / "usb-drive-not-plugged"                       # 格式合法、目录现在不存在
+    assert st.sanitize({"gallery_folder": str(gone)})["gallery_folder"] == str(gone.resolve())
+    for bad in ("", "relative/x", r"\\server\share\x", r"C:\Windows", 5, None):
+        assert st.sanitize({"gallery_folder": bad})["gallery_folder"] == ""      # 格式不合法的仍然丢弃
+
+
+def test_saving_other_settings_does_not_clear_a_missing_gallery_folder(tmp_path):
+    p = tmp_path / "s.json"
+    gone = tmp_path / "usb-drive-not-plugged"
+    p.write_text(json.dumps({"gallery_folder": str(gone)}), encoding="utf-8")
+    s = st.SettingsStore(p, restrict=lambda x: None)
+    assert s.update({"preview_edge": 1536})["ok"]
+    assert json.loads(p.read_text(encoding="utf-8"))["gallery_folder"] == str(gone.resolve())
+
+
+def test_new_gallery_choice_is_still_strict(tmp_path):
+    s = st.SettingsStore(tmp_path / "s.json", restrict=lambda x: None)
+    r = s.update({"gallery_folder": str(tmp_path / "nope")})
+    assert not r["ok"] and "gallery_folder" in r["errors"] and s.data["gallery_folder"] == ""
+
+
+def test_gallery_shows_unavailable_message_for_a_missing_browse_folder(tmp_path):
+    from photo_library import MSG_BROWSE_GONE, PhotoLibrary
+
+    class S:
+        data = {"base_folder": str(tmp_path), "gallery_folder": str(tmp_path / "gone")}
+    lib = PhotoLibrary.__new__(PhotoLibrary)
+    import threading
+    lib.settings, lib._lock, lib.lr = S(), threading.Lock(), type("L", (), {"connected": True})()
+    got = []
+    lib._set_error = got.append
+    lib.refresh_sync()
+    assert got == [MSG_BROWSE_GONE] and "暂时无法访问" in MSG_BROWSE_GONE
