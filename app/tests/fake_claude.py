@@ -8,6 +8,9 @@ import os
 import sys
 import time
 
+sys.stdin.reconfigure(encoding="utf-8")
+sys.stdout.reconfigure(encoding="utf-8")
+
 
 def out(obj):
     print(json.dumps(obj, ensure_ascii=False), flush=True)
