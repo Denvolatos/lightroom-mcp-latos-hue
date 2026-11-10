@@ -21,7 +21,9 @@ local escapes = {
 }
 
 local function quote(s)
-	local escaped = s:gsub('[%c"\\]', function(c)
+	-- JSON only escapes ASCII control bytes; %c depends on the process locale
+	-- and can match bytes inside a UTF-8 character on Windows.
+	local escaped = s:gsub('[%z\1-\31"\\]', function(c)
 		return escapes[c] or string.format("\\u%04x", c:byte())
 	end)
 	return '"' .. escaped .. '"'
