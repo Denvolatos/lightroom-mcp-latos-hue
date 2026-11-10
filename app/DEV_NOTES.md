@@ -856,3 +856,86 @@ photo_id 逐字取自第 ③ 项；按从好到坏排列；score 1–10；stars 
 - **修复：** `app/lr_autostart.py` 新增 `no_inherited_dll_directory()`，创建 Lightroom 进程的瞬间临时 `SetDllDirectoryW(NULL)`，创建完恢复。环境变量清理保留（无害）。
 - **排查方法：** 简单的：`(Get-Process Lightroom).Modules | ? FileName -like '<安装目录>*'`，有输出就说明 Lightroom 占着软件目录里的文件。要看根因：用 PowerShell P/Invoke（`NtQueryInformationProcess` + `ReadProcessMemory`）读目标进程 PEB 里 `RTL_USER_PROCESS_PARAMETERS` 的 `DllPath` 字段，看里面是不是软件目录。
 - **真机待验证：** 1.0.3 装好后让软件自动启动 Lightroom，再查 Lightroom 的 Modules，不应再有软件目录里的文件。
+
+> 说明：上面的“1.0.3”一节记的是修复本身；1.0.3 这个版本号**没有对外发布过**，修复并入 1.1.0。
+
+# 1.1.0：合并 PR #7（Galio1991）并对齐（2026-11-09）
+
+合并方式：`git merge --no-ff pr7`（保留贡献者的提交 771d719 与署名），只有 `app/CHANGELOG.md` 冲突，两边都保留后整理成 1.1.0。合并后基线：app 943 通过 / 1 跳过，server 414 通过。下面是合并之后改了什么、为什么。
+
+## 一、AI 来源：第一次由用户自己选（替换 PR 的“按已装命令行自动选默认”）
+- **去掉 `settings.default_provider()`。** 它在 `defaults()` 里查 PATH / 文件系统，而 `defaults()` 被 `sanitize()` 等处频繁调用。现在 `defaults()["provider"]` 固定是 `DEFAULT_PROVIDER="claude"`，不做任何查找（有测试把 `find_claude` / `find_codex` 换成会报错的函数来保证）。
+- **新设置 `provider_chosen`（布尔）。** 迁移规则在 `sanitize()`：读到的是字典（= 设置文件存在，升级用户）而没有这个键 → `True`，沿用原来的 `provider`，不打扰；没有设置文件 → `False`。文件存在但读不出来（坏 JSON、不是字典）→ `False`：原来选的是什么已经读不到了，重新问一次比悄悄用默认值稳妥。键存在但不是布尔 → 按“文件存在”处理为 `True`。全新安装先保存了别的设置（比如选了工作文件夹）时，写下的是 `provider_chosen: false`，不会因为“文件出现了”就变成已选（有测试）。
+- **未选择期间不启动任何 AI。** `Api.__init__` 用 `providers.NotChosenProvider`（占位，不产生进程），并且不走常驻会话：窗口自己起 Bridge 连 Lightroom，所以图库、导入、导出、预设照常可用。`_start_background` 只在 `_persistent` 时预热，占位时不会预热。`Backend` 巡检对占位来源调用的 `ensure_running/restart` 都是空操作。
+- **门控：** `send`、`pick_prepare`、`pick_start`、`lib_record_start` 在未选择时返回 `{"ok": False, "need_ai_choice": True, "message": "请先在“环境检查”里选择要使用的 AI。"}`；页面在对话区显示这句话并顺手打开环境检查。占位来源自己的 `send` 也只回这句话（第二道保险）。
+- **向导：** AI 项在未选择时是“需要处理：请选择要使用的 AI”，带 `need_choice` 和 `choices`（每个可选来源一个按钮“使用 Claude / 使用 Codex”，旁边是来源自己的状态文案和 Codex 的数据去向提示；未安装的也能选）。`decide()`：`need_choice` 时必弹，不受 `wizard_done` 影响（与“没选工作文件夹必弹”同一规则）。
+- **选择接口 `wizard_choose_ai(provider_id)`：** 只接受注册表里可选的 id（`is_selectable`，与设置保存用的是同一个校验）；已选过的拒绝（要换去设置）；AI 忙时拒绝。保存 `provider` + `provider_chosen=True` 后调用现有的 `_apply_provider_choice()`，也就是“新对话时切换来源”那条路径（含 Claude 常驻会话与 Codex 每轮启动之间的通道重建），没有另起一套。
+- **设置对话框：** 未选择时来源下拉框显示“尚未选择”且不可用，并提示去环境检查；`save_settings` 在未选择时丢弃页面带上的 `provider`（对话框每次保存都会带上下拉框的值，不能把它当成用户的选择），`provider_chosen` 永远不接受页面直接改。已选择之后，设置里切换来源的行为不变（下一次“新对话”生效），向导保留 PR 的“更换 AI 来源”按钮。
+- **状态探测：** 未选择时向导要显示两个来源各自的安装/登录状态，用 `providers.StatusProbe`（每个来源一个实例，沿用各自 30 秒缓存）。它只运行命令行自带的本地登录检测（`claude auth status --json`、`codex login status`），不调用模型、不启动会话。**注意：** “未选择期间不启动任何 AI 命令行进程”在实现上指的是不启动会话、不预热；为了显示“已安装并已登录 / 未登录”，这两个本地检测命令仍会在打开环境检查时运行（原来的向导和设置也是这样做的）。如果连这个也不想要，只能把状态降级成“已安装 / 未安装”（只找可执行文件），留给所有者决定。
+
+## 二、界面直接触发的写入：与现有保护对齐
+PR 新增的 `version_save / version_apply / batch_plan_from_edit / batch_apply / batch_undo` 是页面直接触发的。
+- **AI 忙时拒绝（新增）。** `Api._write_block()`：`_busy`（对话、AI 挑片、“记成经验”共用；挑片期间确认服务还处于 `deny_all`）或来源自己的 `busy` 为真时，上述五个接口返回大白话“AI 正在处理……请等它完成”。批量应用被拒时保留已预演的计划，AI 忙完可以直接再点。
+  - **与“我的预设”套用的差别（待所有者决定）：** 任务要求“与预设套用的现有行为对齐，以代码为准”。查代码：`LibraryService.apply_prepare/apply_confirm` 目前**没有**后端的 AI 忙检查（只查连接、只读、照片是否变了、令牌），`undo` / `restore_original` 也没有。本次只给新接口加了忙检查，没有改预设套用和撤销的现有行为。是否把同样的检查补到预设套用上，留给所有者决定。
+- **只读开关：** 由 server 的 `EditService.check_writable()` 拦截（`apply_version`、`batch_plan`、`batch_apply`、`restore`）。`LrService._run` 以前把所有 `ReadOnlyError` 都翻成“无法还原”，对版本/批量不合适，现在这几条用“只读模式已开启，不允许修改照片。要修改，请先关闭只读模式。”（不带本机路径），并在结果里带 `readonly` / `uncertain` 标记。`save_version` 只写软件自己的版本记录、不改照片，server 不拦，这里也不拦。有测试。
+- **参数校验在后端：** 版本名用 server 的 `versions.clean_name`（1–40 字、无控制字符）；`edit_id` / `batch_id` 用 server 的 `EDIT_ID` 格式；`plan_id`、令牌必须是字符串并用 `secrets.compare_digest` 比较。`batch_undo` 只接受本次运行里软件自己执行过的批次（PR 里它等于任意 `undo(edit_id)`）。
+- **`version_apply` 改成一次性令牌。** PR 让页面回传 `expected_current / expected_target` 两个参数字典做一致性校验。现在 `version_plan` 在后端记下“给页面看过的方案”（照片 id、当前值、目标值）并发一个令牌；`version_apply(token)` 只收令牌，照片/当前参数/版本内容与当时不一致就拒绝（`LrService.apply_version` 的三项检查保留）。页面拿到的只有显示用的条目（中文参数名 + 格式化好的数值），不再拿到原始参数字典。令牌用错一次即作废。
+- **保存版本的小修正：** 预览图取失败（任何异常）不影响保存；保存用的是已解析出的那张照片的 id，不再读第二次“选中”，避免取图期间换了照片导致图和参数对不上。
+
+## 三、界面一致性
+- `window.prompt` / `window.confirm` 换成软件自己的对话框：命名用 `inputDialog`（与 `askDialog` 同风格，回车确认、Esc 取消、空名字就地提示），应用版本与批量预演用“项目 / 现在 / 改成”的表格清单（`planDialog`、`confirmBatch`）。参数显示中文名（`names.param_name`）和格式化数值（`adjustments.fmt_value`），不再是 `Exposure2012: 0.35`。
+- 所有新增的 `innerHTML` 都经 `esc()`；`ui_versions_check.py` 的假数据里放了 `<b>`、`<i>`、`<img onerror>`，脚本检查它们没有变成真的元素。
+- 没有版本时隐藏版本下拉框、禁用“应用版本”，左框提示怎么保存；操作进行中按钮禁用，避免连点。换了照片后不再显示上一张的“撤销应用”（仍可在“本次调整”里撤销）。
+- 图库标题行原来挤了三个按钮，标题会折成两行：把“换目录”挪到“当前浏览：…”那一行的右边。
+
+## 四、读取超时（PR：8→40 秒）
+调用方清点：
+- `selected_all`：`Backend.refresh_photo`（**巡检线程，每 3 秒**；图库选中后也会立即调一次）、`PhotoLibrary._read_lr_selection`、`PickService.prepare/start`（用户点的）。
+- `selected_detail` + `develop_of`：`PreviewManager.refresh`（**预览线程，周期性**）、`ExportService`（用户点的）。
+- `selected_photo`：`current_photo_settings` → 预设保存/套用（用户点的）。
+- 页面每 3 秒的 `status()` 只读内存，不调插件，不受影响。
+
+结论：巡检线程是单线程，`refresh_photo` 卡 40 秒会把连接状态推送、自动恢复（换端口重登记、重建助手）一起拖住；预览线程卡住则 40 秒内不会刷新。所以**周期性调用保持短超时**：`list_selected` 10 秒（原 8）、`get_develop` 20 秒（原 15），失败下一轮自动重试；**用户主动触发的读取用 40 秒**：`lr_service.patient(lr)` 上下文（线程本地开关），用在导出对话框/导出、AI 挑片准备/开始、预设保存/套用。`_about` 向 Lightroom 问版本：启动时（界面等它才显示）3 秒，打开设置时 10 秒。测试 `test_read_timeouts.py`。
+
+## 五、轮询间隔 `POLL_HOLD_SECONDS` 10 → 1（保留）
+- 读了 `bridge.py` 的 `/poll` 和 `Bridge.lua` 的轮询循环：服务端最多等 1 秒后答 “none”；插件收到后**立刻**再发下一次（先读一遍公告文件）。所以不会空转（每次请求都被服务端按住最多 1 秒），空闲时每个会话约每秒 1 个本机请求 + 1 次小文件读取。
+- 不影响重连修复：`Bridge.stop()` 仍然每 0.2 秒检查一次停止标记并立即答复；401/403 后插件仍然先重读公告。`PLUGIN_SEEN_SECONDS=25` 的判断只会更新得更勤。插件 GET 的超时是 15 秒，新旧插件与新旧服务端任意搭配都成立。
+- 测试里用到 10 秒的地方都是显式传 `poll_hold=10` 来测“唤醒长轮询”，不依赖默认值。
+- `server/dev_bridge.py`（开发用）仍是 10 秒，没有动。
+
+## 六、丢弃过期命令（`if job_id in self._events`，保留）
+调用方超时后会把自己的事件从 `_events` 里弹出；`/poll` 取到命令时如果事件已不在，就不下发。字典读取在 GIL 下是安全的。语义：超时的调用方已经得到“结果不确定”，这条命令之后不会再被执行（比原来“迟到执行”更安全）。仍有一个极小的窗口：命令已经交给插件之后调用方才超时，这时命令仍会执行（与以前相同），结果被存进 `_results` 但没人取（原有的小泄漏，没有动）。测试：`test_poll_skips_command_after_caller_times_out`。
+
+## 七、图库可浏览任意本机照片文件夹（`gallery_folder`，所有者已决定保留）
+- “当前浏览目录”集中在 `settings.browse_folder(data)`：`gallery_folder` 优先，否则 `base_folder`。图库扫描、在 Lightroom 里显示文件夹、“打开文件夹”都从这里取。
+- 安全核对：
+  - 路径只来自系统文件夹对话框的这次点击（`gallery_pick_folder` 不收参数）；`save_settings` 理论上也能带 `gallery_folder`，同样经过 `validate_gallery_folder`。
+  - `validate_gallery_folder`：拒绝空值、网络路径（`\\` / `//`）、非绝对路径、磁盘根目录、系统与程序目录（Windows / Program Files / ProgramData）、不存在的目录；不要求可写。
+  - 对该目录只读：扫描用 `importer.scan_folder`（只列文件，不跟随符号链接/联接点，跳过隐藏和系统目录）。
+  - “加入 Lightroom”是原地添加：`PhotoLibrary.add_missing` 的路径只来自后端上一次扫描，逐张调 `EditService.import_photo`，插件端 `checkImportPath` 的限制仍然生效（本机盘符路径、无 `..`、不在系统目录和本工具数据目录、是照片格式的已存在文件），不移动、不复制、不删除。
+  - AI 修图的修改写在 Lightroom 目录里（可撤销），原片文件不被改动。导入副本仍只写 `base_folder`（`ImportService` 没有用 `gallery_folder`）。
+- 已知小事：浏览目录所在的盘没接上时，`sanitize()` 会在内存里把它清空、退回工作文件夹；下次保存任何设置时这个清空会被写进文件，需要重新“换目录”。
+
+## 八、其余逐项
+- **重连后刷新图库：** `status` 事件只在状态变化时推送（`Backend._push_status` 去重），所以不是每 2 秒刷新一次；`PhotoLibrary.refresh` 自带合并。
+- **预览错误信息：** PR 把异常原文直接显示在界面上（可能带本机路径、端口等）。现在界面只显示分好类的一句话（没连上 / 正忙没回应 / 这次读取没成功），原文写进日志（`latoshue.lr`、`latoshue.preview`）。
+- **Bridge.lua 的日志：** 只记地址（127.0.0.1:端口）和 HTTP 状态，不含口令，保留。
+- **CI（`.github/workflows/tests.yml`）：** 加 `permissions: contents: read`；去掉对 `test_stop_interrupts_but_keeps_process` 的排除（本机通过；若在 GitHub 运行器上失败再处理）；依赖 = `./server[test]`（mcp、pillow、pytest、lupa）+ `pywebview`，与 app 测试实际 import 的第三方包一致；pytest 加 `-rs` 让被跳过的测试（比如缺 lupa 时的 Lua 测试）在日志里看得见。
+
+## 九、真机验收脚本
+`app/devtools/real_versions_batch.py`（只写了，**没有运行**）：在测试目录（路径含 “ceshi”，否则退出）上验收多版本与批量复用的写入与撤销，任何失败都恢复到初始快照并删除测试版本。`app/devtools/` 不会被打进安装包：`latoshue.spec` 只分析 `run_latoshue.py` 的 import，数据文件只带 `web/`。
+
+## 十、界面自查
+`app/tests/ui_versions_check.py`（无头 Edge + 假 `pywebview.api`，只含示例数据）：26 个场景全部通过“不横向溢出 / 按钮不换行 / 对话框不超出窗口 / 动态文字已转义”检查，截图在 `app/docs/`：`versions_*.png`、`batch_*.png`、`gallery_browse_folder.png`、`wizard_choose_ai_*.png`、`wizard_ai_chosen_*.png`、`settings_ai_not_chosen.png`、`send_ai_not_chosen.png`，以及 1100 宽的 `layout_1100_versions*.png`、`layout_1100_batch_plan.png`、`layout_1100_gallery_browse.png`、`layout_1100_wizard_choose_ai*.png`。
+
+## 真机未验证清单（1.1.0）
+以下都只有单元测试和无头页面检查，没有在真实 Lightroom / 真窗口上验证：
+1. **多版本的真实写入与撤销：** 保存版本、应用版本、撤销应用（用 `app/devtools/real_versions_batch.py` 在测试目录上跑）。
+2. **批量复用的真实写入与整批还原：** 同上脚本；另需在真窗口里走一遍“复用 → 预演 → 确认 → 还原这批照片”。
+3. **1 秒轮询的实际效果：** 多会话同时连接时的延迟是否改善；单会话空闲时 Lightroom 与软件的 CPU 占用。
+4. **超时调整：** Lightroom 忙（导入大量照片、生成预览）时，巡检 10 秒 / 预览 20 秒 / 用户操作 40 秒是否合适；状态条是否仍然及时更新。
+5. **DLL 占用修复（原 1.0.3）：** 装好后让软件自动启动 Lightroom，`(Get-Process Lightroom).Modules | ? FileName -like '<安装目录>*'` 应无输出；之后覆盖安装、卸载不再“拒绝访问”。
+6. **首次选择 AI 的真窗口流程：** 全新安装（删掉或改名 `~/LrMcp/app_settings.json`）→ 向导必弹 → 选 Claude / 选 Codex（包括选一个没安装的）→ 来源启动、对话可用；选择前发消息 / AI 挑片 / 记成经验的提示；升级用户不被打扰。选 Claude 时会从“窗口自己的 Bridge”切到“借用常驻会话的通道”，这一步的通道重建只在测试里用假对象验证过。
+7. **图库换目录：** 真窗口里的文件夹对话框、浏览一个不在 Lightroom 目录里的文件夹、“加入 Lightroom”原地添加、移动硬盘拔掉后的表现。
+8. **CI 在 GitHub 运行器上的结果：** 工作流没有在 GitHub 上跑过（没有 push）；特别是不再排除的 `test_stop_interrupts_but_keeps_process`，以及 Python 3.11 + windows-latest 下 pywebview / lupa 的安装。
+9. 安装包没有重新构建：`docs/release/v1.1.0.md` 的大小与 SHA-256 待构建后填写。

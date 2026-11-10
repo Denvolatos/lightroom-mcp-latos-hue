@@ -6,10 +6,10 @@
 
 A Lightroom Classic plug-in (Lua, `plugin/lrmcp.lrdevplugin`) and a Python MCP server (`server/lightroom_mcp`).
 The server hosts a local HTTP queue on `127.0.0.1` (first free port in 58770–58789, one server per AI session, announced in `~/LrMcp/servers/<port>.txt`); the plug-in polls all of them and runs whitelisted commands.
-Version 1.0.1 reads photos and can make small, guarded changes (89 whitelisted sliders incl. RAW temperature/tint, colour grading, calibration, parametric curve, detail and effects, crop and straighten, plus catalog information (rating, flag, colour label, title, caption, keywords), a dry-run-first batch tool (at most 10 photos) and develop presets without masks (applied by Lightroom, undone by writing back every changed setting), plus 4 point curves; restorable).
+Version 1.1.0 reads photos and can make small, guarded changes (89 whitelisted sliders incl. RAW temperature/tint, colour grading, calibration, parametric curve, detail and effects, crop and straighten, plus catalog information (rating, flag, colour label, title, caption, keywords), a dry-run-first batch tool (at most 10 photos) and develop presets without masks (applied by Lightroom, undone by writing back every changed setting), plus 4 point curves; restorable).
 Windows + Lightroom Classic 15.2 is the only tested combination.
 
-The repository also holds **Latos Hue** (`app/`, version 1.0.1): a Windows desktop app (pywebview + Python) that talks to this plug-in and starts Claude or Codex itself. It has its own changelog (`app/CHANGELOG.md`), developer notes (`app/DEV_NOTES.md`) and tests (`python -m pytest -q app/tests`).
+The repository also holds **Latos Hue** (`app/`, version 1.1.0): a Windows desktop app (pywebview + Python) that talks to this plug-in and starts Claude or Codex itself. It has its own changelog (`app/CHANGELOG.md`), developer notes (`app/DEV_NOTES.md`) and tests (`python -m pytest -q app/tests`).
 
 ## Releases (one product, one version number)
 

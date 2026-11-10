@@ -130,7 +130,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
 Contributions submitted from 2026-11-03 on are licensed under the AGPL-3.0, as stated in `CONTRIBUTING.md`.
-自 2026-11-03 起提交的贡献按 AGPL-3.0 授权，见 `CONTRIBUTING.md`。
+This includes pull request #7 by Galio1991 (versions page, edit reuse, folder browsing, test workflow; merged for 1.1.0), which was
+submitted under AGPL-3.0-only (SPDX headers in its new files).
+自 2026-11-03 起提交的贡献按 AGPL-3.0 授权，见 `CONTRIBUTING.md`。其中包括 Galio1991 的 PR #7（多版本页、批量复用、图库换目录、测试工作流；
+在 1.1.0 合并），按 AGPL-3.0-only 提交（新增文件带 SPDX 声明）。
 
 ## Adobe
 

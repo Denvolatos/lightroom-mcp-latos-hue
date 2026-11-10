@@ -19,15 +19,16 @@ The project also provides **LrMCP**, a standalone Lightroom Classic plug-in and 
 ## ✨ What it does
 
 - **Import:** choose photos from a memory card or any folder; they are copied into the app's work folder (the originals are not touched) and added to your Lightroom catalog.
-- **Gallery:** browse thumbnails grouped by folder, search, filter, sort and multi-select; the selected photos are what the AI works on.
+- **Gallery:** browse thumbnails grouped by folder, search, filter, sort and multi-select; the selected photos are what the AI works on. "换目录" (change folder) lets you browse any photo folder on your computer (it is only read; nothing is moved or copied); photos that are not in the Lightroom catalog yet can be added in place.
 - **AI photo picking:** select a few photos and let the AI compare them; it suggests a ranking plus star and flag ratings, shown in the app first, and **written only after you confirm**.
 - **AI retouching:** tell the AI the look you want in plain words. You can turn on "confirm each step" (the AI asks before every change), **every step can be undone**, and one click returns the photo to how it was before.
+- **Versions:** save how a photo looks now as a named version, compare "saved version" and "current" side by side later, go back to a version after confirming, and undo that switch.
 - **Reuse an edit:** preview a verified slider change on other selected photos, inspect each result, then confirm; up to 10 photos per batch, with batch restoration.
 - **Presets, experience, favourites:** save your own presets, keep notes on the colour experience the AI learned, and mark favourite photos. They live only on your own computer.
 - **Export:** JPEG or TIFF (8 or 16 bit), you choose the folder and size, existing files are never overwritten.
 - **Small conveniences:** optional automatic start of Lightroom, a first-run "environment check" wizard, and an update check (it only tells you, it never installs by itself).
 
-The AI can be **Claude** (the Claude Code command line already installed and signed in on your computer) or **Codex** (the Codex command line, installed and signed in).
+The AI can be **Claude** (the Claude Code command line already installed and signed in on your computer) or **Codex** (the Codex command line, installed and signed in). **You choose which one the first time you open the app**; the app does not decide for you and starts no AI before you have chosen.
 
 ## 📦 Install
 
@@ -43,9 +44,9 @@ Uninstalling removes the program and the plug-in; your settings and experience n
 
 ## 🚀 First use
 
-1. Open Latos Hue. An "**environment check**" list appears: photo work folder, Lightroom, the Lightroom plug-in, the AI command line. For anything not ready it tells you what to do next (for example "choose a folder", "choose the Lightroom program", or sign in to Claude or Codex in a terminal first). You can reopen it any time from Settings.
-2. In Settings choose your AI (Claude or Codex). Turn on "start Lightroom automatically" if you like.
-3. Click "Import" (导入), pick a folder with photos, confirm; the photos are copied to your work folder and added to the Lightroom catalog.
+1. Open Latos Hue. An "**environment check**" list appears: photo work folder, Lightroom, the Lightroom plug-in, the AI assistant. For anything not ready it tells you what to do next (for example "choose a folder", "choose the Lightroom program", or sign in to Claude or Codex in a terminal first). You can reopen it any time from Settings.
+2. In the "AI 助手" (AI assistant) item click "**使用 Claude**" (use Claude) or "**使用 Codex**" (use Codex). Next to each button you see its state (installed and signed in / installed but not signed in / not installed); you may pick one that is not installed yet, and the list then tells you what to do next. To change it later click "更换 AI 来源" (change AI source) or use Settings (it takes effect with the next "new conversation"). Turn on "start Lightroom automatically" in Settings if you like.
+3. Click "Import" (导入), pick a folder with photos, confirm; the photos are copied to your work folder and added to the Lightroom catalog. Or skip importing: click "换目录" above the gallery and browse a folder of photos you already have.
 4. Click photos in the gallery on the left and tell the AI the look you want on the right, or select several photos and click "AI 挑片" (AI picking).
 5. Not happy? Click "撤销" (undo). Happy? Click "导出" (export).
 
@@ -53,7 +54,7 @@ Uninstalling removes the program and the plug-in; your settings and experience n
 
 ## 🔒 Privacy and data
 
-- **Your original photos are processed on your computer only**; the app does not upload them.
+- **Your original photos are processed on your computer only**; the app does not upload them. The AI's edits are stored in the Lightroom catalog and can be undone; **the original photo files are not changed**. A folder you browse with "换目录" is only read, and "加入 Lightroom" (add to Lightroom) adds photos in place, without moving or copying them.
 - **When you retouch or pick photos, a preview of the selected photos is sent to the AI service you chose** (the provider behind Claude or Codex). The app uploads nothing else about your photos.
 - The app **does not store your account and does not sign in for you**; you sign in yourself in the Claude / Codex command line.
 - Settings, presets, favourites and experience notes are stored on your own computer in `C:\Users\<you>\LrMcp`.
@@ -235,4 +236,4 @@ The Adobe Lightroom Classic SDK is not included in this repository and must not 
 
 Issues and pull requests are welcome; please read [CONTRIBUTING.md](CONTRIBUTING.md) first (your contributions are licensed under the AGPL-3.0). For bug reports, compatibility reports and feature requests use [issues](../../issues/new/choose); please never attach photos or catalogs.
 
-Thanks to the contributor **Galio1991**: restore conflict protection and the review and edit-reuse workflow (PRs #1 and #2, submitted under the MIT license; the copyright notice is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)), and Latos Hue's Codex support and several security fixes (PRs #4, #5 and #6).
+Thanks to the contributor **Galio1991**: restore conflict protection and the review and edit-reuse workflow (PRs #1 and #2, submitted under the MIT license; the copyright notice is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)), and Latos Hue's Codex support and several security fixes (PRs #4, #5 and #6), and the versions page, edit reuse, folder browsing and test workflow of 1.1.0 (PR #7).

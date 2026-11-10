@@ -3,9 +3,28 @@
 Versions: a new feature raises the middle number, a small fix the last one. The server version lives in
 `server/lightroom_mcp/__init__.py`, the plug-in version in `plugin/lrmcp.lrdevplugin/Version.lua` (and `Info.lua`).
 
-## 1.0.3 (2026-11-04) — version sync with Latos Hue 1.0.3
+## 1.1.0 (unreleased) — shorter polls, expired commands are dropped; released together with Latos Hue 1.1.0
 
-- Version number only: the plug-in and the MCP server move to **1.0.3** to match Latos Hue 1.0.3. The tools and how to use them are unchanged. Latos Hue 1.0.3 is the real fix for the installer "access denied" problem: the 1.0.2 fix did not fully work, because the app handed its own DLL search folder to the Lightroom it started; 1.0.3 removes that folder at the moment Lightroom is launched (see `app/CHANGELOG.md`). After upgrading, reload the plug-in once in Lightroom (File > Plug-in Manager > Reload Plug-in). If you installed Latos Hue 1.0.0 / 1.0.1 / 1.0.2 with auto-start of Lightroom, close Latos Hue and Lightroom before upgrading.
+1.0.3 was never released; its number is not used. What it contained is part of this release.
+
+- **Shorter polls (expected to help with several AI sessions; still to be confirmed on a real machine):** the server now answers
+  the plug-in's `/poll` after at most **1 second** instead of 10 (`POLL_HOLD_SECONDS`). With several sessions connected at the
+  same time, the plug-in is expected to reach each of them sooner. The plug-in still asks again right after every answer, so one
+  idle session costs about one small local request per second.
+- **Expired commands are dropped:** when a caller has given up waiting for a command (timeout), the server no longer hands that
+  command to the plug-in afterwards. A change whose caller timed out before the plug-in picked it up is therefore not written late.
+- **Plug-in log:** when sending a result back to the server fails, the plug-in writes one line to its log (address and HTTP status,
+  never the token).
+- **Tests on GitHub:** a workflow runs the server tests (including the plug-in's Lua tests), the Lua syntax check and the desktop
+  app's tests on Windows for every push and pull request.
+- The tools and how to use them are unchanged. Poll change, dropped commands, plug-in log line and the workflow were contributed
+  by **Galio1991** (pull request #7, AGPL-3.0-only).
+- **Latos Hue 1.1.0** (same release) adds a versions page, reuse of one edit on other photos, browsing any photo folder and a
+  first-run choice of the AI source, and contains the real fix for the installer "access denied" problem: the 1.0.2 fix did not
+  fully work, because the app handed its own DLL search folder to the Lightroom it started; the app now removes that folder at the
+  moment Lightroom is launched (see `app/CHANGELOG.md`).
+- **Upgrading:** close Latos Hue and Lightroom before installing (a Lightroom started by 1.0.0 / 1.0.1 / 1.0.2 still holds files in
+  the app folder). Afterwards reload the plug-in once in Lightroom (File > Plug-in Manager > Reload Plug-in) or restart Lightroom.
 
 ## 1.0.2 (2026-11-04) — version sync with Latos Hue 1.0.2
 
