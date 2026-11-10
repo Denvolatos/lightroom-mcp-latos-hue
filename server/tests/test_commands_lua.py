@@ -11,6 +11,20 @@ lupa = pytest.importorskip("lupa.lua51")
 
 PLUGIN = Path(__file__).resolve().parents[2] / "plugin" / "lrmcp.lrdevplugin"
 
+
+def test_json_preserves_utf8_under_windows_western_locale():
+    runtime = lupa.LuaRuntime(unpack_returned_tuples=True)
+    setlocale = runtime.eval("os.setlocale")
+    previous = setlocale(None, "ctype")
+    try:
+        if not setlocale("English_United States.1252", "ctype"):
+            pytest.skip("Windows Western locale unavailable")
+        encoder = runtime.execute((PLUGIN / "Json.lua").read_text(encoding="utf-8"))
+        assert json.loads(encoder.encode("老\x00\n")) == "老\x00\n"
+    finally:
+        setlocale(previous, "ctype")
+
+
 FAKE_SDK = r"""
 local read_plugin_file = ...
 
