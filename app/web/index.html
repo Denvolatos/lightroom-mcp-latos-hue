@@ -37,14 +37,14 @@
       <div class="pane" id="lpane"></div>
     </div>
     <div class="lower" id="gal">
-      <div class="galhead"><span class="galtitle" id="gal_title">浏览照片</span><span class="spacer"></span>
-        <button class="btn small" id="gal_refresh" title="重新读取当前浏览的文件夹和 Lightroom 目录">刷新</button>
-        <button class="btn small" id="gal_open" title="在资源管理器中打开当前浏览的文件夹">打开文件夹</button></div>
-      <div class="galscope"><span id="gal_scope">选择照片文件夹后，可浏览其中及子文件夹的照片</span>
-        <button class="btn small" id="gal_change" title="选择要浏览的照片文件夹（只是浏览，不移动照片，也不改变导入副本的保存位置）">换目录</button></div>
-      <div class="galtools"><input type="text" id="gal_q" placeholder="搜索文件名" maxlength="60" autocomplete="off">
-        <select id="gal_sort" title="排序"><option value="name">按文件名</option><option value="time">按拍摄时间</option></select>
-        <select id="gal_filter" title="筛选"><option value="all">全部</option><option value="rated">已评星</option><option value="pick">留用</option><option value="new">尚未加入</option></select></div>
+      <div class="galhead"><span class="galtitle" id="gal_title">我的照片</span><span class="spacer"></span>
+        <button class="btn small" id="gal_refresh" title="重新读取照片库里的照片">刷新</button>
+        <button class="btn small" id="gal_open" title="在资源管理器中打开照片库文件夹">打开文件夹</button></div>
+      <div class="galscope"><span id="gal_scope">照片库就是“设置”里的照片工作文件夹，导入的照片会按拍摄日期放进来。</span></div>
+      <div class="galtools"><input type="text" id="gal_q" placeholder="搜索文件名" maxlength="60" autocomplete="off" aria-label="搜索文件名">
+        <select id="gal_sort" title="排序方式" aria-label="排序方式"><option value="captured">拍摄时间</option><option value="imported">导入时间</option><option value="name">名称</option><option value="size">大小</option><option value="rating">星级</option><option value="flag">旗标</option><option value="label">颜色标签</option><option value="modified">最后修改</option><option value="edited">是否修过</option><option value="type">类型</option></select>
+        <button class="btn small" id="gal_dir" type="button" title="降序（点击切换为升序）" aria-label="排序方向：降序，点击切换为升序">↓ 降序</button>
+        <select id="gal_filter" title="筛选" aria-label="筛选"><option value="all">全部</option><option value="rated">已评星</option><option value="pick">留用</option><option value="new">未同步</option></select></div>
       <div class="galbar" id="gal_bar"></div>
       <div class="galmsg" id="gal_msg"></div>
       <div class="galscroll" id="gal_scroll" tabindex="0"></div>
@@ -121,9 +121,9 @@
     <div class="body">
       <div class="sgroup">
         <h4>常规</h4>
-        <div class="srow"><span class="lab">软件文件夹</span>
+        <div class="srow"><span class="lab">照片工作文件夹</span>
           <span class="inline"><input type="text" id="s_folder" readonly><button class="btn small" id="s_pick">选择文件夹</button></span>
-          <span class="sub">导入时，照片会复制到该文件夹，再加入 Lightroom 目录；原片不会被移动或删除。</span>
+          <span class="sub">导入时，照片会按拍摄日期复制到该文件夹的“年\年-月-日”文件夹里；原片不会被移动或删除。这个文件夹就是你的照片库。</span>
           <span class="ferr" id="e_folder"></span></div>
       </div>
       <div class="sgroup">
