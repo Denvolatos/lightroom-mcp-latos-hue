@@ -370,7 +370,7 @@
   <button class="btn" id="impbtn" onclick="startImport()">导入</button>
   <button class="btn" onclick="openExport()">导出</button>
   <button class="btn" id="pickbtn" onclick="openPick()" title="在 Lightroom 中选择照片后，让 AI 比较并给出排名和建议">AI 挑片</button>
-  <button class="btn" onclick="undo()">撤销</button>
+  <button class="btn" onclick="undo(this)">撤销</button>
   <button class="btn" id="newchat" onclick="newChat()" style="display:none">新对话</button>
   <span class="spacer"></span>
   <span class="status upd-note" id="updnote" style="display:none"><span id="updtxt"></span><button class="btn small" id="updopen">查看新版本</button></span>
@@ -428,7 +428,7 @@
       <div class="section-title">本次调整</div>
       <div class="pane"><table id="ptable"><thead><tr><th>参数</th><th>改前</th><th>改后</th><th>状态</th><th></th></tr></thead><tbody></tbody></table>
         <div class="empty" id="pempty">暂无调整。请在下方输入修图需求。</div>
-        <div class="restore-row" id="restorerow" style="display:none"><button class="btn small" onclick="restoreOriginal()">还原到原始状态</button></div></div>
+        <div class="restore-row" id="restorerow" style="display:none"><button class="btn small" onclick="restoreOriginal(this)">还原到原始状态</button></div></div>
     </div>
     <div class="chat">
       <div class="msgs" id="msgs"><div class="msg ai">请选择照片并输入期望的修图效果。</div></div>
@@ -1022,7 +1022,7 @@ function renderParams(){
       const reuse=can && !String(r.rid||'').startsWith('lib:') && !reusable.has(r.edit_id); if(reuse) reusable.add(r.edit_id);
       tb.insertAdjacentHTML('beforeend',
         `<tr><td>${esc(r.label)}<div class="why">${esc(r.reason)}</div></td><td class="num">${esc(r.before)}</td><td class="num">${esc(r.after)}</td><td class="${STCLS[r.status]||''}">${esc(r.status)}</td><td>${can?`<button class="btn small" data-eid="${esc(r.edit_id)}">撤销</button>`:''}${reuse?`<button class="btn small" data-reuse="${esc(r.edit_id)}" title="将这次滑块调整应用到其他选中照片">复用</button>`:''}</td></tr>`); });
-    tb.querySelectorAll('button[data-eid]').forEach(b=>b.onclick=()=>undoRow(b.dataset.eid));
+    tb.querySelectorAll('button[data-eid]').forEach(b=>{ b.disabled = undoBusy; b.onclick=()=>undoRow(b.dataset.eid, b); });
     tb.querySelectorAll('button[data-reuse]').forEach(b=>b.onclick=()=>reuseEdit(b.dataset.reuse));
     $('#pempty').style.display = rows.length?'none':'block';
     $('#restorerow').style.display = rows.some(r=>r.status==='已应用')?'block':'none';
@@ -1179,28 +1179,51 @@ async function reuseEdit(editId){
   }catch(e){ toast('批量操作未完成，请检查连接并重新预演。'); }
   finally{ batchBusy=false; }
 }
-async function undoRow(eid, force=false){
-  const r = await window.pywebview.api.undo(eid, force);
-  if (r.ok) return toast('已撤销');
-  if (r.conflict && !force){
-    if (await askDialog('参数在调整后又发生变化', r.message+'\n\n强制撤销将覆盖这些后续改动。', '强制撤销')) return undoRow(eid, true);
-    return;
+/* 撤销 / 还原：一次只做一个。点击后按钮立刻变灰并显示“正在…”，Lightroom 回复前再点不会重复发送 */
+let undoBusy = false;
+async function undoGuard(btn, text, fn){
+  if (undoBusy) return toast('正在处理上一次撤销，请稍候。');
+  undoBusy = true; const old = btn ? btn.textContent : '';
+  document.querySelectorAll('#ptable button[data-eid], #restorerow button').forEach(b=>b.disabled=true);
+  if (btn){ btn.disabled = true; btn.textContent = text; }
+  try { await fn(); }
+  finally {
+    undoBusy = false;
+    if (btn && btn.isConnected){ btn.disabled = false; btn.textContent = old; }
+    document.querySelectorAll('#ptable button[data-eid], #restorerow button').forEach(b=>b.disabled=false);
   }
-  toast('撤销失败：'+r.message);
 }
-async function restoreOriginal(force=false){
-  if (!force && !await askDialog('还原到原始状态', '将当前照片还原到首次调整之前的状态，已应用的调整均会被撤销。是否继续？', '还原')) return;
-  const r = await window.pywebview.api.restore_original(force);
-  if (r.ok) return toast('已还原到原始状态');
-  if (r.conflict && !force){
-    if (await askDialog('参数在调整后又发生变化', r.message+'\n\n强制还原将覆盖这些后续改动。', '强制还原')) return restoreOriginal(true);
-    return;
-  }
-  toast('还原失败：'+r.message);
+function undoRow(eid, btn){
+  return undoGuard(btn, '正在撤销…', async()=>{
+    for (let force=false;;){
+      const r = await safeCall(()=>window.pywebview.api.undo(eid, force), null, '撤销没有完成，请重试。'); if (!r) return;
+      if (r.ok) return toast('已撤销');
+      if (r.conflict && !force){
+        if (!await askDialog('参数在调整后又发生变化', r.message+'\n\n强制撤销将覆盖这些后续改动。', '强制撤销')) return;
+        force = true; continue;
+      }
+      return toast('撤销失败：'+(r.message||''));
+    }
+  });
+}
+async function restoreOriginal(btn){
+  if (undoBusy) return toast('正在处理上一次撤销，请稍候。');
+  if (!await askDialog('还原到原始状态', '将当前照片还原到首次调整之前的状态，已应用的调整均会被撤销。是否继续？', '还原')) return;
+  return undoGuard(btn, '正在还原…', async()=>{
+    for (let force=false;;){
+      const r = await safeCall(()=>window.pywebview.api.restore_original(force), null, '还原没有完成，请重试。'); if (!r) return;
+      if (r.ok) return toast('已还原到原始状态');
+      if (r.conflict && !force){
+        if (!await askDialog('参数在调整后又发生变化', r.message+'\n\n强制还原将覆盖这些后续改动。', '强制还原')) return;
+        force = true; continue;
+      }
+      return toast('还原失败：'+(r.message||''));
+    }
+  });
 }
 function undoOne(k){ steps=steps.filter(s=>s.k!==k); renderParams(); renderStage(); toast('已撤销「'+k+'」'); }
-function undo(){
-  if (REAL()){ const last=[...rows].reverse().find(r=>r.status==='已应用'&&r.edit_id); if(!last) return toast('没有可撤销的调整'); return undoRow(last.edit_id); }
+function undo(btn){
+  if (REAL()){ const last=[...rows].reverse().find(r=>r.status==='已应用'&&r.edit_id); if(!last) return toast('没有可撤销的调整'); return undoRow(last.edit_id, btn); }
   if(!steps.length) return toast('没有可撤销的调整'); const s=steps.pop(); renderParams(); renderStage(); toast('已撤销「'+s.k+'」'); }
 
 /* ---- export dialog ---- */
@@ -1602,13 +1625,19 @@ function pkApplied(ev, undoRes){
     [canUndo?{label:'撤销这次写入', onclick:()=>pkUndo(false)}:null, {label:'关闭', cls:'primary', onclick:pkFinishClose}].filter(Boolean));
 }
 async function pkUndo(force){
-  const r = await window.pywebview.api.pick_apply_undo(force);
+  if (PK.undoBusy) return; PK.undoBusy = true;
+  const b = [...document.querySelectorAll('#pk_foot button')].find(x=>x.textContent==='撤销这次写入');
+  if (b){ b.disabled = true; b.textContent = '正在撤销…'; }
+  let r; try { r = await safeCall(()=>window.pywebview.api.pick_apply_undo(force), b, '撤销没有完成，请重试。'); }
+  finally { PK.undoBusy = false; }
+  if (!r){ if (b && b.isConnected) b.textContent = '撤销这次写入'; return; }
   if (r.results){
-    const st = await window.pywebview.api.pick_apply_state(); pkApplied(st, r.results);
+    const st = await safeCall(()=>window.pywebview.api.pick_apply_state()); if (st && st.results) pkApplied(st, r.results);
     if (r.conflict && !force && await askDialog('这些照片在写入后又发生变化', (r.results.filter(x=>x.status==='conflict').map(x=>(x.name||'')+'：'+x.message).join('\n'))+'\n\n强制撤销将覆盖这些后续改动。', '强制撤销')) return pkUndo(true);
     return;
   }
   $('#pk_err').textContent = r.message||'无法撤销。';
+  if (b && b.isConnected){ b.disabled = false; b.textContent = '撤销这次写入'; }
 }
 function onPickEvent(ev){
   const open = $('#pmask').classList.contains('show');
