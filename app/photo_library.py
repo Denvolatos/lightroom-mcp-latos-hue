@@ -281,7 +281,16 @@ class PhotoLibrary:
 
     @staticmethod
     def _clean_label(v):
-        return v.strip().lower() if isinstance(v, str) and v.strip().lower() not in ("", "none") else None
+        # 真机实测：Lightroom 用 "gray" 表示“没有颜色标签”，和 none 一样处理
+        return v.strip().lower() if isinstance(v, str) and v.strip().lower() not in ("", "none", "gray", "grey") else None
+
+    def _ctime_text(self, path: str):
+        """磁盘上文件的创建时间（Windows 的 st_ctime；复制进库的那一刻）：Lightroom 取不到“加入时间”时，用它当导入时间。"""
+        try:
+            c = getattr(self._stat_fn(path), "st_ctime", None)
+            return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(c)) if isinstance(c, (int, float)) and c > 0 else None
+        except (OSError, ValueError, OverflowError):
+            return None
 
     def _file_info(self, path: str, key: str, want_date: bool):
         """磁盘上的文件：(大小, 修改时间, 拍摄时间文本)。拍摄时间只在 want_date 时读（并缓存）；文件不在返回 (None, None, None)。"""
@@ -316,6 +325,8 @@ class PhotoLibrary:
             size, mtime, _d = self._file_info(path, key, False) if key in disk else (None, None, None)
             edited = p.get("edited") if isinstance(p.get("edited"), bool) else None
             added_at = p.get("added_at") if isinstance(p.get("added_at"), str) and p.get("added_at") else None
+            if added_at is None and key in disk:
+                added_at = self._ctime_text(path)
             recs.append({"uid": p["id"], "name": str(p.get("name") or os.path.basename(path) or p["id"]), "path": path, "key": key,
                          "group": group_of(path, base, str(p.get("subfolder") or "")), "format": str(p.get("format") or ext).upper()[:6],
                          "rating": rating, "flag": flag, "captured": p.get("captured") or None, "w": p.get("width"), "h": p.get("height"),
@@ -330,7 +341,7 @@ class PhotoLibrary:
                 recs.append({"uid": "n-" + hashlib.sha1(key.encode("utf-8", "replace")).hexdigest()[:16], "name": os.path.basename(path),
                              "path": path, "key": key, "group": group_of(path, base), "format": ext.upper()[:6], "rating": None,
                              "flag": "none", "captured": captured, "w": None, "h": None, "vc": False, "in_catalog": False, "on_disk": True,
-                             "size": size, "mtime": mtime, "label": None, "edited": None, "added_at": None})
+                             "size": size, "mtime": mtime, "label": None, "edited": None, "added_at": self._ctime_text(path)})
         truncated = cat_truncated or disk_truncated or len(recs) > MAX_PHOTOS
         recs = [p for g in sort_groups(recs, "name") for p in g["photos"]][:MAX_PHOTOS]
         self._date_cache = {k: v for k, v in self._date_cache.items() if k in disk}      # 只保留还在磁盘上的

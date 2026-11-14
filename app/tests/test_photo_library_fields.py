@@ -29,11 +29,12 @@ def test_public_has_sort_fields_for_catalog_and_disk_only_photos(env):
     pa, pb = sorted(env.lib.state()["photos"], key=lambda p: p["name"])
     assert pa["size"] == 123 and pa["mtime"] == pytest.approx(ts, abs=0.01) and pa["label"] == "red" and pa["edited"] is True
     assert pa["added_at"] == "2026-11-01T08:00:00" and pa["captured"] == "2026-03-04T05:06:07" and pa["rating"] == 4 and pa["format"] == "JPG"
-    assert pb["size"] == 77 and pb["mtime"] > 0 and (pb["label"], pb["edited"], pb["added_at"]) == (None, None, None)
+    assert pb["size"] == 77 and pb["mtime"] > 0 and (pb["label"], pb["edited"]) == (None, None)
+    assert pb["added_at"] and pb["added_at"][:4].isdigit()          # 目录里没有：用磁盘文件的创建时间当导入时间
     assert pb["group"] == "2026/2026-11-14" and pb["added"] is False
 
 
-@pytest.mark.parametrize("raw,expect", [("none", None), ("", None), (None, None), (5, None), ("  Blue ", "blue")])
+@pytest.mark.parametrize("raw,expect", [("none", None), ("gray", None), ("Grey", None), ("", None), (None, None), (5, None), ("  Blue ", "blue")])
 def test_label_normalised(env, raw, expect):
     p = touch(env.base / "A.jpg")
     env.lr.catalog = [cat(1, p, label=raw)]
@@ -54,7 +55,8 @@ def test_old_plugin_without_new_fields_gives_none(env):
     env.lr.catalog = [cat(1, p)]                 # cat() 不带 label/edited/added_at：旧插件
     env.lib.refresh_sync()
     ph = env.lib.state()["photos"][0]
-    assert (ph["label"], ph["edited"], ph["added_at"]) == (None, None, None) and ph["size"] == 5
+    assert (ph["label"], ph["edited"]) == (None, None) and ph["size"] == 5
+    assert ph["added_at"] and ph["added_at"][:4].isdigit()          # 插件没给加入时间：回落到文件创建时间
 
 
 def test_missing_on_disk_catalog_photo_has_no_size(env):

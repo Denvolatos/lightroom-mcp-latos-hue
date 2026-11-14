@@ -1327,7 +1327,7 @@ end
 -- Optional raw metadata (label, has-adjustments, date added). These key names are not confirmed on a real Lightroom Classic:
 -- ask for all of them in one batch; if Lightroom refuses that, ask key by key. A key that cannot be read gives nil for that
 -- field only, never an error for the whole command.
-local OPTIONAL_KEYS = { "colorNameForLabel", "hasAdjustments", "addedTime" }
+local OPTIONAL_KEYS = { "colorNameForLabel", "hasAdjustments", "addedTime", "editCount" }
 
 local function optionalRaw(catalog, photos)
 	local all = batchRaw(catalog, photos, OPTIONAL_KEYS)
@@ -1433,7 +1433,13 @@ function M.list_folder_photos(params)
 			height = dims.height,
 			is_virtual_copy = rawOf(batch, photo, "isVirtualCopy") and true or false,
 			label = optionalOf(extra, photo, "colorNameForLabel"),
-			edited = optionalOf(extra, photo, "hasAdjustments"),
+			edited = (function()
+				local has = optionalOf(extra, photo, "hasAdjustments")
+				if type(has) == "boolean" then return has end
+				local n = optionalOf(extra, photo, "editCount")   -- measured on a real machine: hasAdjustments is not a raw key
+				if type(n) == "number" then return n > 0 end
+				return nil
+			end)(),
 			added_at = addedAtOf(optionalOf(extra, photo, "addedTime")),
 		}
 	end
