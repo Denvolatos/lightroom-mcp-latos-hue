@@ -582,11 +582,16 @@ class Api:
             changes["lightroom_path"] = ""
         elif choice == "pending" and self._pending_lr_path:
             changes["lightroom_path"] = self._pending_lr_path
+        before = {k: self._settings.data.get(k) for k in ("base_folder", "gallery_folder")}
         r = self._settings.update(changes, selectable=is_selectable, create_missing=bool(create_missing))
         if r["ok"]:
             self._pending_lr_path = ""
             if "preview_edge" in changes:
                 self._preview.set_edge(r["settings"]["preview_edge"])
+            if any(r["settings"].get(k) != v for k, v in before.items()):
+                # 换了工作文件夹或浏览目录：图库按新文件夹重新读取，向导下一次重新检查（与 wizard_pick_folder 一致）
+                self._wizard.invalidate()
+                self._photolib.refresh()
         return r
 
     def choose_lightroom_path(self) -> dict:

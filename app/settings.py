@@ -274,6 +274,18 @@ def restrict_to_current_user(path: Path) -> None:
         pass
 
 
+def _same_folder(a, b) -> bool:
+    """两个文件夹设置是否指同一个位置（只比较文本，不访问磁盘）。"""
+    a = a.strip() if isinstance(a, str) else ""
+    b = b.strip() if isinstance(b, str) else ""
+    if not a or not b:
+        return a == b
+    try:
+        return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+    except (OSError, ValueError):
+        return a == b
+
+
 class SettingsStore:
     def __init__(self, path: Path | None = None, restrict=restrict_to_current_user):
         self.path = Path(path) if path is not None else SETTINGS_FILE
@@ -302,8 +314,13 @@ class SettingsStore:
         new = dict(self.data)
         errors: dict[str, str] = {}
         needs_create = False
-        if "base_folder" in changes:
-            v = validate_folder(str(changes["base_folder"] or ""))
+        raw_base = str(changes.get("base_folder") or "").strip().strip('"') if "base_folder" in changes else None
+        if raw_base is not None and _same_folder(raw_base, self.data.get("base_folder")):
+            pass        # 没有变化（设置对话框每次保存都会带上它）：不再校验，免得文件夹暂时不在时连其他开关都存不进去
+        elif raw_base == "":
+            new["base_folder"] = ""     # 允许空值（还没选或想清除），由环境检查向导单独提醒
+        elif raw_base is not None:
+            v = validate_folder(raw_base)
             if not v["ok"]:
                 errors["base_folder"] = v["message"]
             elif not v["exists"]:

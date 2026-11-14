@@ -41,3 +41,68 @@ def test_wizard_reports_missing_folder_branch_after_load(tmp_path):
                              get_connection=lambda: {}, get_provider=lambda: {}, spawn=lambda fn: fn())
     folder = w.check()[0]
     assert folder["state"] == wizard.TODO and "找不到了" in folder["text"]
+
+
+# ---------------------------------------------------------------- 工作文件夹为空 / 不变时也能保存其他设置
+def test_empty_work_folder_does_not_block_other_settings(tmp_path):
+    s = _store(tmp_path / "s.json")
+    assert s.data["base_folder"] == ""
+    r = s.update({"base_folder": "", "check_updates": False, "confirm_default": False})
+    assert r["ok"] and s.data["check_updates"] is False and s.data["confirm_default"] is False
+
+
+def test_unchanged_offline_work_folder_is_not_revalidated(tmp_path):
+    p = tmp_path / "s.json"
+    gone = r"Z:\移动硬盘\照片工作"
+    p.write_text(json.dumps({"base_folder": gone}), encoding="utf-8")
+    s = _store(p)
+    r = s.update({"base_folder": gone, "check_updates": False})
+    assert r["ok"] and s.data["base_folder"] == gone and s.data["check_updates"] is False
+    r = s.update({"base_folder": r"Z:\别的盘\新文件夹"})          # 真的换了：照常完整校验
+    assert not r["ok"] and "base_folder" in r["errors"]
+
+
+def test_work_folder_can_be_cleared(tmp_path):
+    folder = tmp_path / "w"
+    folder.mkdir()
+    s = _store(tmp_path / "s.json")
+    assert s.update({"base_folder": str(folder)})["ok"]
+    assert s.update({"base_folder": ""})["ok"] and s.data["base_folder"] == ""
+
+
+class _Spy:
+    def __init__(self):
+        self.calls = 0
+
+    def __call__(self, *a, **k):
+        self.calls += 1
+
+
+def _fake_api(store):
+    import main
+    api = main.Api.__new__(main.Api)
+    api._settings = store
+    api._pending_lr_path = ""
+    api._ai_chosen = lambda: True
+    api._preview = type("P", (), {"set_edge": lambda self, e: e})()
+    api._wizard = type("W", (), {})()
+    api._wizard.invalidate = _Spy()
+    api._photolib = type("L", (), {})()
+    api._photolib.refresh = _Spy()
+    return api
+
+
+def test_save_settings_refreshes_gallery_and_wizard_when_folder_changes(tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    s = _store(tmp_path / "s.json")
+    api = _fake_api(s)
+    assert api.save_settings({"check_updates": False})["ok"]
+    assert api._photolib.refresh.calls == 0 and api._wizard.invalidate.calls == 0     # 没换文件夹：不刷新
+    assert api.save_settings({"base_folder": str(a)})["ok"]
+    assert api._photolib.refresh.calls == 1 and api._wizard.invalidate.calls == 1
+    assert api.save_settings({"gallery_folder": str(b)})["ok"]
+    assert api._photolib.refresh.calls == 2 and api._wizard.invalidate.calls == 2
+    assert api.save_settings({"base_folder": str(a), "gallery_folder": str(b)})["ok"]   # 同样的值：不刷新
+    assert api._photolib.refresh.calls == 2
