@@ -3,6 +3,14 @@
 Versions: a new feature raises the middle number, a small fix the last one. The server version lives in
 `server/lightroom_mcp/__init__.py`, the plug-in version in `plugin/lrmcp.lrdevplugin/Version.lua` (and `Info.lua`).
 
+## 1.2.0 — released together with Latos Hue 1.2.0
+
+- **Plug-in / server:** `list_folder_photos` now also returns the colour label, whether the photo has been edited (`editCount`) and,
+  if Lightroom gives it, when it was added. Measured on a real Lightroom Classic: "no label" is reported as `"gray"`, and
+  `hasAdjustments` / `addedTime` are not raw metadata keys on this build (they stay empty; the app falls back to other sources).
+  Keys that cannot be read give an empty field, never an error for the whole command. The tools and how to use them are unchanged.
+- **Upgrading:** close Latos Hue and Lightroom, install, then restart Lightroom (or reload the plug-in once).
+
 ## 1.1.1 — fixes for slow photo switching and fragile connections; released together with Latos Hue 1.1.1
 
 No new tools; the tools and how to use them are unchanged.
