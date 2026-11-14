@@ -366,15 +366,22 @@ class LibraryService:
             self._lr_cache = {r["id"]: r for r in rows}
         favs = {f["key"] for f in self.favs.list() if f["type"] == "lr_preset"}
         groups: dict[str, list] = {}
+        hidden = 0
         for r in rows:
+            if r.get("has_masks") or r.get("masks"):     # 带蒙版的预设本软件套用不了（apply_prepare 会拒绝）：默认不列出，只计数
+                hidden += 1
+                continue
             folder = str(r.get("folder") or "（未分组）")[:80]
             key = f"{folder}/{str(r.get('name') or '')[:80]}"
-            groups.setdefault(folder, []).append({"id": r["id"], "name": str(r.get("name") or "（未命名）")[:80], "masks": bool(r.get("has_masks") or r.get("masks")),
+            groups.setdefault(folder, []).append({"id": r["id"], "name": str(r.get("name") or "（未命名）")[:80], "masks": False,
                                                   "key": key, "fav": key in favs})
-        note = f"共 {data.get('total', len(rows))} 个预设，" + (f"匹配 {data.get('matched', len(rows))} 个，" if word else "") + f"显示 {len(rows)} 个。"
+        shown = len(rows) - hidden
+        note = f"共 {data.get('total', len(rows))} 个预设，" + (f"匹配 {data.get('matched', len(rows))} 个，" if word else "") + f"显示 {shown} 个。"
         if (data.get("matched") or 0) > len(rows) or (not word and (data.get("total") or 0) > len(rows)):
             note += "请输入关键词缩小范围。"
-        return {"ok": True, "groups": [{"folder": k, "presets": v} for k, v in groups.items()], "note": note}
+        # 只返回有预设的分组（全是带蒙版预设的文件夹整组不出现）
+        return {"ok": True, "groups": [{"folder": k, "presets": v} for k, v in groups.items() if v], "note": note,
+                "hidden_masks": hidden}
 
     # ---- 套用：确认清单 → 写入 -------------------------------------
     def apply_prepare(self, kind, ref, strength=100) -> dict:
