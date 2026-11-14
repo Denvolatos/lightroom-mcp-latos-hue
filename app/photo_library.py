@@ -11,7 +11,7 @@
 （最多 500 张且总量 64 MB，最久未用先淘汰），由本机图片服务（preview.PreviewServer，只服务缓存里的图、带随机口令）提供 URL。
 照片被调整/撤销/还原后缓存失效并重新取。
 
-选中：页面把想选的照片发给后端，后端带 show_folder=软件文件夹 调 select_photos，以 Lightroom 实际选区为准更新高亮。
+选中：页面把想选的照片发给后端，后端先不带 show_folder 调 select_photos；没选中时再带照片自己的文件夹试一次，以 Lightroom 实际选区为准更新高亮。
 所有来自页面的值在这里再校验；页面不能传路径或文件夹，只能传当前图库里已知的照片标识。不对文件夹做周期性轮询。
 """
 from __future__ import annotations
@@ -527,7 +527,8 @@ class PhotoLibrary:
         return out
 
     def select(self, ids, active=None) -> dict:
-        """把这些照片在 Lightroom 里选中（带 show_folder=软件文件夹），并以 Lightroom 实际选区为准更新高亮。"""
+        """把这些照片在 Lightroom 里选中，并以 Lightroom 实际选区为准更新高亮。先不带 show_folder 直接选；
+        没选中时才带上照片自己所在的文件夹再试一次（1.1.1 之前每次都切到浏览根目录，Lightroom 网格每次都重载）。"""
         chk = self._check_ids(ids, MAX_SELECT)
         if isinstance(chk, str):
             return {"ok": False, "status": "refused", "message": chk, "selected": list(self.sel_ids), "active": self.active}
@@ -535,12 +536,14 @@ class PhotoLibrary:
         if active is not None and (not isinstance(active, str) or active not in ids):
             return {"ok": False, "status": "refused", "message": "当前照片必须是所选照片之一。",
                     "selected": list(self.sel_ids), "active": self.active}
-        base = browse_folder(self.settings.data)
         with self._select_lock:
             self._selecting = True
             try:
                 try:
-                    data = self.lr.library_select(ids, active, base if os.path.isdir(base) else None)
+                    data = self.lr.library_select(ids, active, None)           # 先直接选，不切换 Lightroom 的文件夹
+                    folder = self._retry_folder(data, ids, active)
+                    if folder:                       # 没选中（照片不在 Lightroom 当前显示的来源里）：切到照片自己的文件夹再试一次
+                        data = self.lr.library_select(ids, active, folder)
                 except Exception as e:           # noqa: BLE001
                     sel = self._read_lr_selection()
                     if sel is not None:
@@ -568,6 +571,23 @@ class PhotoLibrary:
         self._after_select()
         return {"ok": ok, "status": status, "message": msg, "selected": list(self.sel_ids), "active": self.active,
                 "not_selected": [i for i in (data.get("not_selected") or []) if isinstance(i, str)]}
+
+    def _retry_folder(self, data: dict, ids: list[str], active) -> str | None:
+        """第一次（不带 show_folder）没全选中时，返回要切换到的文件夹：优先当前照片，否则第一张没选中的照片所在的文件夹。
+        路径只来自后端自己的图库数据；文件夹不存在、或结果不确定时不重试。"""
+        status = data.get("status") or ("selected" if data.get("all_selected") else "partial")
+        if status in ("selected", "uncertain"):
+            return None
+        got = set(i for i in (data.get("selected") or []) if isinstance(i, str))
+        missed = [i for i in (data.get("not_selected") or []) if isinstance(i, str)] or [i for i in ids if i not in got]
+        if not missed:
+            return None
+        pick = active if active in missed else missed[0]
+        with self._lock:
+            p = self._by_uid.get(pick)
+            path = p["path"] if p else ""
+        folder = os.path.dirname(path) if path else ""
+        return folder if folder and os.path.isdir(folder) else None
 
     def _after_select(self) -> None:
         """有选区就立即刷新“当前照片”（预览、本次调整等），不等 3 秒轮询。"""

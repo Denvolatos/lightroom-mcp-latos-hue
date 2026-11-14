@@ -616,8 +616,44 @@ def test_select_model_cases_and_limit_50(env):
     r = env.lib.select(ids[:51])
     assert r["ok"] is False and "最多选择 50" in r["message"] and len(env.lr.select_calls) == 4
     assert env.lib.select([ids[1], ids[1]])["selected"] == [ids[1]]           # 重复的合并
-    assert env.lr.select_calls[0] == ([ids[0]], None, str(env.base))          # 带 show_folder=软件文件夹
+    assert env.lr.select_calls[0] == ([ids[0]], None, None)                    # 1.1.1：先直接选，不切换文件夹
     assert env.lr.select_calls[1][1] == ids[2]
+
+
+def test_select_retries_once_with_the_photos_own_folder_only_when_not_selected(env):
+    seed(env, 2, 2, sub="子文件夹")
+    env.lib.refresh_sync()
+    by = {p["name"]: p["id"] for p in env.lib.state()["photos"]}
+    a, s0 = by["R0.jpg"], by["S0.arw"]
+    calls = []
+
+    def sel(ids, active, show_folder):
+        calls.append(show_folder)
+        if show_folder is None and s0 in ids:                                 # 第一次：子文件夹里的照片不在当前来源里，选不中
+            return {"status": "partial", "selected": [i for i in ids if i == a], "not_selected": [i for i in ids if i != a],
+                    "all_selected": False, "reason": "不在当前文件夹"}
+        return {"status": "selected", "selected": list(ids), "not_selected": [], "all_selected": True}
+    env.lr.library_select = sel
+    r = env.lib.select([a, s0], active=s0)
+    assert calls == [None, str(env.base / "子文件夹")]                          # 只重试一次，带的是照片自己的文件夹
+    assert r["ok"] and r["selected"] == [a, s0] and r["active"] == s0
+    calls.clear()
+    assert env.lib.select([a])["ok"] and calls == [None]                       # 直接选中：不切换文件夹
+
+
+def test_select_does_not_retry_when_uncertain_or_folder_gone(env):
+    seed(env, 1, 1, sub="sub")
+    env.lib.refresh_sync()
+    by = {p["name"]: p["id"] for p in env.lib.state()["photos"]}
+    env.lr.select_result = {"status": "uncertain", "selected": [], "not_selected": [], "all_selected": False}
+    env.lib.select([by["S0.arw"]])
+    assert [c[2] for c in env.lr.select_calls] == [None]
+    import shutil
+    shutil.rmtree(env.base / "sub")
+    env.lr.select_calls.clear()
+    env.lr.select_result = {"status": "partial", "selected": [], "not_selected": [by["S0.arw"]], "all_selected": False}
+    env.lib.select([by["S0.arw"]])
+    assert [c[2] for c in env.lr.select_calls] == [None]                       # 文件夹已不在：不重试
 
 
 def test_select_calls_on_selected_and_emits(env):
@@ -987,7 +1023,7 @@ def test_api_validates_page_values(api):
     assert api.library_thumbnails(["101"], retry="yes")["ok"] is True          # retry 只认 True
     assert api.library_select(["101"], {"x": 1})["status"] == "refused"
     r = api.library_select(["101"], "101")
-    assert r["ok"] is True and api._photolib.lr.select_calls == [(["101"], "101", str(api._base))]
+    assert r["ok"] is True and api._photolib.lr.select_calls == [(["101"], "101", None)]
 
 
 def test_api_start_refresh_and_thumb_server_lifecycle(api):
