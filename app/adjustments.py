@@ -17,6 +17,7 @@ STATUS_OK = "已应用"
 STATUS_FAILED = "失败"
 STATUS_DENIED = "已拒绝"
 STATUS_UNDONE = "已撤销"
+STATUS_NOT_RUN = "未执行（本轮已结束）"   # 本轮结束（停止/超时/出错）时还没有结果的行
 
 EDIT_DIR = Path.home() / "LrMcp" / "edits"
 SET_TOOL = "lr_set_develop"
@@ -76,7 +77,18 @@ class AdjustmentTracker:
             return changed
         if t == "tool_result":
             return self._on_result(ev)
+        if t == "done":
+            return self._on_turn_end()
         return False
+
+    def _on_turn_end(self) -> bool:
+        """一轮结束后不会再有 tool_result：仍是“待确认/处理中”的行改成终态，不留假记录。"""
+        changed = False
+        for r in self.rows:
+            if r["status"] in (STATUS_PENDING, STATUS_RUNNING):
+                r["status"], r["note"], changed = STATUS_NOT_RUN, "本轮已结束，这项调整没有执行结果。", True
+        self._calls.clear()
+        return changed
 
     def _on_tool(self, ev: dict) -> bool:
         name, tid = ev.get("name", ""), ev.get("id") or ""

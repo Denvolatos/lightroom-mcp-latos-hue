@@ -60,3 +60,19 @@ def test_tracker_tolerates_non_dict_changes(changes, tmp_path):
     assert len(t.rows) == (1 if changes == '{"Exposure2012": 0.3}' else 0)
     t.observe({"type": "tool", "name": "lr_set_develop", "id": "T2", "input": "not a dict"})
     t.observe({"type": "tool_result", "id": "T1", "text": '{"edit_id": "E1", "changes": ["bad", 3]}', "is_error": False})
+
+
+@pytest.mark.parametrize("confirm_on", [True, False])
+def test_turn_end_marks_unresolved_rows(confirm_on, tmp_path):
+    t = adj.AdjustmentTracker(confirm_on=confirm_on, edit_dir=tmp_path)
+    t.observe({"type": "tool", "name": "lr_set_develop", "id": "T1", "input": {"changes": {"Exposure2012": 0.3}}})
+    t.observe({"type": "tool", "name": "lr_set_develop", "id": "T2", "input": {"changes": {"Contrast2012": 5}}})
+    t.observe({"type": "tool_result", "id": "T1", "text": '{"edit_id": "E1", "changes": []}', "is_error": False})
+    assert t.observe({"type": "stopped"}) is False
+    assert t.observe({"type": "done", "tokens": 0, "cost": None, "text": "", "is_error": True}) is True
+    st = {r["key"]: r["status"] for r in t.rows}
+    assert st == {"Exposure2012": adj.STATUS_OK, "Contrast2012": adj.STATUS_NOT_RUN}
+    assert t.observe({"type": "done", "tokens": 0, "cost": None, "text": "", "is_error": False}) is False
+    # 迟到的结果不会再改终态行
+    t.observe({"type": "tool_result", "id": "T2", "text": '{"edit_id": "E2", "changes": []}', "is_error": False})
+    assert {r["key"]: r["status"] for r in t.rows}["Contrast2012"] == adj.STATUS_NOT_RUN
