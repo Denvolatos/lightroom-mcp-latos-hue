@@ -55,7 +55,7 @@ local function readKeyValues(path)
 	end
 	local values = {}
 	for line in text:gmatch("[^\r\n]+") do
-		local k, v = line:match("^(%w+)=(.*)$")
+		local k, v = line:match("^([A-Za-z0-9]+)=(.*)$")
 		if k then
 			values[k] = v
 		end
@@ -68,7 +68,7 @@ local function readLegacyToken()
 		return nil
 	end
 	local text = LrFileUtils.readFile(legacyTokenPath)
-	return text and (text:gsub("%s+", ""))
+	return text and (text:gsub("[ \t\r\n]+", ""))
 end
 
 local function authHeaders(token, extra)
@@ -95,13 +95,13 @@ end
 -- "cmd <id> <command> key=value ..."  or (dev builds only)  "run <id> <script name>"
 local function parse(body)
 	local words = {}
-	for w in body:gmatch("%S+") do
+	for w in body:gmatch("[^ \t\r\n]+") do
 		words[#words + 1] = w
 	end
 	if words[1] == "cmd" and #words >= 3 then
 		local params = {}
 		for i = 4, #words do
-			local k, v = words[i]:match("^([%w_]+)=(.*)$")
+			local k, v = words[i]:match("^([A-Za-z0-9_]+)=(.*)$")
 			if k then
 				params[k] = v
 			end
@@ -238,7 +238,7 @@ LrTasks.startAsyncTask(function()
 		local wanted = {}
 		if LrFileUtils.exists(serversDir) then
 			for path in LrFileUtils.files(serversDir) do
-				local port = tonumber(LrPathUtils.leafName(path):match("^(%d+)%.txt$"))
+				local port = tonumber(LrPathUtils.leafName(path):match("^([0-9]+)%.txt$"))
 				if port and port >= FIRST_PORT and port < FIRST_PORT + PORT_COUNT then
 					wanted[port] = path
 				end

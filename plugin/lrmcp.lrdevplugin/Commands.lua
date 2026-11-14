@@ -27,6 +27,18 @@ local function fail(message)
 	error({ lrmcp = message }, 0)
 end
 
+-- Lua's character classes (%c, %w, %a, %s ...) and string.lower/upper follow the C locale of the process. With a western
+-- code page (cp1252) the bytes 0x80-0xFF count as letters, control or space characters, so the bytes of UTF-8 text (Chinese
+-- paths and names) would be refused, cut apart or changed. Only explicit ASCII ranges are used here.
+local CONTROL_CHARS = "[%z\1-\31\127]" -- ASCII control characters: 0x00-0x1F and 0x7F
+local ASCII_LOWER = {}
+for code = 65, 90 do
+	ASCII_LOWER[string.char(code)] = string.char(code + 32)
+end
+local function asciiLower(text)
+	return (text:gsub("[A-Z]", ASCII_LOWER))
+end
+
 local function photoFromRef(catalog, ref)
 	if ref == nil or ref == "selected" then
 		local photo = catalog:getTargetPhoto()
@@ -227,7 +239,7 @@ function M.get_preview(params)
 		fail("这是视频文件，暂不支持预览。")
 	end
 	LrFileUtils.createAllDirectories(previewDir)
-	local uuid = tostring(photo:getRawMetadata("uuid")):gsub("[^%w]", ""):sub(1, 8)
+	local uuid = tostring(photo:getRawMetadata("uuid")):gsub("[^A-Za-z0-9]", ""):sub(1, 8)
 	-- unique per call: two AI sessions may ask for a preview of the same photo within the same second, and a shared
 	-- file name would let one session read the other's picture
 	previewCounter = previewCounter + 1
@@ -326,7 +338,7 @@ function M.set_develop(params)
 		fail("只读模式已开启（" .. readonlyPath .. " 存在），不允许修改照片。")
 	end
 	local editId = params.edit
-	if not editId or not editId:match("^[%w%-]+$") then
+	if not editId or not editId:match("^[A-Za-z0-9%-]+$") then
 		fail("缺少或不合法的修改编号。")
 	end
 	local restoring = params.restore == "1"
@@ -520,7 +532,7 @@ local function findPreset(uuid)
 end
 
 function M.list_presets(params)
-	local query = params.query and params.query ~= "" and params.query:lower() or nil
+	local query = params.query and params.query ~= "" and asciiLower(params.query) or nil
 	local limit = math.max(1, math.min(tonumber(params.limit) or 30, 50))
 	local rows, total, matched = {}, 0, 0
 	for _, folder in ipairs(LrApplication.developPresetFolders()) do
@@ -528,7 +540,7 @@ function M.list_presets(params)
 		for _, preset in ipairs(folder:getDevelopPresets()) do
 			total = total + 1
 			local name = tostring(preset:getName())
-			if not query or name:lower():find(query, 1, true) or folderName:lower():find(query, 1, true) then
+			if not query or asciiLower(name):find(query, 1, true) or asciiLower(folderName):find(query, 1, true) then
 				matched = matched + 1
 				if #rows < limit then
 					local s = preset:getSetting() or {}
@@ -560,11 +572,11 @@ function M.apply_preset(params)
 		fail("只读模式已开启（" .. readonlyPath .. " 存在），不允许修改照片。")
 	end
 	local editId = params.edit
-	if not editId or not editId:match("^[%w%-]+$") then
+	if not editId or not editId:match("^[A-Za-z0-9%-]+$") then
 		fail("缺少或不合法的修改编号。")
 	end
 	local presetId = params.preset
-	if not presetId or not presetId:match("^[%w%-]+$") then
+	if not presetId or not presetId:match("^[A-Za-z0-9%-]+$") then
 		fail("缺少或不合法的预设 id（用 lr_list_presets 查）。")
 	end
 	local preset = findPreset(presetId)
@@ -637,7 +649,7 @@ function M.restore_settings(params)
 		fail("只读模式已开启（" .. readonlyPath .. " 存在），不允许修改照片。")
 	end
 	local editId = params.edit
-	if not editId or not editId:match("^[%w%-]+$") then
+	if not editId or not editId:match("^[A-Za-z0-9%-]+$") then
 		fail("缺少或不合法的修改编号。")
 	end
 	local blob = params.blob
@@ -663,7 +675,7 @@ function M.restore_settings(params)
 		if count > 300 then
 			fail("要还原的项目太多。")
 		end
-		if type(key) ~= "string" or not key:match("^[%w_]+$") then
+		if type(key) ~= "string" or not key:match("^[A-Za-z0-9_]+$") then
 			fail("不合法的参数名。")
 		end
 		if key == "MaskGroupBasedCorrections" then
@@ -733,7 +745,7 @@ local function urlDecode(text)
 end
 
 local function hasControlChars(text)
-	return text:find("[%c]") ~= nil
+	return text:find(CONTROL_CHARS) ~= nil
 end
 
 local function keywordNames(photo)
@@ -788,7 +800,7 @@ function M.set_metadata(params)
 		fail("只读模式已开启（" .. readonlyPath .. " 存在），不允许修改照片。")
 	end
 	local editId = params.edit
-	if not editId or not editId:match("^[%w%-]+$") then
+	if not editId or not editId:match("^[A-Za-z0-9%-]+$") then
 		fail("缺少或不合法的修改编号。")
 	end
 	local rating, flag, color, title, caption, addNames, removeNames
@@ -805,7 +817,7 @@ function M.set_metadata(params)
 		end
 	end
 	if params.color ~= nil then
-		color = params.color:lower()
+		color = asciiLower(params.color)
 		if not LABELS[color] then
 			fail("颜色标签必须是 red、yellow、green、blue、purple 或 none。")
 		end
@@ -881,7 +893,7 @@ function M.set_metadata(params)
 	local verified = true
 	if rating ~= nil and after.rating ~= rating then verified = false end
 	if flag ~= nil and after.flag ~= PICK_TO_FLAG[flag] then verified = false end
-	if color ~= nil and after.color_label:lower() ~= color then verified = false end
+	if color ~= nil and asciiLower(after.color_label) ~= color then verified = false end
 	if title ~= nil and after.title ~= title then verified = false end
 	if caption ~= nil and after.caption ~= caption then verified = false end
 	local nowHas = {}
@@ -912,7 +924,7 @@ local BLOCKED_FOLDERS = {
 }
 
 local function checkExportFolder(path)
-	if path == "" or #path > 400 or path:find("%c") then
+	if path == "" or #path > 400 or path:find(CONTROL_CHARS) then
 		fail("导出文件夹的路径不合法（为空、太长或含控制字符）。")
 	end
 	if path:sub(1, 2) == "\\\\" or path:sub(1, 2) == "//" then
@@ -921,7 +933,7 @@ local function checkExportFolder(path)
 	if not LrPathUtils.isAbsolute(path) then
 		fail("导出文件夹必须是完整路径，比如 D:\\照片\\导出 。")
 	end
-	local norm = (path:gsub("\\", "/")):lower() .. "/"
+	local norm = asciiLower((path:gsub("\\", "/"))) .. "/"
 	norm = norm:gsub("//+", "/")
 	for part in norm:gmatch("[^/]+") do
 		if part == ".." then
@@ -994,7 +1006,7 @@ function M.export_photo(params)
 
 	-- the file name comes from the photo's own file name, only safe characters; the first free name is used
 	local leaf = LrPathUtils.leafName(photo:getRawMetadata("path") or "photo")
-	local base = (LrPathUtils.removeExtension(leaf):gsub("[^%w%-_]", "_"))
+	local base = (LrPathUtils.removeExtension(leaf):gsub("[^A-Za-z0-9%-_]", "_"))
 	if base == "" then
 		base = "photo"
 	end
@@ -1051,16 +1063,16 @@ local IMPORT_EXTENSIONS = {
 }
 
 local function checkImportPath(path)
-	if path == "" or #path > 400 or path:find("%c") then
+	if path == "" or #path > 400 or path:find(CONTROL_CHARS) then
 		fail("照片路径不合法（为空、太长或含控制字符）。")
 	end
 	if path:sub(1, 2) == "\\\\" or path:sub(1, 2) == "//" then
 		fail("不允许导入网络路径上的照片。请用本机磁盘上的文件。")
 	end
-	if not path:match("^%a:[\\/]") then
+	if not path:match("^[A-Za-z]:[\\/]") then
 		fail("照片路径必须是本机的完整路径，比如 D:\\照片\\a.jpg 。")
 	end
-	local norm = (path:gsub("\\", "/")):lower()
+	local norm = asciiLower((path:gsub("\\", "/")))
 	norm = norm:gsub("//+", "/")
 	for part in norm:gmatch("[^/]+") do
 		if part == ".." then
@@ -1073,7 +1085,7 @@ local function checkImportPath(path)
 		end
 	end
 	local ext = path:match("%.([^%.\\/]+)$")
-	if not ext or not IMPORT_EXTENSIONS[ext:lower()] then
+	if not ext or not IMPORT_EXTENSIONS[asciiLower(ext)] then
 		fail("不支持这种文件格式（只接受常见的照片格式：jpg jpeg arw cr2 cr3 nef nrw raf orf rw2 dng tif tiff heic heif png）：" .. path)
 	end
 	local kind = LrFileUtils.exists(path)
@@ -1149,16 +1161,16 @@ end
 -- a folder of the catalog: local drive path, no network path, no "..", not under BLOCKED_FOLDERS. It need not exist on disk
 -- (a folder can be offline) and is not created; whether it is in the catalog is found out with getFolderByPath.
 local function checkLibraryFolder(path)
-	if path == "" or #path > 400 or path:find("%c") then
+	if path == "" or #path > 400 or path:find(CONTROL_CHARS) then
 		fail("文件夹路径不合法（为空、太长或含控制字符）。")
 	end
 	if path:sub(1, 2) == "\\\\" or path:sub(1, 2) == "//" then
 		fail("不允许使用网络路径。请用本机磁盘上的文件夹。")
 	end
-	if not path:match("^%a:[\\/]") then
+	if not path:match("^[A-Za-z]:[\\/]") then
 		fail("文件夹路径必须是本机的完整路径，比如 D:\\照片 。")
 	end
-	local norm = (path:gsub("\\", "/")):lower()
+	local norm = asciiLower((path:gsub("\\", "/")))
 	norm = norm:gsub("//+", "/")
 	for part in norm:gmatch("[^/]+") do
 		if part == ".." then
@@ -1190,7 +1202,7 @@ local function parseIds(raw, maxCount, what)
 	end
 	local ids, seen = {}, {}
 	for id in urlDecode(raw):gmatch("[^,]+") do
-		if #id > 64 or not id:match("^[%w%-]+$") then
+		if #id > 64 or not id:match("^[A-Za-z0-9%-]+$") then
 			fail("照片 id 不合法：只能是字母、数字和连字符。")
 		end
 		if not seen[id] then
@@ -1226,7 +1238,7 @@ function M.list_folder_photos(params)
 	local entries = {}
 	for _, photo in ipairs(folder:getPhotos(recursive) or {}) do
 		local p = photo:getRawMetadata("path") or ""
-		entries[#entries + 1] = { photo = photo, path = p, key = p:gsub("\\", "/"):lower(), uuid = photo:getRawMetadata("uuid") or "" }
+		entries[#entries + 1] = { photo = photo, path = p, key = asciiLower((p:gsub("\\", "/"))), uuid = photo:getRawMetadata("uuid") or "" }
 	end
 	table.sort(entries, function(a, b)
 		if a.key ~= b.key then
@@ -1234,7 +1246,7 @@ function M.list_folder_photos(params)
 		end
 		return a.uuid < b.uuid
 	end)
-	local root = (path:gsub("\\", "/")):lower():gsub("/+$", "")
+	local root = asciiLower((path:gsub("\\", "/"))):gsub("/+$", "")
 	local out = {}
 	for i = offset + 1, math.min(#entries, offset + limit) do
 		local e = entries[i]
@@ -1243,7 +1255,7 @@ function M.list_folder_photos(params)
 		local pick = photo:getRawMetadata("pickStatus")
 		local dir = (e.path:gsub("\\", "/")):match("^(.*)/[^/]*$") or ""
 		local subfolder = ""
-		if dir:lower():sub(1, #root) == root then
+		if asciiLower(dir):sub(1, #root) == root then
 			subfolder = dir:sub(#root + 2)
 		end
 		out[#out + 1] = {
@@ -1362,7 +1374,7 @@ function M.select_photos(params)
 	local activeId = params.active
 	if activeId ~= nil and activeId ~= "" then
 		activeId = urlDecode(activeId)
-		if #activeId > 64 or not activeId:match("^[%w%-]+$") then
+		if #activeId > 64 or not activeId:match("^[A-Za-z0-9%-]+$") then
 			fail("active 不合法：只能是照片 id。")
 		end
 	else

@@ -1075,3 +1075,74 @@ def test_select_reports_lightrooms_refusal(lib):
 def test_select_refuses_bad_parameters(lib, extra):
     assert not lib.run("select_photos", **extra)["ok"]
     assert lib.fake("select_calls") == 0
+
+
+# ---- 1.1.1: no locale-dependent character classes (cp1252 broke UTF-8 text) ------------------------------------------
+@pytest.fixture
+def western_locale():
+    """The C locale of the process decides what Lua's %c / %w / %s and string.lower mean. A western Windows (cp1252) made the
+    bytes 0x80-0x9F of Chinese UTF-8 text "control characters". Lua in lupa shares the C runtime of Python, so set it here."""
+    import locale
+
+    old = locale.setlocale(locale.LC_CTYPE)
+    for name in ("English_United States.1252", "en_US.ISO8859-1", "en_US.iso88591"):
+        try:
+            locale.setlocale(locale.LC_CTYPE, name)
+            break
+        except locale.Error:
+            continue
+    else:
+        pytest.skip("no western single-byte locale on this computer")
+    yield
+    locale.setlocale(locale.LC_CTYPE, old)
+
+
+# 中文照片成图: UTF-8 bytes include 0xAD (中) and 0x90 (成), which cp1252 counts as control characters (like 0x81 0x8D
+# 0x8F 0x9D), so the old %c escaped them one by one and broke the text.
+ZH = "\u4e2d\u6587\u7167\u7247\u6210\u56fe"
+
+
+def test_json_keeps_utf8_text_under_a_western_locale(lr, western_locale):
+    assert lr.decode(json.dumps(ZH, ensure_ascii=False)) == json.dumps(ZH, ensure_ascii=False)
+    assert lr.decode(r'"a\u0001b\u007f"') == r'"a\u0001b\u007f"'     # real control characters are still escaped
+    assert lr.decode(' [ 1 , -2.5e3 ] ') == "[1,-2500]"
+
+
+def test_chinese_title_and_folder_are_accepted_under_a_western_locale(lr, western_locale):
+    reply = lr.run("set_metadata", photo="selected", edit="m1", title=enc(ZH))
+    assert reply["ok"], reply
+    assert reply["data"]["after"]["title"] == ZH
+    folder = "D:\\" + ZH + "\\" + "\u5bfc\u51fa"
+    lr.make_folder(folder)
+    reply = lr.run("export_photo", photo="selected", folder=enc(folder))
+    assert reply["ok"] and reply["data"]["folder"] == folder, reply
+    bad = lr.run("set_metadata", photo="selected", edit="m2", title=enc("a\x7fb"))
+    assert not bad["ok"]
+
+
+def test_library_paths_with_chinese_names_under_a_western_locale(lr, western_locale):
+    root = "D:\\" + ZH
+    sub = root + "\\" + "\u5b50\u6587\u4ef6\u5939"     # 子文件夹
+    lr.lib_photo("UUID-ZH-1", sub + "\\A.JPG")
+    lr.lib_folder(sub, ["UUID-ZH-1"])
+    lr.lib_folder(root, [], [sub])
+    data = lr.run("list_folder_photos", path=enc(root))["data"]
+    assert data["total"] == 1 and data["photos"][0]["subfolder"] == "\u5b50\u6587\u4ef6\u5939"
+    assert data["photos"][0]["path"] == sub + "\\A.JPG"
+
+
+def test_plugin_lua_uses_no_locale_dependent_patterns():
+    """%a %c %l %p %u %w (and their upper-case forms), %s / %d inside a pattern, and string.lower / upper depend on the
+    C locale. The plug-in must use explicit ASCII ranges instead (string.format's %s and %d are fine)."""
+    import re
+
+    bad = []
+    for path in sorted(PLUGIN.glob("*.lua")):
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            code = line.split("--", 1)[0] if not line.lstrip().startswith("--") else ""
+            if re.search(r"%[aAcClLpPuUwW]", code) or re.search(r"[:.](lower|upper)\s*\(", code):
+                bad.append(f"{path.name}:{n}")
+            for pattern in re.findall(r"[:.](?:find|match|gmatch|gsub)\s*\(\s*(?:[\w.]+\s*,\s*)?[\"']((?:[^\"'\\]|\\.)*)[\"']", code):
+                if re.search(r"%[sSdD]", pattern):
+                    bad.append(f"{path.name}:{n}")
+    assert not bad, f"locale-dependent patterns at {bad}"
