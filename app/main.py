@@ -76,6 +76,7 @@ class Api:
         # 但只有 claude 真的启动、它那条通道也连上了 Lightroom 之后才切过去（见 _watch_side）；在那之前、或 claude 没装/没登录/
         # 启动失败时，一直用窗口自己的 Bridge，图库、导出、预设、版本照常可用。
         self._borrowing = False
+        self._startup_errors: list[str] = []     # 启动时没能完成的步骤（见 _start_background）
         self._mode_lock = threading.RLock()
         self._closing = threading.Event()
         self._lr = self._make_lr(False)
@@ -121,23 +122,33 @@ class Api:
                                    has_adjustments=lambda: any(r.get("status") == "已应用" for r in self._tracker.rows))
 
     def _start_background(self) -> None:
-        """窗口一出现就预热：Bridge、常驻 claude（含 lightroom_mcp 与确认服务）同时启动，之后每条消息零启动开销。"""
+        """窗口一出现就预热：Bridge、常驻 claude（含 lightroom_mcp 与确认服务）同时启动，之后每条消息零启动开销。
+        每一步单独兜底：任何一步出错只把原因推给页面，后面的照常做；连接巡检（backend.start）最先启动，一定会执行。
+        图库刷新放在最后：它会推事件给页面，而页面还没加载好时推事件会等待，不能挡住前面的步骤。"""
         self._splash_text(splashmod.TEXT_SERVICES)
-        self._updates.start_background()         # 开关为开时后台查一次（24 小时内查过就用缓存）；失败静默
-        launching = self._autolaunch.start()     # 开关为开且 Lightroom 没在运行时，后台最小化启动它（不阻塞界面）
-
-        def warm() -> None:
-            self._lr.start()
-        threading.Thread(target=warm, daemon=True).start()
+        launching = bool(self._startup_step("自动启动 Lightroom", self._autolaunch.start))   # 开关为开时后台最小化启动
+        self._startup_step("Lightroom 通道", lambda: threading.Thread(target=self._lr.start, daemon=True).start())
+        self._startup_step("连接巡检", self._backend.start)
+        self._startup_step("检查更新", self._updates.start_background)   # 开关为开时后台查一次；失败静默
         if self._persistent:
-            self._start_resident()
-        self._preview.server.start()
-        self._preview.start()
-        self._photolib.server.start()
-        self._photolib.start()
-        self._photolib.refresh()                # 软件启动时读一次；连接恢复后再补读
-        self._backend.start()
+            self._startup_step("AI 助手", self._start_resident)
+        self._startup_step("预览服务", lambda: (self._preview.server.start(), self._preview.start()))
+        self._startup_step("图库服务", lambda: (self._photolib.server.start(), self._photolib.start()))
         self._splash_text(splashmod.TEXT_CONNECT_LR if launching else splashmod.TEXT_LOADING)
+        self._startup_step("读取图库", self._photolib.refresh)          # 软件启动时读一次；连接恢复后再补读
+
+    def _startup_step(self, name: str, fn):
+        """启动时的一步：出错不往外抛，把原因作为一条错误消息推给页面（沿用 onClaudeEvent 的 error 事件）。"""
+        try:
+            return fn()
+        except Exception as e:                   # noqa: BLE001
+            self._startup_errors.append(name)
+            try:
+                self._emit({"type": "error", "message": f"启动时“{name}”没能完成（{type(e).__name__}）。"
+                                                        "其他功能不受影响；如果一直不正常，请重新打开软件。"})
+            except Exception:                    # noqa: BLE001
+                pass
+            return None
 
     def _splash_text(self, text: str) -> None:
         if self._splash is not None:
@@ -588,14 +599,13 @@ class Api:
                                                  cur if self._provider.id == "codex" or not include_status else None),
                 "current_provider": self._provider.id, "edges": list(appsettings.EDGE_CHOICES),
                 "default_base_folder": appsettings.default_base_folder(),
-                "about": self._about(10 if include_status else 3)}
+                "about": self._about(10 if include_status else None)}
 
-    def _about(self, timeout: float = 3) -> dict:
-        """关于信息。timeout：向 Lightroom 问版本号最多等多久。启动时（界面等着它才显示）用 3 秒，
-        用户打开设置时用 10 秒（PR #7 放宽的值）。"""
+    def _about(self, timeout: float | None = 3) -> dict:
+        """关于信息。timeout：向 Lightroom 问版本号最多等多久；None（启动时，界面等着它才显示）不问 Lightroom。"""
         lr_ver = None
         try:
-            if self._lr.connected and getattr(self._lr, "_bridge", None) is not None:
+            if timeout is not None and self._lr.connected and getattr(self._lr, "_bridge", None) is not None:
                 lr_ver = str(self._lr._bridge.call("status", timeout=timeout).get("lightroom_version") or "") or None
         except Exception:
             lr_ver = None

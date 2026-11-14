@@ -127,9 +127,9 @@ def test_selected_detail_failure_keeps_details_in_the_log_only(caplog):
     assert svc.selected_detail()["id"] == "P1" and svc.last_selected_error is None
 
 
-def test_about_waits_briefly_at_startup_and_longer_in_settings():
+def test_about_does_not_ask_lightroom_at_startup():
     api = main.Api.__new__(main.Api)
     svc, b = service()
     api._lr = svc
-    assert api._about()["lightroom_version"] == "15.0" and b.timeouts[-1] == ("status", 3)     # 启动时：界面在等
-    assert api._about(10)["lightroom_version"] == "15.0" and b.timeouts[-1] == ("status", 10)  # 打开设置：可以多等
+    assert api._about(None)["lightroom_version"] is None and b.timeouts == []      # 启动时：界面在等，不问 Lightroom
+    assert api._about(10)["lightroom_version"] == "15.0" and b.timeouts[-1][0] == "status"   # 打开设置时才问
