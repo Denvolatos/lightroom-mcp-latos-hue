@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -80,7 +81,12 @@ def selftest() -> tuple[bool, list[str]]:
 
     def resources():
         need = [web_dir() / "index.html", web_dir() / "assets" / "latos-hue-ribbon.ico",
-                web_dir() / "assets" / "latos-hue-ribbon-192.png"]
+                web_dir() / "assets" / "latos-hue-ribbon-192.png",
+                web_dir() / "css" / "app.css", web_dir() / "js" / "core.js"]
+        index = web_dir() / "index.html"
+        if index.is_file():      # 页面引用的样式和脚本（css/、js/）也必须随包带上
+            refs = re.findall(r'(?:src|href)="((?:css|js)/[^"]+)"', index.read_text(encoding="utf-8"))
+            need += [web_dir() / r for r in refs if web_dir() / r not in need]
         missing = [str(p) for p in need if not p.is_file()]
         if missing:
             raise FileNotFoundError("缺少 " + ", ".join(missing))
