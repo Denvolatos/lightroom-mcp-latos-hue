@@ -16,7 +16,7 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 INDEX = WEB_DIR / "index.html"
 _LINK_RE = re.compile(r'<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"')
 _SCRIPT_RE = re.compile(r'<script src="([^"]+)"></script>')
-_TYPES = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8"}
+_TYPES = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".png": "image/png", ".ico": "image/x-icon"}
 
 
 def read_index() -> str:
@@ -47,9 +47,9 @@ def inject_stub(html: str, stub: str) -> str:
 
 
 def serve_static(handler) -> bool:
-    """Answer GET /css/... and /js/... from app/web. Returns True when the request was handled."""
+    """Answer GET /css/..., /js/... and /assets/... from app/web. Returns True when the request was handled."""
     path = handler.path.split("?")[0]
-    if not (path.startswith("/css/") or path.startswith("/js/")):
+    if not (path.startswith("/css/") or path.startswith("/js/") or path.startswith("/assets/")):
         return False
     f = (WEB_DIR / path.lstrip("/")).resolve()
     if WEB_DIR.resolve() not in f.parents or f.suffix not in _TYPES or not f.is_file():

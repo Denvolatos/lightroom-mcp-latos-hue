@@ -7,11 +7,12 @@
 <title>修图助手</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="css/app.css">
+<script src="js/theme.js"></script>
 </head>
 <body>
 
 <div class="topbar">
-  <span class="brand">修图助手</span><span class="badge" id="demobadge">界面演示 · 示例数据</span>
+  <span class="brand"><img class="logo" src="assets/latos-hue-ribbon-192.png" alt="">修图助手</span><span class="badge" id="demobadge">界面演示 · 示例数据</span>
   <button class="btn" id="impbtn" onclick="startImport()">导入</button>
   <button class="btn" onclick="openExport()">导出</button>
   <button class="btn" id="pickbtn" onclick="openPick()" title="在 Lightroom 中选择照片后，让 AI 比较并给出排名和建议">AI 挑片</button>
@@ -51,6 +52,8 @@
     </div>
   </div>
 
+  <div class="splitter" id="split_l" role="separator" aria-orientation="vertical" aria-label="调整左栏宽度" tabindex="0" title="拖动调整左栏宽度（双击恢复默认）"></div>
+
   <!-- CENTER -->
   <div class="center">
     <div class="viewbar">
@@ -66,6 +69,8 @@
     <div class="stage pair" id="stage"></div>
     <div class="infobar" id="infobar"></div>
   </div>
+
+  <div class="splitter" id="split_r" role="separator" aria-orientation="vertical" aria-label="调整右栏宽度" tabindex="0" title="拖动调整右栏宽度（双击恢复默认）"></div>
 
   <!-- RIGHT -->
   <div class="col right">
