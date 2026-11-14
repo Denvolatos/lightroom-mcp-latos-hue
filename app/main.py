@@ -213,6 +213,7 @@ class Api:
     def _switch_lr(self, borrow: bool) -> None:
         """换窗口的 Lightroom 通道，并让所有持有它的功能（预览、巡检、图库、导入、导出、挑片、预设）指向新的对象。"""
         with self._mode_lock:
+            kept_photo = self._backend.photo          # 换通道时保留“当前照片”，不让顶栏和右栏在新通道连上前空几秒
             self._backend.stop()
             self._preview.stop()
             self._lr.stop()
@@ -224,6 +225,7 @@ class Api:
             self._backend = Backend(self._lr, self._session, self._tracker, self._emit,
                                     state_file=None, previews=self._preview,
                                     hold_restart=self._autolaunch_in_grace)
+            self._backend.photo = kept_photo
             self._rebind_lr_services()
             if borrow:
                 self._lr.start()                 # 借用模式的 start 只是建对象，不阻塞

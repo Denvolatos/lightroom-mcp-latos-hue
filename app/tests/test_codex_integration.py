@@ -274,3 +274,11 @@ def test_detecting_codex_never_switches_provider(api, monkeypatch):
     assert r["settings"]["provider"] == "claude" and r["current_provider"] == "claude"
     assert api._settings.data["provider"] == "claude"
     assert next(p for p in r["providers"] if p["id"] == "codex")["experimental"] is False
+
+
+def test_switching_channel_keeps_the_current_photo(api, monkeypatch):
+    """1.1.1 真机发现：启动几秒后切到借用常驻 claude 的通道时，新巡检对象的“当前照片”是空的，顶栏和右栏会空约 3 秒。"""
+    _patch_main(monkeypatch)
+    api._backend.photo = {"id": "P1", "name": "DSC0001.ARW"}
+    api._switch_lr(True)
+    assert api._backend.photo == {"id": "P1", "name": "DSC0001.ARW"}
