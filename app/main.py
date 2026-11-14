@@ -288,12 +288,13 @@ class Api:
     def send(self, text: str, confirm: bool = True) -> dict:
         if not self._ai_chosen():
             return {"ok": False, "need_ai_choice": True, "message": MSG_CHOOSE_AI}
-        if self._busy:
-            return {"ok": False, "message": "上一条请求仍在处理，请稍候。"}
         text = (text or "").strip()
         if not text:
             return {"ok": False, "message": "请输入内容。"}
-        self._busy = True
+        with self._lock:                            # 与 _pick_acquire 同一把锁：检查并置位“忙”是一步
+            if self._busy:
+                return {"ok": False, "message": "上一条请求仍在处理，请稍候。"}   # 被拒的这次不做任何清理
+            self._busy = True
         confirm = bool(confirm)
         self._tracker.confirm_on = confirm
 
@@ -879,6 +880,9 @@ class Api:
 
     def pick_apply_confirm(self, photo_ids: list) -> dict:
         """用户点"确认写入"：只写清单里勾选的照片，且只写星级和旗标。结果经 pick_apply_done 事件给出。"""
+        refused = self._busy_refusal(plain=True)    # AI 正在处理时与其他页面写操作一样拒绝
+        if refused:
+            return refused
         return self._apply.confirm(photo_ids)
 
     def pick_apply_cancel(self) -> dict:
@@ -888,6 +892,9 @@ class Api:
         return self._apply.state_public()
 
     def pick_apply_undo(self, force: bool = False) -> dict:
+        refused = self._busy_refusal(plain=True)
+        if refused:
+            return refused
         r = self._apply.undo(bool(force))
         try:
             ids = [x.get("photo_id") for x in r.get("results") or [] if x.get("status") == "undone"]
