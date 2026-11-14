@@ -142,6 +142,12 @@ class ThumbStore(PreviewStore):
         while len(self._by_key) > 1 and (len(self._by_key) > self._max_cache or self._bytes > self.max_bytes):
             self._drop(next(iter(self._by_key)))
 
+    def clear(self) -> tuple[int, int]:
+        n, size = super().clear()
+        with self._lock:
+            self._bytes = 0
+        return n, size
+
     def invalidate(self, photo_id: str) -> int:
         """丢掉这张照片的所有缓存条目；返回丢掉的条数。"""
         with self._lock:
@@ -547,6 +553,17 @@ class PhotoLibrary:
                     self._dirty[uid] = self._clock()
         self._wake.set()
         return n
+
+    def thumbs_cleared(self) -> None:
+        """缩略图缓存被整体清空（设置里的“清理缓存”）后调用：忘掉失败记录，把页面正在看的照片重新排队，叫醒取图线程，
+        并通知页面刷新。不碰任何照片文件。"""
+        with self._lock:
+            self._failed.clear()
+            self._dirty.clear()
+            self._queue = [i for i in self._wanted if i in self._by_uid and self._by_uid[i]["in_catalog"]
+                           and i not in self._inflight]
+        self._wake.set()
+        self.emit({"type": "library_changed"})
 
     def cache_hit_rate(self) -> float | None:
         r = self.stats["requested"]

@@ -35,6 +35,8 @@ from export_service import ExportService  # noqa: E402
 from pick_service import PickService  # noqa: E402
 from pick_apply import ApplyService  # noqa: E402
 import library_store as libstore  # noqa: E402
+import maintenance  # noqa: E402
+import timing as timingmod  # noqa: E402
 from library_service import LibraryService  # noqa: E402
 from preview import PreviewManager, PreviewServer, PreviewStore  # noqa: E402
 from photo_library import PhotoLibrary, ThumbStore  # noqa: E402
@@ -633,6 +635,7 @@ class Api:
                 "providers": available_providers(claude_st, codex_st),
                 "current_provider": self._provider.id, "edges": list(appsettings.EDGE_CHOICES),
                 "default_base_folder": appsettings.default_base_folder(),
+                "readonly": self._readonly_on(),
                 "about": self._about(ABOUT_QUERY_TIMEOUT if include_status else None)}
 
     def _status_probe(self):
@@ -1247,6 +1250,127 @@ class Api:
     def set_preview_edge(self, edge) -> dict:
         """预览长边像素（256–2048）；"初始"图保持首次取图时的分辨率。"""
         return {"ok": True, "edge": self._preview.set_edge(edge)}
+
+
+    # ---- 1.3.0 设置页：安全 / 维护 / 关于 --------------------------------
+    @staticmethod
+    def _server_config():
+        """server 包的 config（路径常量）。先确保 server/ 在 sys.path 里（与 lr_service 同一做法）。"""
+        from lr_service import _import_server
+        _import_server()
+        from lightroom_mcp import config
+        return config
+
+    def _readonly_path(self) -> Path:
+        return self._server_config().READONLY_FILE
+
+    def _readonly_on(self) -> bool:
+        try:
+            return bool(maintenance.readonly_state(self._readonly_path())["on"])
+        except Exception:                           # noqa: BLE001
+            return False
+
+    def _maintenance_block(self) -> str | None:
+        """清理缓存、恢复默认设置：AI、导入、导出进行中时拒绝。"""
+        if self._busy or bool(getattr(getattr(self, "_session", None), "busy", False)):
+            return MSG_AI_BUSY
+        for name, label in (("_import", "导入"), ("_export", "导出")):
+            svc = getattr(self, name, None)
+            if getattr(svc, "stage", "idle") in ("scanning", "copying", "running"):
+                return f"{label}正在进行，请等它完成后再试。"
+        return None
+
+    def set_readonly(self, on) -> dict:
+        """打开/关闭只读模式（创建/删除 ~/LrMcp/readonly）。服务端和 Lightroom 插件都认这个文件。"""
+        try:
+            return maintenance.set_readonly(on if isinstance(on, bool) else None, self._readonly_path())
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "readonly": self._readonly_on(), "message": f"切换只读模式失败：{e}"}
+
+    def clear_cache(self) -> dict:
+        """清理软件自己的缓存：缩略图、预览、计时日志。不碰照片、设置、经验库、收藏、版本数据。"""
+        try:
+            block = self._maintenance_block()
+            if block:
+                return {"ok": False, "busy": True, "freed_bytes": 0, "freed_text": "0 B", "items": [], "message": block}
+            r = maintenance.clear_cache(self._photolib.store, self._preview.store, timingmod.TIMING_LOG)
+            try:
+                self._photolib.thumbs_cleared()      # 页面正在看的照片重新取缩略图
+                self._preview.request(0)             # 中栏预览重新取
+            except Exception:                        # noqa: BLE001 - 缓存已清，重取失败也不影响结果
+                pass
+            return r
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "freed_bytes": 0, "freed_text": "0 B", "items": [], "message": f"清理缓存失败：{e}"}
+
+    def _pick_diag_folder(self) -> str | None:
+        """系统“选择文件夹”对话框；返回所选路径，取消或没有窗口返回 None。路径只来自这次选择。"""
+        if self._window is None:
+            return None
+        kind = getattr(getattr(webview, "FileDialog", None), "FOLDER", None) or webview.FOLDER_DIALOG
+        try:
+            res = self._window.create_file_dialog(kind)
+        except Exception:                           # noqa: BLE001
+            return None
+        return str(res[0]) if res else None
+
+    def make_diagnostics(self) -> dict:
+        """在用户选的文件夹里生成脱敏的诊断包 zip。"""
+        try:
+            folder = self._pick_diag_folder()
+            if not folder:
+                return {"ok": False, "cancelled": True, "path": "", "bytes": 0, "message": ""}
+            config = self._server_config()
+            try:
+                from lightroom_mcp import __version__ as server_version
+            except Exception:                       # noqa: BLE001
+                server_version = None
+            try:
+                items = list(self._wizard.state().get("items") or [])
+            except Exception:                       # noqa: BLE001
+                items = []
+            try:
+                conn = dict(self._backend.status())
+            except Exception:                       # noqa: BLE001
+                conn = {}
+            info = {"app_version": appsettings.APP_VERSION, "server_version": server_version,
+                    "plugin_version": getattr(self._lr, "plugin_version", None), "system": maintenance.environment_info(),
+                    "readonly": self._readonly_on()}
+            return maintenance.build_diagnostics(folder, info, settings=dict(self._settings.data), wizard_items=items,
+                                                 connection=conn, log_files=[config.LOG_FILE], timing_log=timingmod.TIMING_LOG)
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "path": "", "bytes": 0, "message": f"生成诊断包失败：{e}"}
+
+    def reset_settings(self) -> dict:
+        """恢复默认设置，保留照片库位置和已选的 AI 来源；旧设置先备份。"""
+        try:
+            block = self._maintenance_block()
+            if block:
+                return {"ok": False, "busy": True, "message": block}
+            r = maintenance.reset_settings(self._settings)
+            if r.get("ok"):
+                try:
+                    self._preview.set_edge(self._settings.data["preview_edge"])
+                    self._wizard.invalidate()
+                except Exception:                    # noqa: BLE001
+                    pass
+            return r
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "message": f"恢复默认设置失败：{e}"}
+
+    def open_link(self, key) -> dict:
+        """在默认浏览器里打开关于页的链接。页面只传 key（homepage / denvolatos / galio1991），不传网址。"""
+        try:
+            return maintenance.open_link(key)
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "message": f"无法打开：{e}"}
+
+    def about_info(self) -> dict:
+        try:
+            return maintenance.about_info(appsettings.APP_VERSION, getattr(self._lr, "plugin_version", None))
+        except Exception:                           # noqa: BLE001
+            return maintenance.about_info(appsettings.APP_VERSION, None)
+
 
 
 MAIN_TITLE = "修图助手"                    # 主窗口标题（单实例激活时按它找窗口）

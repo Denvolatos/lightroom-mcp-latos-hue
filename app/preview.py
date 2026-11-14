@@ -125,6 +125,15 @@ class PreviewStore:
         with self._lock:
             return len(self._by_key)
 
+    def clear(self) -> tuple[int, int]:
+        """清空内存里的缓存图（含“初始”图）。返回 (条数, 字节数)。已发给页面的地址之后会 404，由调用方让页面重新取。"""
+        with self._lock:
+            n, size = len(self._by_key), sum(len(e["bytes"]) for e in self._by_key.values())
+            self._by_key.clear()
+            self._by_id.clear()
+            self._initial.clear()
+            return n, size
+
 
 class PreviewServer:
     """只服务 PreviewStore 里的图：GET /p/<口令>/<16位十六进制条目id>.jpg。口令每次启动随机，其他任何路径、方法、Host 一律拒绝。"""
