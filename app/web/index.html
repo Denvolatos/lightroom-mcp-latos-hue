@@ -100,6 +100,8 @@
   .frame .chip { position: absolute; right: 10px; top: 10px; padding: 2px 10px; border-radius: 99px; z-index: 2;
     background: rgba(0,0,0,.6); font-size: 12px; color: var(--warn); display: none; }
   .frame.busy .chip { display: block; }
+  .stage.switching .frame .pimg { opacity: .45; transition: opacity .15s; }
+  .stage.switching #fc .chip { display: block; }
   .infobar { flex: none; padding: 2px 14px 10px; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
   .infobar .line { color: var(--text); opacity: .85; font-variant-numeric: tabular-nums; user-select: text; }
   .seg button:disabled { opacity: .5; cursor: not-allowed; }
@@ -150,6 +152,7 @@
   .opts { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 10px; font-size: 12px; color: var(--muted);
     border-top: 1px solid var(--line); }
   .switch { position: relative; width: 34px; height: 18px; border-radius: 99px; background: #444a52; border: none; padding: 0; transition: background .2s; }
+  .switch:disabled { opacity: .5; cursor: not-allowed; }
   .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left .2s; }
   .switch.on { background: var(--ok); } .switch.on::after { left: 18px; }
   /* ---------- export dialog ---------- */
@@ -370,7 +373,7 @@
   <button class="btn" id="impbtn" onclick="startImport()">导入</button>
   <button class="btn" onclick="openExport()">导出</button>
   <button class="btn" id="pickbtn" onclick="openPick()" title="在 Lightroom 中选择照片后，让 AI 比较并给出排名和建议">AI 挑片</button>
-  <button class="btn" onclick="undo()">撤销</button>
+  <button class="btn" onclick="undo(this)">撤销</button>
   <button class="btn" id="newchat" onclick="newChat()" style="display:none">新对话</button>
   <span class="spacer"></span>
   <span class="status upd-note" id="updnote" style="display:none"><span id="updtxt"></span><button class="btn small" id="updopen">查看新版本</button></span>
@@ -428,7 +431,7 @@
       <div class="section-title">本次调整</div>
       <div class="pane"><table id="ptable"><thead><tr><th>参数</th><th>改前</th><th>改后</th><th>状态</th><th></th></tr></thead><tbody></tbody></table>
         <div class="empty" id="pempty">暂无调整。请在下方输入修图需求。</div>
-        <div class="restore-row" id="restorerow" style="display:none"><button class="btn small" onclick="restoreOriginal()">还原到原始状态</button></div></div>
+        <div class="restore-row" id="restorerow" style="display:none"><button class="btn small" onclick="restoreOriginal(this)">还原到原始状态</button></div></div>
     </div>
     <div class="chat">
       <div class="msgs" id="msgs"><div class="msg ai">请选择照片并输入期望的修图效果。</div></div>
@@ -560,6 +563,16 @@ let sel = 0, fav = new Set([0]), favP = new Set(['电影感']), steps = [], hist
 
 const $ = s => document.querySelector(s);
 function toast(t){ const b=$('#toastbox'); b.textContent=t; clearTimeout(toast.t); toast.t=setTimeout(()=>b.textContent='',6000); }
+/* 调用后端：Python 抛异常时 promise 会失败。这里接住它，提示一句、把按钮恢复可点，返回 null（调用处见到 null 就停下）。
+   btn 可以是按钮元素或选择器；按钮已经不在页面上时不管它。 */
+async function safeCall(fn, btn, msg){
+  try { const r = await fn(); return r==null ? {} : r; }
+  catch(e){
+    const b = typeof btn==='string' ? $(btn) : btn;
+    if (b && b.isConnected) b.disabled = false;
+    toast(msg || '操作没有完成，请重试。'); return null;
+  }
+}
 
 /* ---- left tabs ---- */
 let ltab = 'preset';
@@ -580,13 +593,14 @@ $('#ltabs').onclick = e => { const t=e.target.closest('.tab'); if(!t) return;
   document.querySelectorAll('#ltabs .tab').forEach(x=>x.classList.toggle('on',x===t)); ltab=t.dataset.t;
   if (REAL() && ltab==='preset' && LB.sub==='lr' && !LB.lr) loadLr(); renderLeft(); };
 /* ---- 预设 / 收藏 / 经验（真实模式；演示模式仍用上面的示例数据）---- */
-const LB = {sub:'mine', presets:null, sel:null, strength:100, lrq:'', lr:null, lrSel:null, notes:null, nq:'', ntag:'', nsel:null, fav:null, err:''};
+const LB = {sub:'mine', presets:null, sel:null, strength:100, lrq:'', lr:null, lrSel:null, notes:null, nq:'', ntag:'', nsel:null, fav:null, err:'',
+  lrDraft:null, nqDraft:null, lrSeq:0, nSeq:0};    // lrDraft/nqDraft：搜索框里打了但还没按回车的字，重绘左栏时保留
 const lapi = () => window.pywebview.api;
 async function loadLib(which){
   if (!REAL()) return;
   try {
     if (!which || which==='p') LB.presets = await lapi().lib_presets();
-    if (!which || which==='n') LB.notes = await lapi().lib_notes(LB.nq, LB.ntag);
+    if (!which || which==='n'){ const seq = ++LB.nSeq; const n = await lapi().lib_notes(LB.nq, LB.ntag); if (seq===LB.nSeq) LB.notes = n; }   // 只接受最新一次搜索的结果
     if (!which || which==='f') LB.fav = await lapi().lib_favs();
     LB.err = '';
   } catch(e){ LB.err = '无法读取预设、经验或收藏，请重试。'; }
@@ -619,8 +633,12 @@ function renderLeft(){
   let h = '';
   if (LB.err) h += `<div class="empty bad">${esc(LB.err)}</div>`;
   if (ltab==='preset') h += presetTabHtml(); else if (ltab==='fav') h += favTabHtml(); else h += noteTabHtml();
+  const ae = document.activeElement, fid = ae && p.contains(ae) && ae.id ? ae.id : null;   // 重绘前记下焦点和光标位置
+  let ss = null; try { if (fid && ae.selectionStart!=null) ss = [ae.selectionStart, ae.selectionEnd]; } catch(e){}
   p.innerHTML = h; p.dataset.k = '';
   bindLeft(p);
+  const f = fid && p.querySelector('#'+fid);
+  if (f){ f.focus({preventScroll:true}); if (ss) try { f.setSelectionRange(ss[0], ss[1]); } catch(e){} }
 }
 function presetTabHtml(){
   let h = subSeg([['mine','我的预设'],['lr','Lightroom 预设']], LB.sub, 'sub');
@@ -637,10 +655,12 @@ function presetTabHtml(){
       <button class="btn small" id="pr_ren">重命名</button><button class="btn small" id="pr_note">编辑备注</button><button class="btn small" id="pr_exp">导出</button><button class="btn small" id="pr_del">删除</button></div></div>`;
     return h;
   }
-  h += `<div class="tools"><input type="text" id="lr_q" placeholder="搜索名称或分组（一个词）" value="${esc(LB.lrq)}"><button class="btn small" id="lr_go">搜索</button></div>`;
+  h += `<div class="tools"><input type="text" id="lr_q" placeholder="搜索名称或分组（一个词）" value="${esc(LB.lrDraft!=null?LB.lrDraft:LB.lrq)}"><button class="btn small" id="lr_go">搜索</button></div>`;
   if (!LB.lr) return h + '<div class="empty">正在读取 Lightroom 预设…</div>';
   if (!LB.lr.ok) return h + `<div class="empty bad">${esc(LB.lr.message)}</div>`;
-  h += `<div class="dm pad">${esc(LB.lr.note)}</div>`;
+  const hidden = Number(LB.lr.hidden_masks)||0;      // 后端默认过滤掉含蒙版的预设，并告诉我们过滤了几个；没有这个字段就不显示
+  if (hidden>0) h += `<div class="dm pad">已隐藏 ${hidden} 个含蒙版的预设（本软件用不了）</div>`;
+  if (LB.lr.note) h += `<div class="dm pad">${esc(LB.lr.note)}</div>`;
   LB.lr.groups.forEach(g=>{ h += `<div class="folder">${esc(g.folder)}</div>`;
     g.presets.forEach(x=>{ h += `<div class="list-item${LB.lrSel===x.id?' sel':''}" data-lid="${esc(x.id)}"><span class="name${x.masks?' dim':''}">${esc(x.name)}${x.masks?'（含蒙版）':''}</span>${starHtml(x.fav, `data-fav="lr_preset" data-key="${esc(x.key)}" data-label="${esc(x.name)}"`)}</div>`; }); });
   let sel = null; LB.lr.groups.forEach(g=>g.presets.forEach(x=>{ if (x.id===LB.lrSel) sel = x; }));
@@ -662,7 +682,7 @@ function noteTabHtml(){
   const N = LB.notes; 
   let h = `<div class="tools"><button class="btn small primary" id="nt_new">新建经验</button><button class="btn small" id="nt_imp">导入</button><button class="btn small" id="nt_exp">导出</button></div>`;
   if (!N) return h + '<div class="empty">正在读取…</div>';
-  h += `<div class="tools"><input type="text" id="nt_q" placeholder="搜索标题、正文、标签" value="${esc(LB.nq)}"><select id="nt_tag"><option value="">全部标签</option>${N.tags.map(t=>`<option value="${esc(t)}" ${LB.ntag===t?'selected':''}>${esc(t)}</option>`).join('')}</select></div>`;
+  h += `<div class="tools"><input type="text" id="nt_q" placeholder="搜索标题、正文、标签" value="${esc(LB.nqDraft!=null?LB.nqDraft:LB.nq)}"><select id="nt_tag"><option value="">全部标签</option>${N.tags.map(t=>`<option value="${esc(t)}" ${LB.ntag===t?'selected':''}>${esc(t)}</option>`).join('')}</select></div>`;
   if (!N.notes.length) h += (LB.nq||LB.ntag) ? '<div class="empty">没有符合条件的经验。</div>' : '<div class="empty">还没有经验。点击“新建经验”记录你自己的调色心得，或在 AI 完成一次调整后点击“把这次做法记成经验”。经验只保存在本机，软件不预装任何经验。</div>';
   N.notes.forEach(n=>{ h += `<div class="list-item" data-nid="${esc(n.id)}"><span class="name">${esc(n.title)}<span class="sub2">${esc([n.scene, ...n.tags].filter(Boolean).join(' · '))}${n.use_in_chat?'':' · 不参与对话'}</span></span>${starHtml(n.fav, `data-fav="note" data-key="${esc(n.id)}"`)}</div>`; });
   h += `<div class="dm pad">${N.context.eligible ? `开启“让 AI 参考我的经验库”时，新对话将提供最近的 ${N.context.used} 条（共 ${N.context.eligible} 条参与对话${N.context.truncated?'，超出长度上限的已舍弃':''}）。` : '没有“参与对话”的经验，AI 不会收到经验资料。'}</div>`;
@@ -680,19 +700,25 @@ function bindLeft(p){
   p.querySelectorAll('[data-fk]').forEach(d=>d.onclick=()=>favClick(d.dataset.fk, d.dataset.key));
   const on = (id, fn)=>{ const e = p.querySelector('#'+id); if (e) e.onclick = fn; };
   on('pr_save', openSavePreset); on('pr_imp', importPreset); on('pr_apply', ()=>applyMine()); on('pr_ren', renamePreset); on('pr_note', notePreset);
-  on('pr_exp', exportPreset); on('pr_del', deletePreset); on('lr_go', ()=>{ LB.lrq = p.querySelector('#lr_q').value; loadLr(); }); on('lr_apply', ()=>applyLr());
+  on('pr_exp', exportPreset); on('pr_del', deletePreset); on('lr_go', ()=>{ LB.lrq = p.querySelector('#lr_q').value; LB.lrDraft = null; loadLr(); }); on('lr_apply', ()=>applyLr());
   on('nt_new', ()=>openNote(null)); on('nt_imp', importNotes); on('nt_exp', exportNotes);
   on('fv_photo', async()=>{ const r = await lapi().lib_fav_toggle('photo','',''); if (!r.ok) toast(r.message||'无法收藏'); loadLib('f'); });
   const str = p.querySelector('#pr_str'); if (str) str.oninput = ()=>{ LB.strength = parseInt(str.value,10); p.querySelector('#pr_strv').textContent = LB.strength+'%'; };
-  const q = p.querySelector('#lr_q'); if (q) q.onkeydown = e=>{ if (e.key==='Enter'){ LB.lrq = q.value; loadLr(); } };
-  const nq = p.querySelector('#nt_q'); if (nq) nq.onkeydown = e=>{ if (e.key==='Enter'){ LB.nq = nq.value; loadLib('n'); } };
-  const nt = p.querySelector('#nt_tag'); if (nt) nt.onchange = ()=>{ LB.ntag = nt.value; LB.nq = p.querySelector('#nt_q').value; loadLib('n'); };
+  const q = p.querySelector('#lr_q'); if (q){ q.oninput = ()=>{ LB.lrDraft = q.value; }; q.onkeydown = e=>{ if (e.key==='Enter'){ LB.lrq = q.value; LB.lrDraft = null; loadLr(); } }; }
+  const nq = p.querySelector('#nt_q'); if (nq){ nq.oninput = ()=>{ LB.nqDraft = nq.value; }; nq.onkeydown = e=>{ if (e.key==='Enter'){ LB.nq = nq.value; LB.nqDraft = null; loadLib('n'); } }; }
+  const nt = p.querySelector('#nt_tag'); if (nt) nt.onchange = ()=>{ LB.ntag = nt.value; LB.nq = p.querySelector('#nt_q').value; LB.nqDraft = null; loadLib('n'); };
 }
-async function loadLr(keep){ if (!keep) LB.lr = null; renderLeft(); try { LB.lr = await lapi().lib_lr_presets(LB.lrq); } catch(e){ LB.lr = {ok:false, message:'无法读取 Lightroom 预设。'}; } renderLeft(); }
+async function loadLr(keep){
+  const seq = ++LB.lrSeq;                 // 连按搜索时只接受最新一次的结果，先发出的慢请求不会覆盖
+  if (!keep) LB.lr = null; renderLeft();
+  let r; try { r = await lapi().lib_lr_presets(LB.lrq); } catch(e){ r = {ok:false, message:'无法读取 Lightroom 预设。'}; }
+  if (seq!==LB.lrSeq) return;
+  LB.lr = r; renderLeft();
+}
 function favClick(kind, key){
   if (kind==='preset'){ const x = (LB.presets&&LB.presets.presets||[]).find(p=>p.name===key); ltab='preset'; LB.sub='mine'; if (x) LB.sel = x.id; tabsOn(); renderLeft(); }
   else if (kind==='note'){ openNote(key); }
-  else if (kind==='lr_preset'){ ltab='preset'; LB.sub='lr'; LB.lrq=''; tabsOn(); loadLr(); }
+  else if (kind==='lr_preset'){ ltab='preset'; LB.sub='lr'; LB.lrq=''; LB.lrDraft=null; tabsOn(); loadLr(); }
   else { const i = $('#fv_info'); if (i) i.textContent = '照片收藏仅记录名称与收藏时间。软件暂时不能在 Lightroom 中自动选中该照片，请在 Lightroom 中自行选择。'; }
 }
 function tabsOn(){ document.querySelectorAll('#ltabs .tab').forEach(x=>x.classList.toggle('on', x.dataset.t===ltab)); }
@@ -700,7 +726,7 @@ function tabsOn(){ document.querySelectorAll('#ltabs .tab').forEach(x=>x.classLi
 /* 保存为预设 */
 async function openSavePreset(){
   if (!photoReady()) return infoDialog('无法保存', '请先在 Lightroom 中选择一张照片。');
-  const o = await lapi().lib_preset_options();
+  const o = await safeCall(()=>lapi().lib_preset_options()); if (!o || !o.limits) return;
   lbOpen('保存当前照片的调整为预设');
   lbSet(`<div class="prow"><span class="lab">名称</span><div><input type="text" id="sp_name" maxlength="${o.limits.name}" placeholder="不超过 ${o.limits.name} 个字"></div></div>
     <div class="prow"><span class="lab">备注</span><div><textarea id="sp_note" rows="3" maxlength="${o.limits.note}" placeholder="可选，不超过 ${o.limits.note} 个字"></textarea></div></div>
@@ -713,17 +739,18 @@ async function openSavePreset(){
 async function doSavePreset(overwrite){
   const groups = [...document.querySelectorAll('.sp_g:checked')].map(c=>c.value);
   $('#sp_ok').disabled = true;
-  const r = await lapi().lib_preset_save($('#sp_name').value, $('#sp_note').value, groups, overwrite);
+  const r = await safeCall(()=>lapi().lib_preset_save($('#sp_name').value, $('#sp_note').value, groups, overwrite), $('#sp_ok'));
+  if (!r) return;
   if (r.exists){ $('#sp_ok').disabled = false; if (await askDialog('覆盖预设', r.message, '覆盖')) return doSavePreset(true); return; }
   if (!r.ok){ $('#sp_err').textContent = r.message||'无法保存。'; $('#sp_ok').disabled = false; return; }
   lbClose(); toast(r.message); LB.sel = r.id; ltab='preset'; LB.sub='mine'; tabsOn(); loadLib();
 }
 /* 套用：确认清单 */
 async function applyMine(){
-  const r = await lapi().lib_apply_prepare('mine', LB.sel, LB.strength);
-  applyConfirmView(r);
+  const r = await safeCall(()=>lapi().lib_apply_prepare('mine', LB.sel, LB.strength));
+  if (r) applyConfirmView(r);
 }
-async function applyLr(){ applyConfirmView(await lapi().lib_apply_prepare('lr', LB.lrSel, 100)); }
+async function applyLr(){ const r = await safeCall(()=>lapi().lib_apply_prepare('lr', LB.lrSel, 100)); if (r) applyConfirmView(r); }
 function applyConfirmView(r){
   if (!r.ok) return infoDialog(r.nothing ? '无需套用' : '无法套用', r.message||'无法生成确认清单。');
   lbOpen('确认套用');
@@ -734,8 +761,9 @@ function applyConfirmView(r){
     ${r.skipped&&r.skipped.length ? `<div class="mute">这张照片没有以下参数，已跳过：${esc(r.skipped.join('、'))}。</div>` : ''}
     ${r.clipped ? `<div class="warn">有 ${r.clipped} 项超出允许范围，已裁剪到边界。</div>` : ''}
     <div class="mute">写入后可在右侧“本次调整”中撤销。</div><div class="bad" id="ap_err"></div>`,
-    [{label:'取消', onclick:async()=>{ await lapi().lib_apply_cancel(); lbClose(); }},
-     {label:'确认套用', cls:'primary', id:'ap_ok', onclick:async()=>{ $('#ap_ok').disabled = true; const w = await lapi().lib_apply_confirm(r.token);
+    [{label:'取消', onclick:async()=>{ try { await lapi().lib_apply_cancel(); } catch(e){} lbClose(); }},
+     {label:'确认套用', cls:'primary', id:'ap_ok', onclick:async()=>{ $('#ap_ok').disabled = true; const w = await safeCall(()=>lapi().lib_apply_confirm(r.token), $('#ap_ok'));
+        if (!w) return;
         if (!w.ok){ $('#ap_err').textContent = w.message||'无法套用。'; $('#ap_ok').disabled = !!w.readonly; return; }
         lbClose(); toast(w.message); }}]);
 }
@@ -782,7 +810,8 @@ function noteEditor(n, id, banner, back){
 async function saveNote(id){
   const tags = $('#ne_tags').value.split(/[,，、;；]+/).map(s=>s.trim()).filter(Boolean);
   $('#ne_ok').disabled = true;
-  const r = await lapi().lib_note_save(id, {title:$('#ne_title').value, scene:$('#ne_scene').value, tags, body:$('#ne_body').value, use_in_chat:$('#ne_use').checked});
+  const r = await safeCall(()=>lapi().lib_note_save(id, {title:$('#ne_title').value, scene:$('#ne_scene').value, tags, body:$('#ne_body').value, use_in_chat:$('#ne_use').checked}), $('#ne_ok'));
+  if (!r) return;
   if (!r.ok){ $('#ne_err').textContent = r.message||'无法保存。'; $('#ne_ok').disabled = false; return; }
   lbClose(); toast('经验已保存'); ltab='exp'; tabsOn(); loadLib();
 }
@@ -799,14 +828,23 @@ function offerRecord(){
   const d = document.createElement('div'); d.className = 'note recbtn'; d.innerHTML = '<button class="btn small">把这次做法记成经验</button>';
   $('#msgs').appendChild(d); d.scrollIntoView(); d.querySelector('button').onclick = startRecord;
 }
+let REC = null;     // 正在起草的经验：'starting' 请求还没返回 / 'run' 已开始；完成事件到了就清掉
+function recCloseNow(){ REC = null; try { lapi().lib_record_close(); } catch(e){} lbClose(); }
 async function startRecord(){
-  const r = await lapi().lib_record_start(); if (!r.ok) return infoDialog('无法生成草稿', r.message);
+  REC = 'starting';            // 先打开转圈页再请求：完成事件比接口返回先到时也能正常显示结果
   lbOpen('把这次做法记成经验');
   lbSet(`<div class="big"><span class="spin"></span>正在请 AI 起草经验…</div><div class="mute">只总结已确认并已应用的调整。AI 不会直接写入经验库；生成后你可以编辑，点击“保存”才会写入。</div>`,
-        [{label:'停止', onclick:async(e)=>{ e.target.disabled = true; await lapi().lib_record_stop(); }}]);
+        [{label:'停止', onclick:async(e)=>{ e.target.disabled = true; try { await lapi().lib_record_stop(); } catch(e2){ return recCloseNow(); }
+            setTimeout(()=>{ if (REC) lbSet('<div class="big">已停止</div><div class="mute">没有收到 AI 的结果，可以关闭后重试。</div>', [{label:'关闭', onclick:recCloseNow}]); }, 4000); }}]);
+  const r = await safeCall(()=>lapi().lib_record_start());
+  if (REC!=='starting') return;                    // 结果已经显示了
+  if (!r){ REC = null; lbClose(); return; }
+  if (!r.ok){ REC = null; lbClose(); return infoDialog('无法生成草稿', r.message); }
+  REC = 'run';
 }
 function onRecordDone(ev){
-  if (!$('#lmask').classList.contains('show')) return;
+  if (!REC || !$('#lmask').classList.contains('show')) return;
+  REC = null;
   const usage = `<div class="mute">用时 ${ev.elapsed} 秒${ev.tokens?'，约 '+Number(ev.tokens).toLocaleString()+' token':''}${ev.cost!=null?'，估算费用 $'+Number(ev.cost).toFixed(3):''}（估算值，非实际账单）。</div>`;
   lapi().lib_record_close();
   if (ev.ok){
@@ -850,11 +888,16 @@ async function loadVersionPicture(){
   versionImage=''; versionDifference=null;
   const name=$('#versionpick').value;
   if (name && versionRows.length){
-    const picture=await window.pywebview.api.version_preview(name);
-    const plan=await window.pywebview.api.version_plan(name);
-    if (name!==$('#versionpick').value) return;
-    if (picture.ok && picture.result.photo_id===versionPhoto) versionImage=picture.result.url;
-    if (plan.ok && plan.result.photo_id===versionPhoto) versionDifference=plan.result;
+    try {
+      const picture=await window.pywebview.api.version_preview(name);
+      const plan=await window.pywebview.api.version_plan(name);
+      if (name!==$('#versionpick').value) return;
+      if (picture.ok && picture.result.photo_id===versionPhoto) versionImage=picture.result.url;
+      if (plan.ok && plan.result.photo_id===versionPhoto) versionDifference=plan.result;
+    } catch(e){
+      if (name!==$('#versionpick').value) return;
+      versionImage=''; versionDifference=null; renderStage(); $('#infobar').textContent='无法读取这个版本，请检查与 Lightroom 的连接后再选一次。'; return;
+    }
   }
   renderStage();
 }
@@ -954,6 +997,7 @@ function renderStage(){
     const examples=diff ? diff.items.slice(0,5).map(i=>`${i.label} ${i.before} → ${i.after}`).join('；') : '';
     $('#infobar').textContent=v?`版本：${v.name} · ${v.created||''}${v.note?' · '+v.note:''}。${diff?(diff.count?`与当前相差 ${diff.count} 项${examples?'：'+examples:''}${diff.count>5?' 等':''}`:'与当前完全相同'):'正在读取参数差异…'}`:'这张照片还没有保存过版本。';
     $('#cur').textContent=(p.photo||{}).name||photoName||'';
+    showSwitching();
     $('#pvctl').style.display='none'; return;
   }
   s.classList.toggle('actual', actual && real);
@@ -972,6 +1016,7 @@ function renderStage(){
     setFrame('fi',{text:t}); setFrame('fc',{text:t}); $('#infobar').innerHTML=''; return; }
   const p = pv || {state:'loading', message:'正在读取预览'}, ph = p.photo || {};
   $('#cur').textContent = ph.name || photoName || '';
+  showSwitching();
   if (p.state==='ok'){
     const n = nApplied(), pi = p.current;
     setFrame('fi',{url:p.initial.url});
@@ -983,9 +1028,36 @@ function renderStage(){
     $('#infobar').innerHTML = ph.name ? `<div class="line">${esc(fmtInfo(ph))}</div>` : '';
   }
 }
+/* 图库里点了另一张照片：Lightroom 回复、新预览送到之前，中栏先写“正在切换到 …”，大图变淡，由 preview 事件覆盖 */
+let SWITCH = null;
+function showSwitching(){
+  const s=$('#stage'); s.classList.toggle('switching', !!SWITCH);
+  if (SWITCH) $('#cur').textContent = '正在切换到 '+SWITCH.name+'…';
+}
+function markSwitching(id){
+  const p = id && G.byId[id]; clearTimeout(markSwitching.t);
+  const ph = (pv && pv.photo) || {};
+  if (!p || !REAL() || ph.id===id){ if (SWITCH){ SWITCH=null; renderStage(); } return; }
+  SWITCH = {id, name:p.name};
+  markSwitching.t = setTimeout(()=>{ if (SWITCH){ SWITCH=null; renderStage(); } }, 15000);   // 保底：太久没有新预览就恢复原样
+  renderStage();
+}
+function previewArrived(ev){
+  const ph = ev.photo || {};
+  if (SWITCH && (ph.id===SWITCH.id || ph.name===SWITCH.name || (ev.state!=='ok' && ev.state!=='loading'))){ SWITCH=null; clearTimeout(markSwitching.t); }
+}
 function toggleZoom(){ if(!REAL()) return; actual=!actual; $('#zoom').textContent = actual ? '100%' : '适合窗口'; renderStage(); }
 $('#zoom').onclick=toggleZoom;
-$('#edge').onchange=()=>{ if(REAL()) window.pywebview.api.set_preview_edge(parseInt($('#edge').value,10)); };
+/* 顶栏的预览清晰度：立即生效并写进设置（只提交这一项），重启和保存设置时都不会被改回去 */
+$('#edge').onchange=async()=>{
+  if (!REAL()) return;
+  const v = parseInt($('#edge').value,10), api = window.pywebview.api;
+  let r = null;
+  try { r = await api.save_settings({preview_edge: v}, false); } catch(e){}
+  if (r && r.ok){ if (SET && SET.settings) SET.settings.preview_edge = r.settings.preview_edge; return; }
+  try { await api.set_preview_edge(v); } catch(e){}      // 没能写进设置：至少这次先生效
+  toast('预览清晰度已切换，但没能保存到设置，下次打开会恢复原值。');
+};
 setTimeout(()=>{ if(!REAL()){ noBackend=true; renderStage(); } }, 2500);
 
 /* ---- right ---- */
@@ -1000,7 +1072,7 @@ function renderParams(){
       const reuse=can && !String(r.rid||'').startsWith('lib:') && !reusable.has(r.edit_id); if(reuse) reusable.add(r.edit_id);
       tb.insertAdjacentHTML('beforeend',
         `<tr><td>${esc(r.label)}<div class="why">${esc(r.reason)}</div></td><td class="num">${esc(r.before)}</td><td class="num">${esc(r.after)}</td><td class="${STCLS[r.status]||''}">${esc(r.status)}</td><td>${can?`<button class="btn small" data-eid="${esc(r.edit_id)}">撤销</button>`:''}${reuse?`<button class="btn small" data-reuse="${esc(r.edit_id)}" title="将这次滑块调整应用到其他选中照片">复用</button>`:''}</td></tr>`); });
-    tb.querySelectorAll('button[data-eid]').forEach(b=>b.onclick=()=>undoRow(b.dataset.eid));
+    tb.querySelectorAll('button[data-eid]').forEach(b=>{ b.disabled = undoBusy; b.onclick=()=>undoRow(b.dataset.eid, b); });
     tb.querySelectorAll('button[data-reuse]').forEach(b=>b.onclick=()=>reuseEdit(b.dataset.reuse));
     $('#pempty').style.display = rows.length?'none':'block';
     $('#restorerow').style.display = rows.some(r=>r.status==='已应用')?'block':'none';
@@ -1043,7 +1115,8 @@ function showStatus(s){ LASTST = s;
   $('#lrstat').textContent = text; $('#lrdot').style.background = dot;
   $('#lrhint').textContent = hint; $('#lrhint').title = hint; }
 function onLrLaunch(ev){ LRL = ev; if (LASTST) showStatus(LASTST); else { $('#lrstat').textContent = ev.state==='starting' ? '正在启动 Lightroom…' : $('#lrstat').textContent; $('#lrhint').textContent = ev.message; } }
-function setBusy(b){ busy=b; $('#send').disabled=b; $('#inp').disabled=b; $('#stop').style.display=b?'':'none'; $('#newchat').disabled=b; }
+function setBusy(b){ busy=b; $('#send').disabled=b; $('#inp').disabled=b; $('#stop').style.display=b?'':'none'; $('#newchat').disabled=b;
+  $('#sw').disabled=b; $('#sw').title = b ? 'AI 正在处理这一轮，结束后才能切换' : '开启后，每项调整需先经确认才会执行'; }   // 这一轮用的是发送时的设置，处理中切换不会生效
 async function newChat(){
   if (!REAL() || busy) return;
   if (!await askDialog('新对话', '将清空当前对话与「本次调整」表格并重置助手会话。照片上已应用的调整不会被撤销，仍可用「还原到原始状态」还原。是否继续？', '新对话')) return;
@@ -1072,7 +1145,7 @@ window.onClaudeEvent = function(ev){
   else if (ev.type==='status'){ showStatus(ev); }
   else if (ev.type==='lr_launch'){ onLrLaunch(ev); }
   else if (ev.type==='photo'){ photoName=ev.name; renderStage(); if(viewMode==='multi') loadVersions().catch(()=>{}); loadLib('f'); }
-  else if (ev.type==='preview'){ pv=ev; renderStage(); }
+  else if (ev.type==='preview'){ pv=ev; previewArrived(ev); renderStage(); }
   else if (ev.type==='connecting'){ cur=null; note(ev.message); }
   else if (ev.type==='confirm'){ cur=null; showConfirm(ev); }
   else if (ev.type==='confirm_done'){ closeConfirm(ev); }
@@ -1157,32 +1230,55 @@ async function reuseEdit(editId){
   }catch(e){ toast('批量操作未完成，请检查连接并重新预演。'); }
   finally{ batchBusy=false; }
 }
-async function undoRow(eid, force=false){
-  const r = await window.pywebview.api.undo(eid, force);
-  if (r.ok) return toast('已撤销');
-  if (r.conflict && !force){
-    if (await askDialog('参数在调整后又发生变化', r.message+'\n\n强制撤销将覆盖这些后续改动。', '强制撤销')) return undoRow(eid, true);
-    return;
+/* 撤销 / 还原：一次只做一个。点击后按钮立刻变灰并显示“正在…”，Lightroom 回复前再点不会重复发送 */
+let undoBusy = false;
+async function undoGuard(btn, text, fn){
+  if (undoBusy) return toast('正在处理上一次撤销，请稍候。');
+  undoBusy = true; const old = btn ? btn.textContent : '';
+  document.querySelectorAll('#ptable button[data-eid], #restorerow button').forEach(b=>b.disabled=true);
+  if (btn){ btn.disabled = true; btn.textContent = text; }
+  try { await fn(); }
+  finally {
+    undoBusy = false;
+    if (btn && btn.isConnected){ btn.disabled = false; btn.textContent = old; }
+    document.querySelectorAll('#ptable button[data-eid], #restorerow button').forEach(b=>b.disabled=false);
   }
-  toast('撤销失败：'+r.message);
 }
-async function restoreOriginal(force=false){
-  if (!force && !await askDialog('还原到原始状态', '将当前照片还原到首次调整之前的状态，已应用的调整均会被撤销。是否继续？', '还原')) return;
-  const r = await window.pywebview.api.restore_original(force);
-  if (r.ok) return toast('已还原到原始状态');
-  if (r.conflict && !force){
-    if (await askDialog('参数在调整后又发生变化', r.message+'\n\n强制还原将覆盖这些后续改动。', '强制还原')) return restoreOriginal(true);
-    return;
-  }
-  toast('还原失败：'+r.message);
+function undoRow(eid, btn){
+  return undoGuard(btn, '正在撤销…', async()=>{
+    for (let force=false;;){
+      const r = await safeCall(()=>window.pywebview.api.undo(eid, force), null, '撤销没有完成，请重试。'); if (!r) return;
+      if (r.ok) return toast('已撤销');
+      if (r.conflict && !force){
+        if (!await askDialog('参数在调整后又发生变化', r.message+'\n\n强制撤销将覆盖这些后续改动。', '强制撤销')) return;
+        force = true; continue;
+      }
+      return toast('撤销失败：'+(r.message||''));
+    }
+  });
+}
+async function restoreOriginal(btn){
+  if (undoBusy) return toast('正在处理上一次撤销，请稍候。');
+  if (!await askDialog('还原到原始状态', '将当前照片还原到首次调整之前的状态，已应用的调整均会被撤销。是否继续？', '还原')) return;
+  return undoGuard(btn, '正在还原…', async()=>{
+    for (let force=false;;){
+      const r = await safeCall(()=>window.pywebview.api.restore_original(force), null, '还原没有完成，请重试。'); if (!r) return;
+      if (r.ok) return toast('已还原到原始状态');
+      if (r.conflict && !force){
+        if (!await askDialog('参数在调整后又发生变化', r.message+'\n\n强制还原将覆盖这些后续改动。', '强制还原')) return;
+        force = true; continue;
+      }
+      return toast('还原失败：'+(r.message||''));
+    }
+  });
 }
 function undoOne(k){ steps=steps.filter(s=>s.k!==k); renderParams(); renderStage(); toast('已撤销「'+k+'」'); }
-function undo(){
-  if (REAL()){ const last=[...rows].reverse().find(r=>r.status==='已应用'&&r.edit_id); if(!last) return toast('没有可撤销的调整'); return undoRow(last.edit_id); }
+function undo(btn){
+  if (REAL()){ const last=[...rows].reverse().find(r=>r.status==='已应用'&&r.edit_id); if(!last) return toast('没有可撤销的调整'); return undoRow(last.edit_id, btn); }
   if(!steps.length) return toast('没有可撤销的调整'); const s=steps.pop(); renderParams(); renderStage(); toast('已撤销「'+s.k+'」'); }
 
 /* ---- export dialog ---- */
-let EX = {st:null, o:null, stage:null};
+let EX = {st:null, o:null, stage:null, tok:0};
 const EX_SIZES = [0, 4096, 2048, 1024];
 function exOpen(){ $('#mask').classList.add('show'); }
 function exClose(){ $('#mask').classList.remove('show'); EX.stage=null; }
@@ -1192,15 +1288,20 @@ function exSet(body, buttons){
 }
 async function openExport(){
   if (!REAL()) return toast('界面演示中，导出不可用');
+  const tok = ++EX.tok;
   exOpen(); EX.stage='load';
   exSet('<div class="mute"><span class="spin"></span>正在读取 Lightroom 中选中的照片…</div>', [{label:'取消', onclick:exClose}]);
+  const stale = ()=> tok!==EX.tok || EX.stage!=='load';      // 读取期间点了取消、又重新打开，或结果已经显示
   let cur = null;
   try { cur = await window.pywebview.api.export_state(); } catch(e){}
+  if (stale()) return;
   if (cur && cur.stage==='running'){ EX.stage='run'; exRunning(); return; }
   if (cur && cur.stage==='done' && cur.result){ exResult(cur.result); return; }
-  try { EX.st = await window.pywebview.api.export_dialog_state(); }
-  catch(e){ exSet('<div class="bad">无法读取导出信息，请重试。</div>', [{label:'关闭', onclick:exClose}]); return; }
-  EX.o = Object.assign({}, EX.st.options); EX.stage='form'; exForm();
+  let st;
+  try { st = await window.pywebview.api.export_dialog_state(); }
+  catch(e){ if (!stale()) exSet('<div class="bad">无法读取导出信息，请重试。</div>', [{label:'关闭', onclick:exClose}]); return; }
+  if (stale()) return;
+  EX.st = st; EX.o = Object.assign({}, EX.st.options); EX.stage='form'; exForm();
 }
 function exInfoLine(p){ return [p.camera, p.format, p.size].filter(Boolean).join(' · ') || '—'; }
 function exForm(){
@@ -1263,7 +1364,7 @@ function exUpdate(){
   $('#ex_go').disabled = !(st.photo && st.folder && !bad);
 }
 async function exPick(){
-  const r = await window.pywebview.api.choose_export_folder();
+  const r = await safeCall(()=>window.pywebview.api.choose_export_folder()); if (!r) return;
   if (r.ok){ EX.st.folder=r.folder; EX.st.folder_message=''; $('#ex_dir').value=r.folder; }
   exUpdate();
   if (!r.ok && r.message){ $('#ex_dirmsg').textContent=r.message; $('#ex_dirmsg').style.color='var(--bad)'; }
@@ -1272,17 +1373,20 @@ async function exStart(){
   const o=EX.o;
   const payload = {format:o.format, size:o.size, quality:o.quality, bit_depth:o.bit_depth, metadata:o.metadata};
   $('#ex_go').disabled=true;
-  const r = await window.pywebview.api.export_current_photo(payload);
-  if (!r.ok){ exUpdate(); $('#ex_err').textContent=r.message||'无法导出。'; if (r.changed) $('#ex_go').disabled=true; return; }
+  EX.stage='starting';           // 先记下阶段：导出很快失败时，完成事件可能比接口返回先到
+  const r = await safeCall(()=>window.pywebview.api.export_current_photo(payload), $('#ex_go'));
+  if (EX.stage!=='starting') return;               // 结果已经显示，或弹窗已关
+  if (!r){ EX.stage='form'; return; }
+  if (!r.ok){ EX.stage='form'; exUpdate(); $('#ex_err').textContent=r.message||'无法导出。'; if (r.changed) $('#ex_go').disabled=true; return; }
   EX.stage='run'; exRunning();
 }
 function exRunning(){
-  exOpen(); exSet('<div class="big"><span class="spin"></span>正在导出…</div><div class="mute">Lightroom 导出通常需要数秒到数十秒，请稍候。导出期间请勿关闭软件。</div>',
-    [{label:'取消', disabled:true}, {label:'导出', cls:'primary', disabled:true}]);
+  exOpen(); exSet('<div class="big"><span class="spin"></span>正在导出…</div><div class="mute">Lightroom 导出通常需要数秒到数十秒，请稍候。导出期间请勿关闭软件。点“隐藏”后导出会继续，结束后再点“导出”可查看结果。</div>',
+    [{label:'隐藏', onclick:exClose}, {label:'导出', cls:'primary', disabled:true}]);
 }
 function exResult(ev){
   EX.stage='done'; exOpen();
-  const close = {label:'关闭', cls:'primary', onclick:async()=>{ await window.pywebview.api.export_close(); exClose(); }};
+  const close = {label:'关闭', cls:'primary', onclick:async()=>{ try { await window.pywebview.api.export_close(); } catch(e){} exClose(); }};
   if (ev.status==='exported'){
     const bd = ev.format==='tiff' && ev.bit_depth ? `（${ev.bit_depth} 位）` : '';
     exSet(`<div class="big okmsg">导出完成。</div>
@@ -1294,18 +1398,18 @@ function exResult(ev){
     exSet(`<div class="big">状态不确定</div><div class="warn" style="color:var(--warn)">${esc(ev.message)}</div><div class="kvl"><span>保存位置</span><span>${esc(ev.folder)}</span></div>`, [close]);
   } else {
     exSet(`<div class="big">导出失败</div><div class="bad">${esc(ev.message)}</div>`,
-      [{label:'返回修改', onclick:async()=>{ await window.pywebview.api.export_close(); openExport(); }}, close]);
+      [{label:'返回修改', onclick:async()=>{ try { await window.pywebview.api.export_close(); } catch(e){} openExport(); }}, close]);
   }
 }
 function onExportEvent(ev){
   if (ev.type==='export_done'){ if ($('#mask').classList.contains('show')) exResult(ev); else toast('导出已结束，请点击“导出”查看结果。'); }
-  else if (ev.type==='export_progress' && $('#mask').classList.contains('show')) exRunning();
+  else if (ev.type==='export_progress' && $('#mask').classList.contains('show') && (EX.stage==='run' || EX.stage==='starting')){ EX.stage='run'; exRunning(); }
 }
 $('#mask').onclick=e=>{ if(e.target.id==='mask' && (EX.stage==='form'||EX.stage==='load')) exClose(); };
 
 
 /* ---- import ---- */
-let IM = {cat:'', stage:null, pstage:null};
+let IM = {cat:'', stage:null, pstage:null, seq:0};
 const fmtSize = n => n>=1073741824 ? (n/1073741824).toFixed(2)+' GB' : n>=1048576 ? (n/1048576).toFixed(1)+' MB' : n>=1024 ? (n/1024).toFixed(1)+' KB' : n+' B';
 const fmtTime = s => { s=Math.round(s||0); return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); };
 function imOpen(title){ $('#im_title').textContent=title; $('#imask').classList.add('show'); }
@@ -1319,20 +1423,25 @@ async function startImport(){
   if (!REAL()) return toast('界面演示中，导入不可用');
   if (IM.stage) { $('#imask').classList.add('show'); return; }
   IM.cat=''; IM.stage='scanning';      // 先置状态：扫描很快结束时，完成事件可能先于本函数返回
-  const r = await window.pywebview.api.choose_source_folder();
+  const r = await safeCall(()=>window.pywebview.api.choose_source_folder());
+  if (!r){ IM.stage=null; return; }    // 出错时一定要清掉阶段，否则以后点“导入”都打不开选择文件夹
   if (!r.ok){ IM.stage=null; if (r.message) await infoDialog('无法导入', r.message); return; }
   if (IM.stage==='scanning') imScanning(0);
 }
 function imScanning(n){
   imOpen('导入照片');
   imSet(`<div class="big">正在扫描来源文件夹</div><div class="mute">已找到 ${n} 张照片。扫描只读取文件名，不会改动存储卡上的任何内容。</div>`,
-    [{label:'取消', onclick:async()=>{ await window.pywebview.api.import_cancel(); imClose(); }}]);
+    [{label:'取消', onclick:async()=>{ try { await window.pywebview.api.import_cancel(); } catch(e){} imClose(); }}]);
 }
 async function imConfirm(){
   IM.stage='confirm'; imOpen('导入照片');
-  const cur = $('#im_cat') ? $('#im_cat').value : IM.cat;
-  const p = await window.pywebview.api.import_prepare(cur);
-  if (!p.found){ imSet(`<div class="bad">${esc((p.errors&&p.errors._)||'没有可导入的内容。')}</div>`, [{label:'关闭', onclick:async()=>{ await window.pywebview.api.import_close(); imClose(); }}]); return; }
+  const cur = $('#im_cat') ? $('#im_cat').value : IM.cat, seq = ++IM.seq;
+  let p; try { p = await window.pywebview.api.import_prepare(cur); } catch(e){ p = {errors:{_:'无法读取导入信息，请关闭后重试。'}}; }
+  if (seq!==IM.seq || IM.stage!=='confirm') return;       // 更新的一次已经发出，或弹窗已关
+  /* 等待期间用户可能又打了字：用输入框现在的内容重建，并放回焦点和光标，不吞字 */
+  const live = $('#im_cat'), typed = live ? live.value : cur, hadFocus = !!live && document.activeElement===live;
+  let ss = null; if (hadFocus) try { ss = [live.selectionStart, live.selectionEnd]; } catch(e){}
+  if (!p.found){ imSet(`<div class="bad">${esc((p.errors&&p.errors._)||'没有可导入的内容。')}</div>`, [{label:'关闭', onclick:async()=>{ try { await window.pywebview.api.import_close(); } catch(e){} imClose(); }}]); return; }
   const f=p.found, errs=Object.entries(p.errors||{});
   const errHTML = errs.filter(([k])=>k!=='category').map(([,m])=>`<div class="bad">${esc(m)}</div>`).join('');
   const catErr = (p.errors&&p.errors.category) ? `<div class="bad">${esc(p.errors.category)}</div>` : '';
@@ -1344,20 +1453,25 @@ async function imConfirm(){
   imSet(`<div class="big">找到 ${f.n} 张（RAW ${f.raw}、JPEG ${f.jpeg}、其他 ${f.other}），共 ${esc(f.size_text)}</div>
     <div class="kvl"><span>来源文件夹</span><span>${esc(p.source)}</span>
       <span>软件文件夹</span><span>${esc(p.base)}${p.base_is_default?'（默认位置，可在设置中更换）':''}</span>
-      <span>分类文件夹名</span><span><input type="text" id="im_cat" maxlength="60" placeholder="可选，留空则直接放入软件文件夹" value="${esc(cur)}"></span>
+      <span>分类文件夹名</span><span><input type="text" id="im_cat" maxlength="60" placeholder="可选，留空则直接放入软件文件夹" value="${esc(typed)}"></span>
       <span>保存到</span><span>${esc(p.target)}</span>
       <span>磁盘剩余空间</span><span>${esc(p.free_text)}（本次需要约 ${esc(p.needed_text)}）</span></div>${catErr}${errHTML}${notes.join('')}`,
-    [{label:'取消', onclick:async()=>{ await window.pywebview.api.import_cancel(); imClose(); }},
+    [{label:'取消', onclick:async()=>{ try { await window.pywebview.api.import_cancel(); } catch(e){} imClose(); }},
      {label:'开始导入', cls:'primary', id:'im_go', disabled:!p.can_start, onclick:imBegin}]);
   const inp=$('#im_cat'); let t=null;
-  inp.oninput=()=>{ clearTimeout(t); t=setTimeout(()=>{ IM.cat=inp.value; imConfirm().then(()=>{ const i=$('#im_cat'); i.focus(); i.setSelectionRange(i.value.length,i.value.length); }); },350); };
+  if (hadFocus){ inp.focus(); if (ss) try { inp.setSelectionRange(ss[0], ss[1]); } catch(e){} }
+  if (typed!==cur){ IM.cat=typed; t=setTimeout(()=>imConfirm(), 350); }       // 等待期间打的字也要重新计算“保存到”
+  inp.oninput=()=>{ clearTimeout(t); t=setTimeout(()=>{ IM.cat=inp.value; imConfirm(); },350); };
 }
 async function imBegin(){
   const cat=$('#im_cat').value; IM.cat=cat;
-  let r = await window.pywebview.api.import_start(cat, false);
+  $('#im_go').disabled = true;
+  let r = await safeCall(()=>window.pywebview.api.import_start(cat, false), $('#im_go'));
+  if (!r) return;
   if (r.needs_create){
-    if (!await askDialog('创建文件夹', '软件文件夹不存在：\n'+r.base+'\n是否创建？', '创建')) return;
-    r = await window.pywebview.api.import_start(cat, true);
+    if (!await askDialog('创建文件夹', '软件文件夹不存在：\n'+r.base+'\n是否创建？', '创建')){ const g=$('#im_go'); if (g) g.disabled=false; return; }
+    r = await safeCall(()=>window.pywebview.api.import_start(cat, true), $('#im_go'));
+    if (!r) return;
   }
   if (!r.ok){ await infoDialog('无法开始导入', r.message||'无法开始导入。'); imConfirm(); return; }
   IM.stage='copying'; IM.pstage=null;
@@ -1386,20 +1500,20 @@ function imResult(ev){
   if (!ev.cancelled && !c.failed && !c.lr_pending && !c.lr_uncertain && !c.lr_failed) lines.push('<div class="okmsg">全部完成。</div>');
   imSet(`<div class="big">${esc(countsLine(c))}</div><div class="mute">共 ${ev.n} 张，用时 ${fmtTime(ev.elapsed)}。</div>${lines.join('')}
     ${rows?`<div class="plist"><table><thead><tr><th>文件</th><th>环节</th><th>原因</th></tr></thead><tbody>${rows}</tbody></table>${ev.problems_more?`<div class="mute">另有 ${ev.problems_more} 项未列出。</div>`:''}</div>`:''}`,
-    [ev.pending_retry?{label:'重新尝试加入 Lightroom', onclick:async()=>{ const r=await window.pywebview.api.import_retry_lr(); if(!r.ok) await infoDialog('无法重新加入', r.message); else { IM.stage='retry'; IM.pstage=null; } }}:null,
-     {label:'关闭', cls:'primary', onclick:async()=>{ await window.pywebview.api.import_close(); imClose(); }}].filter(Boolean));
+    [ev.pending_retry?{label:'重新尝试加入 Lightroom', onclick:async()=>{ const r=await safeCall(()=>window.pywebview.api.import_retry_lr()); if (!r) return; if(!r.ok) await infoDialog('无法重新加入', r.message); else { IM.stage='retry'; IM.pstage=null; } }}:null,
+     {label:'关闭', cls:'primary', onclick:async()=>{ try { await window.pywebview.api.import_close(); } catch(e){} imClose(); }}].filter(Boolean));
 }
 function onImportEvent(ev){
   if (ev.type==='import_scan'){
     if (ev.state==='scanning'){ if(IM.stage==='scanning'){ imScanning(ev.found||0); } }
-    else if (ev.state==='done'){ if (ev.error){ imOpen('导入照片'); imSet(`<div class="bad">${esc(ev.error)}</div>`, [{label:'关闭', onclick:async()=>{ await window.pywebview.api.import_close(); imClose(); }}]); } else imConfirm(); }
+    else if (ev.state==='done'){ if (ev.error){ imOpen('导入照片'); imSet(`<div class="bad">${esc(ev.error)}</div>`, [{label:'关闭', onclick:async()=>{ try { await window.pywebview.api.import_close(); } catch(e){} imClose(); }}]); } else imConfirm(); }
     else if (ev.state==='cancelled'){ imClose(); }
   } else if (ev.type==='import_progress'){ imProgress(ev); }
   else if (ev.type==='import_done'){ imResult(ev); }
 }
 
 /* ---- AI 挑片 ---- */
-let PK = {stage:null, photos:[], thumbs:{}, o:{criterion:'overall', custom:'', count:'top3'}, res:null, ap:null, timer:null, t0:0, n:0};
+let PK = {tok:0, stage:null, photos:[], thumbs:{}, o:{criterion:'overall', custom:'', count:'top3'}, res:null, ap:null, timer:null, t0:0, n:0};
 const PK_CRIT = [['overall','综合观感'],['technical','技术质量（对焦、曝光、噪点）'],['composition','构图'],['custom','自定义']];
 const PK_CNT = [['top1','挑出最好的 1 张'],['top3','前 3 张'],['all','全部排序']];
 const PK_MAX = 10;
@@ -1413,7 +1527,7 @@ function pkClear(){ if (PK.timer){ clearInterval(PK.timer); PK.timer=null; } }
 function pkClose(){ pkClear(); $('#pmask').classList.remove('show'); PK.stage=null; }
 function pkSet(body, buttons){
   $('#pk_body').innerHTML=body; const f=$('#pk_foot'); f.innerHTML='';
-  (buttons||[]).forEach(b=>{ const e=document.createElement('button'); e.className='btn '+(b.cls||''); e.textContent=b.label; e.disabled=!!b.disabled; if(b.id) e.id=b.id; e.onclick=b.onclick; f.appendChild(e); });
+  (buttons||[]).forEach(b=>{ const e=document.createElement('button'); e.className='btn '+(b.cls||''); e.textContent=b.label; e.disabled=!!b.disabled; if(b.id) e.id=b.id; if(b.title) e.title=b.title; e.onclick=b.onclick; f.appendChild(e); });
 }
 const pkStars = n => '★'.repeat(n)+'☆'.repeat(5-n);
 const pkFlag = f => ({pick:'留用', none:'无旗标', reject:'排除'}[f] || '—');
@@ -1422,17 +1536,20 @@ function pkThumb(id){ const u=PK.thumbs[id]; return u ? `<img class="pt" src="${
 async function pkFinishClose(){ try{ await window.pywebview.api.pick_apply_close(); await window.pywebview.api.pick_close(); }catch(e){} pkClose(); }
 async function openPick(){
   if (!REAL()) return toast('界面演示中，AI 挑片不可用');
-  const api = window.pywebview.api;
+  const api = window.pywebview.api, tok = ++PK.tok;
   pkOpen(); PK.stage='load';
   pkSet('<div class="mute"><span class="spin"></span>正在读取 Lightroom 中选中的照片…</div>', [{label:'取消', onclick:pkClose}]);
+  const stale = ()=> tok!==PK.tok || PK.stage!=='load';      // 读取期间点了取消（或已显示结果）：回来后不再把弹窗打开
   let st=null, ap=null;
   try { st = await api.pick_state(); ap = await api.pick_apply_state(); } catch(e){}
+  if (stale()) return;
   if (st && st.thumbs) Object.assign(PK.thumbs, st.thumbs);
   if (ap && ap.stage==='writing'){ PK.stage='applying'; pkApplying({i:0,n:0,name:''}); return; }
   if (ap && ap.stage==='done' && ap.results.length){ pkApplied(ap); return; }
   if (st && st.stage==='running'){ PK.n=st.n||0; PK.stage='run'; pkRunning(); return; }
   if (st && st.stage==='done' && st.result){ PK.res=st.result; pkResult(); return; }
   let r; try { r = await api.pick_prepare(); } catch(e){ r = {ok:false, message:'无法读取选中的照片，请重试。'}; }
+  if (stale()) return;
   if (!r.ok){ PK.stage='error'; pkSet(`<div class="bad" style="font-size:13px">${esc(r.message||'无法开始。')}</div>`, [{label:'关闭', cls:'primary', onclick:pkClose}]); return; }
   if (r.stage==='running'){ PK.stage='run'; pkRunning(); return; }
   PK.photos = r.photos; Object.assign(PK.thumbs, r.thumbs||{}); PK.stage='form'; pkForm();
@@ -1464,8 +1581,11 @@ function pkFormUpdate(){
 }
 async function pkStart(){
   const o=PK.o; $('#pk_go').disabled=true; $('#pk_err').textContent='';
-  const r = await window.pywebview.api.pick_start({criterion:o.criterion, custom:o.criterion==='custom'?o.custom:'', count:o.count});
-  if (!r.ok){ $('#pk_err').textContent = r.message||'无法开始。'; if (!r.changed) pkFormUpdate(); return; }
+  PK.stage='starting';           // 先记下阶段：AI 很快失败时，完成事件可能比接口返回先到
+  const r = await safeCall(()=>window.pywebview.api.pick_start({criterion:o.criterion, custom:o.criterion==='custom'?o.custom:'', count:o.count}), $('#pk_go'));
+  if (PK.stage!=='starting') return;               // 结果已经显示，或弹窗已关
+  if (!r){ PK.stage='form'; return; }
+  if (!r.ok){ PK.stage='form'; $('#pk_err').textContent = r.message||'无法开始。'; if (!r.changed) pkFormUpdate(); return; }
   PK.n = PK.photos.length; PK.stage='run'; pkRunning();
 }
 function pkRunning(label){
@@ -1473,7 +1593,8 @@ function pkRunning(label){
   pkSet(`<div class="big"><span class="spin"></span>正在比较 ${PK.n||PK.photos.length} 张照片…</div>
     <div class="mute" id="pk_lab">${esc(label||'已发送请求，等待 AI 回复。')}</div><div class="mute" id="pk_time">已用时 00:00</div>
     <div class="mute">通常需要数十秒；最长等待 180 秒。可随时停止。</div>`,
-    [{label:'停止', id:'pk_stop', onclick:async(e)=>{ e.target.disabled=true; e.target.textContent='正在停止'; await window.pywebview.api.pick_stop(); }}]);
+    [{label:'隐藏', title:'AI 继续在后台比较，结束后再点“AI 挑片”查看结果', onclick:pkClose},
+     {label:'停止', id:'pk_stop', onclick:async(e)=>{ e.target.disabled=true; e.target.textContent='正在停止'; try { await window.pywebview.api.pick_stop(); } catch(e2){ toast('没能停止，请稍后再试。'); e.target.disabled=false; e.target.textContent='停止'; } }}]);
   PK.timer = setInterval(()=>{ const t=$('#pk_time'); if(t) t.textContent='已用时 '+fmtTime((Date.now()-PK.t0)/1000); }, 1000);
 }
 function pkUsage(ev){
@@ -1482,7 +1603,7 @@ function pkUsage(ev){
 }
 function pkResult(){
   pkClear(); const ev=PK.res; PK.stage='result'; pkOpen('AI 挑片');
-  const again = {label:'重新比较', onclick:async()=>{ await window.pywebview.api.pick_close(); PK.res=null; pkClose(); openPick(); }};
+  const again = {label:'重新比较', onclick:async()=>{ try { await window.pywebview.api.pick_close(); } catch(e){} PK.res=null; pkClose(); openPick(); }};
   const close = {label:'关闭', cls:'primary', onclick:pkFinishClose};
   const head = `<div class="mute">${esc(ev.n)} 张照片 · 评判标准：${esc(ev.criterion_label)} · 结果：${esc(ev.count_label)}</div>`;
   if (['failed','timeout','stopped'].includes(ev.status)){
@@ -1514,7 +1635,7 @@ async function pkZoom(id){
 }
 /* 写入 Lightroom：确认清单 → 写入 → 结果 → 撤销 */
 async function pkApply(){
-  const r = await window.pywebview.api.pick_apply_prepare();
+  const r = await safeCall(()=>window.pywebview.api.pick_apply_prepare()); if (!r) return;
   if (!r.ok) return infoDialog('无法应用建议', r.message||'无法生成确认清单。');
   PK.ap = r.items; PK.stage='confirm'; pkConfirmView();
 }
@@ -1528,20 +1649,22 @@ function pkConfirmView(){
     <table><thead><tr><th></th><th>照片</th><th>现有（星级 / 旗标）</th><th>写入后</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="mute">只修改星级和旗标，不会改动关键词或其他信息。可取消勾选不想改的照片；写入后可撤销这次写入。</div>
     <div class="bad" id="pk_err"></div>`,
-    [{label:'返回', onclick:async()=>{ await window.pywebview.api.pick_apply_cancel(); pkResult(); }},
+    [{label:'返回', onclick:async()=>{ try { await window.pywebview.api.pick_apply_cancel(); } catch(e){} pkResult(); }},
      {label:'确认写入', cls:'primary', id:'pk_ok', onclick:pkApplyGo}]);
   const upd=()=>{ const n=document.querySelectorAll('#pk_body input[type=checkbox]:checked').length; $('#pk_ok').disabled = n===0; $('#pk_ok').textContent = n ? '确认写入（'+n+' 张）' : '确认写入'; };
   document.querySelectorAll('#pk_body input[type=checkbox]').forEach(c=>c.onchange=upd); upd();
 }
 async function pkApplyGo(){
   const ids=[...document.querySelectorAll('#pk_body input[type=checkbox]:checked')].map(c=>c.dataset.id);
-  $('#pk_ok').disabled=true;
-  const r = await window.pywebview.api.pick_apply_confirm(ids);
-  if (!r.ok){ $('#pk_err').textContent = r.message||'无法写入。'; $('#pk_ok').disabled = !!r.readonly; return; }
+  const btns = [...document.querySelectorAll('#pk_foot button')]; btns.forEach(b=>b.disabled=true);
+  PK.stage='apply_start';        // 先记下阶段：写入很快结束（或失败）时，完成事件可能比接口返回先到
+  const r = await safeCall(()=>window.pywebview.api.pick_apply_confirm(ids));
+  if (PK.stage!=='apply_start') return;            // 已收到进度或结果，或弹窗已关
+  if (!r || !r.ok){ PK.stage='confirm'; btns.forEach(b=>b.disabled=false); if (r){ $('#pk_err').textContent = r.message||'无法写入。'; $('#pk_ok').disabled = !!r.readonly; } return; }
   PK.stage='applying'; pkApplying({i:0,n:ids.length,name:''});
 }
 function pkApplying(ev){
-  pkOpen('正在写入'); pkSet(`<div class="big"><span class="spin"></span>正在写入${ev.n?'（'+Math.min(ev.i+1,ev.n)+' / '+ev.n+'）':''}…</div><div class="mute">${esc(ev.name||'')}</div>`, [{label:'关闭', disabled:true}]);
+  pkOpen('正在写入'); pkSet(`<div class="big"><span class="spin"></span>正在写入${ev.n?'（'+Math.min(ev.i+1,ev.n)+' / '+ev.n+'）':''}…</div><div class="mute">${esc(ev.name||'')}</div>`, [{label:'隐藏', onclick:pkClose}]);
 }
 const AP_ST = {ok:['成功','st-ok'], failed:['失败','st-bad'], uncertain:['不确定','st-wait'], undone:['已还原','st-mute'], conflict:['未还原（又被改过）','st-bad']};
 function pkApplied(ev, undoRes){
@@ -1559,29 +1682,35 @@ function pkApplied(ev, undoRes){
     [canUndo?{label:'撤销这次写入', onclick:()=>pkUndo(false)}:null, {label:'关闭', cls:'primary', onclick:pkFinishClose}].filter(Boolean));
 }
 async function pkUndo(force){
-  const r = await window.pywebview.api.pick_apply_undo(force);
+  if (PK.undoBusy) return; PK.undoBusy = true;
+  const b = [...document.querySelectorAll('#pk_foot button')].find(x=>x.textContent==='撤销这次写入');
+  if (b){ b.disabled = true; b.textContent = '正在撤销…'; }
+  let r; try { r = await safeCall(()=>window.pywebview.api.pick_apply_undo(force), b, '撤销没有完成，请重试。'); }
+  finally { PK.undoBusy = false; }
+  if (!r){ if (b && b.isConnected) b.textContent = '撤销这次写入'; return; }
   if (r.results){
-    const st = await window.pywebview.api.pick_apply_state(); pkApplied(st, r.results);
+    const st = await safeCall(()=>window.pywebview.api.pick_apply_state()); if (st && st.results) pkApplied(st, r.results);
     if (r.conflict && !force && await askDialog('这些照片在写入后又发生变化', (r.results.filter(x=>x.status==='conflict').map(x=>(x.name||'')+'：'+x.message).join('\n'))+'\n\n强制撤销将覆盖这些后续改动。', '强制撤销')) return pkUndo(true);
     return;
   }
   $('#pk_err').textContent = r.message||'无法撤销。';
+  if (b && b.isConnected){ b.disabled = false; b.textContent = '撤销这次写入'; }
 }
 function onPickEvent(ev){
   const open = $('#pmask').classList.contains('show');
   if (ev.type==='pick_thumb'){ PK.thumbs[ev.id]=ev.url;
     if (open && PK.stage==='form'){ const c=document.querySelector(`#pk_grid .pcell[data-id="${CSS.escape(ev.id)}"]`); if(c){ const t=c.querySelector('.pt'); const im=document.createElement('img'); im.className='pt'; im.alt=''; im.src=ev.url; t.replaceWith(im); } } }
   else if (ev.type==='pick_progress'){ if (open && PK.stage==='run'){ const l=$('#pk_lab'); if(l) l.textContent=ev.label||''; } }
-  else if (ev.type==='pick_done'){ PK.res=ev; if (open && ['run','form','load'].includes(PK.stage)) pkResult(); else if (!open) toast('AI 挑片已结束，请点击“AI 挑片”查看结果。'); }
-  else if (ev.type==='pick_apply_progress'){ if (open && PK.stage==='applying') pkApplying(ev); }
-  else if (ev.type==='pick_apply_done'){ if (open && PK.stage==='applying') pkApplied(ev); else if (!open) toast('写入已结束，请点击“AI 挑片”查看结果。'); }
+  else if (ev.type==='pick_done'){ PK.res=ev; if (open && ['run','starting','form','load'].includes(PK.stage)) pkResult(); else if (!open) toast('AI 挑片已结束，请点击“AI 挑片”查看结果。'); }
+  else if (ev.type==='pick_apply_progress'){ if (open && (PK.stage==='applying' || PK.stage==='apply_start')){ PK.stage='applying'; pkApplying(ev); } }
+  else if (ev.type==='pick_apply_done'){ if (open && (PK.stage==='applying' || PK.stage==='apply_start')) pkApplied(ev); else if (!open) toast('写入已结束，请点击“AI 挑片”查看结果。'); }
 }
 $('#pmask').onclick=e=>{ if(e.target.id==='pmask' && (PK.stage==='form'||PK.stage==='load'||PK.stage==='error')) pkFinishClose(); };
 
 /* ---- 图库（软件内浏览与选择照片；Lightroom 只是后台引擎）---- */
 const GAL_MAX_SEL = 50;
 const G = {st:null, byId:{}, thumbs:{}, failed:{}, sel:[], active:null, anchor:null, q:'', sort:'name', filter:'all', collapsed:{},
-  order:[], cells:new Map(), vis:new Set(), busySel:false, wantSel:null, io:null, reqTimer:null, loadTimer:null, demo:false};
+  order:[], cells:new Map(), cellSig:new Map(), sig:null, qTimer:null, vis:new Set(), busySel:false, wantSel:null, io:null, reqTimer:null, loadTimer:null, demo:false};
 const gapi = () => window.pywebview.api;
 function gmsg(t, bad){ const m=$('#gal_msg'); m.textContent=t||''; m.classList.toggle('bad', !!bad); }
 function galDemoState(){
@@ -1638,14 +1767,26 @@ function galImgErr(img){ const c=img.closest('.cell'); if (!c) return; const id=
 function cellHtml(p){
   return `<div class="cell${p.added?'':' na'}" data-id="${esc(p.id)}" title="${esc(p.name)}${p.captured?'　'+esc(p.captured):''}">${cellInner(p)}</div>`;
 }
-function refreshCell(id){ const el=G.cells.get(id), p=G.byId[id]; if (!el||!p) return; el.className='cell'+(p.added?'':' na'); el.innerHTML=cellInner(p); applySelClass(el,id); }
+function refreshCell(id){ const el=G.cells.get(id), p=G.byId[id]; if (!el||!p) return; el.className='cell'+(p.added?'':' na'); el.innerHTML=cellInner(p); applySelClass(el,id); G.cellSig.set(id, cellHtml(p)); }
 function applySelClass(el,id){ el.classList.toggle('sel', G.sel.indexOf(id)>=0); el.classList.toggle('act', id===G.active); }
 function applySelClasses(){ G.cells.forEach((el,id)=>applySelClass(el,id)); }
 function buildGallery(){
   const box=$('#gal_scroll'), st=G.st, top=box.scrollTop;
-  if (G.io){ G.io.disconnect(); } G.cells.clear(); G.vis.clear(); G.order=[];
   $('#gal_title').textContent = '浏览照片' + (st.total ? `（${st.total} 张）` : '') + (st.state==='loading' && st.total ? '　正在刷新…' : '');
   $('#gal_scope').textContent = st.base ? `当前浏览：${st.base}（含子文件夹；导入位置在设置中单独选择）` : '选择照片文件夹后，可浏览其中及子文件夹的照片';
+  const listMode = !(st.state==='idle' || (st.state==='loading' && !(st.photos||[]).length)) && st.state!=='error' && !!st.base && !!st.total;
+  const groups = listMode ? galGroups(galVisible()) : null;
+  const sig = listMode ? 'L|'+groups.map(g=>g.name+':'+(G.collapsed[g.name]?1:0)+':'+g.photos.map(p=>p.id+(p.added?'+':'-')).join(',')).join('|') : null;
+  /* 照片 id、分组、折叠都没变（例如刷新只是把“正在读取”变成“就绪”）：不重建格子，只更新内容有变化的那几格 */
+  if (sig && sig===G.sig && G.cells.size){
+    let changed = 0;
+    groups.forEach(g=>g.photos.forEach(p=>{ const el=G.cells.get(p.id);
+      if (el && G.cellSig.get(p.id)!==cellHtml(p)){ el.title = p.name+(p.captured?'　'+p.captured:''); refreshCell(p.id); changed++; } }));
+    if (changed) scheduleThumbs();          // 有格子变回“读取中”时，补要一次可见格子的缩略图
+    applySelClasses(); renderBar(); return;
+  }
+  G.sig = sig;
+  if (G.io){ G.io.disconnect(); } G.cells.clear(); G.cellSig.clear(); G.vis.clear(); G.order=[];
   let h='';
   if (st.state==='idle' || (st.state==='loading' && !(st.photos||[]).length)){ h = `<div class="gempty"><span class="spin"></span>正在读取图库…</div>`; }
   else if (st.state==='error'){ h = `<div class="gempty" style="color:var(--bad)">${esc(st.message||'无法读取图库。')}</div>`; }
@@ -1655,9 +1796,8 @@ function buildGallery(){
       (st.base_exists ? '' : `<br>软件文件夹尚不存在，完成一次导入后会自动创建。`) +
       `<div class="gpath">${esc(st.base)}</div><button class="btn small" id="gal_open2">在资源管理器中打开</button></div>`;
   } else {
-    const list = galVisible();
-    if (!list.length) h = `<div class="gempty">没有符合条件的照片。</div>`;
-    galGroups(list).forEach(g=>{
+    if (!groups.length) h = `<div class="gempty">没有符合条件的照片。</div>`;
+    groups.forEach(g=>{
       const closed = !!G.collapsed[g.name];
       h += `<div class="ghead" data-g="${esc(g.name)}"><span>${closed?'▸':'▾'}</span><span class="gn">${esc(g.name)}</span><span class="gc">${g.photos.length}</span></div>`;
       h += `<div class="ggrid${closed?' hide':''}">` + g.photos.map(cellHtml).join('') + `</div>`;
@@ -1665,7 +1805,7 @@ function buildGallery(){
     });
   }
   box.innerHTML = h; box.scrollTop = top;
-  box.querySelectorAll('.cell').forEach(el=>{ G.cells.set(el.dataset.id, el); applySelClass(el, el.dataset.id); });
+  box.querySelectorAll('.cell').forEach(el=>{ const id=el.dataset.id; G.cells.set(id, el); if (G.byId[id]) G.cellSig.set(id, cellHtml(G.byId[id])); applySelClass(el, id); });
   const o2=$('#gal_open2'); if (o2) o2.onclick=openBaseFolder;
   const choose=$('#gal_choose'); if (choose) choose.onclick=changeGalleryFolder;
   if (!G.demo && 'IntersectionObserver' in window){
@@ -1730,7 +1870,8 @@ function cellClick(id, e){
   } else { ids=[id]; G.anchor=id; }
   if (!ids.length){ clearSel(); return; }
   gmsg('');
-  const r=limitSel(ids, active); G.sel=r.ids; G.active=r.active; applySelClasses(); renderBar(); sendSel();
+  const r=limitSel(ids, active); G.sel=r.ids; G.active=r.active; applySelClasses(); renderBar();
+  markSwitching(r.active); sendSel();
 }
 function selectAllShown(){
   const ids=G.order.filter(i=>G.byId[i] && G.byId[i].added); if (!ids.length) return;
@@ -1750,6 +1891,7 @@ async function sendSel(){
   if (last){
     G.sel=(last.selected||[]).filter(i=>G.byId[i]); G.active=last.active||(G.sel.length?G.sel[G.sel.length-1]:null);
     if (last.message) gmsg(last.message, !last.ok); else if (!last.ok) gmsg('选择未生效。', true);
+    if (!last.ok || !G.active) markSwitching(null); else if (SWITCH && SWITCH.id!==G.active) markSwitching(G.active);
   }
   applySelClasses(); renderBar();
 }
@@ -1759,7 +1901,7 @@ async function clearSel(){
   try { const r=await gapi().library_clear_selection(); if (r && r.message) gmsg(r.message); } catch(e){}
 }
 async function addToLr(){
-  const r=await gapi().library_add_missing(); if (!r.ok) gmsg(r.message||'无法加入。', true); else gmsg('');
+  const r=await safeCall(()=>gapi().library_add_missing()); if (!r) return; if (!r.ok) gmsg(r.message||'无法加入。', true); else gmsg('');
 }
 async function openBaseFolder(){ if (!REAL()) return; const r=await gapi().open_library(); if (!r.ok) toast(r.message); }
 async function changeGalleryFolder(){
@@ -1785,7 +1927,7 @@ $('#gal').addEventListener('keydown', e=>{
   const tag=(document.activeElement&&document.activeElement.tagName)||'';
   if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='a' && tag!=='INPUT' && tag!=='SELECT'){ e.preventDefault(); selectAllShown(); }
 });
-$('#gal_q').oninput=()=>{ G.q=$('#gal_q').value; if (G.st) buildGallery(); };
+$('#gal_q').oninput=()=>{ clearTimeout(G.qTimer); G.qTimer=setTimeout(()=>{ G.q=$('#gal_q').value; if (G.st) buildGallery(); }, 200); };   // 停顿 0.2 秒再筛选，打字时不卡
 $('#gal_sort').onchange=()=>{ G.sort=$('#gal_sort').value; if (G.st) buildGallery(); };
 $('#gal_filter').onchange=()=>{ G.filter=$('#gal_filter').value; if (G.st) buildGallery(); };
 $('#gal_refresh').onclick=async()=>{ if (G.demo||!REAL()) return; gmsg(''); G.st=Object.assign({}, G.st, {state:'loading'}); buildGallery(); try { await gapi().library_refresh(); } catch(e){} };
@@ -1848,14 +1990,24 @@ function fillSettings(r){
   $('#a_plugin').textContent = a.plugin_version || '未连接，无法读取'; $('#a_data').textContent = a.data_dir; $('#a_url').textContent = a.project_url;
 }
 function clearSettingsErrors(){ ['folder','provider','edge','lrpath'].forEach(k=>{ $('#e_'+k).textContent=''; }); $('#s_msg').textContent=''; $('#s_msg').className='msg-line'; }
+/* 读取设置期间：字段和“保存”都变灰，避免改了又被读回来的值冲掉，或把旧值存回去 */
+let SETLOAD = 0;
+function settingsLock(on){
+  document.querySelectorAll('#smask .body button, #smask .body input, #smask .body select, #s_save').forEach(e=>{ e.disabled = !!on; });
+}
 async function openSettings(){
   if (!REAL()) return;
+  const tok = ++SETLOAD;
   clearSettingsErrors(); $('#smask').classList.add('show');
-  $('#s_msg').textContent = '正在读取设置…';
-  try { fillSettings(await window.pywebview.api.get_settings(true)); $('#s_msg').textContent = SET.settings.base_folder ? '' : '请先选择照片工作文件夹。'; }
-  catch(e){ $('#s_msg').textContent='无法读取设置，请重试。'; $('#s_msg').className='msg-line bad'; }
+  $('#s_msg').textContent = '正在读取设置…'; settingsLock(true);
+  let r = null;
+  try { r = await window.pywebview.api.get_settings(true); } catch(e){}
+  if (tok!==SETLOAD) return;                       // 期间又打开了一次：以后一次为准
+  if (!r || !r.settings){ $('#s_msg').textContent='无法读取设置，请关闭后重试。'; $('#s_msg').className='msg-line bad'; return; }   // 读不到时不能保存
+  settingsLock(false);
+  fillSettings(r); $('#s_msg').textContent = SET.settings.base_folder ? '' : '请先选择照片工作文件夹。';
 }
-function closeSettings(){ $('#smask').classList.remove('show'); }
+function closeSettings(){ $('#smask').classList.remove('show'); SETLOAD++; }
 $('#s_cancel').onclick=closeSettings;
 $('#smask').onclick=e=>{ if(e.target.id==='smask') closeSettings(); };
 $('#s_pick').onclick=async()=>{
@@ -1872,7 +2024,10 @@ async function saveSettings(createMissing=false){
                    confirm_default: setConfirm, ai_use_notes: setNotes, preview_edge: parseInt($('#s_edge').value,10),
                    auto_launch_lightroom: setAutoLr, check_updates: setUpd};
   if (lrChoice) changes.lightroom_path_choice = lrChoice;
-  const r = await window.pywebview.api.save_settings(changes, createMissing);
+  $('#s_save').disabled = true;
+  const r = await safeCall(()=>window.pywebview.api.save_settings(changes, createMissing), $('#s_save'), '设置没有保存，请重试。');
+  if (!r) return;
+  $('#s_save').disabled = false;
   if (r.ok){
     SET.settings = r.settings; confirmDefault = r.settings.confirm_default;
     $('#edge').value = String(r.settings.preview_edge);
@@ -1887,7 +2042,7 @@ async function saveSettings(createMissing=false){
   const m = $('#s_msg'); m.className='msg-line bad';
   m.textContent = (r.errors && r.errors._) ? r.errors._ : (shown ? '设置未保存，请修正标红项。' : '设置未保存。');
 }
-$('#s_save').onclick=()=>saveSettings(false);
+$('#s_save').onclick=()=>{ if (!SET || $('#s_save').disabled) return; saveSettings(false); };
 
 /* ---- update check (0.15.0)：只提示，点了才在浏览器里打开发布页；页面不传任何地址 ---- */
 let UPD = {state:'idle', latest:'', message:''};

@@ -24,7 +24,7 @@ STUB = """<script>
   const notes = empty ? [] : [
     {id:'n-000000000001', title:'示例经验一：天空发灰', scene:'示例场景', tags:['风光','天空'], body:'示例正文：先降低高光 20，再把蓝色饱和度提高 10。', use_in_chat:true, fav:true, modified:'2026-11-03 20:00:00'},
     {id:'n-000000000002', title:'示例经验二：逆光人像', scene:'', tags:['人像'], body:'示例正文：阴影 +40。', use_in_chat:false, fav:false, modified:'2026-11-03 20:05:00'}];
-  const lr = {ok:true, note:'共 6 个预设，显示 6 个。', groups:[
+  const lr = {ok:true, hidden_masks:2, note:'共 6 个预设，显示 6 个。', groups:[
     {folder:'示例分组一', presets:[{id:'11111111-aaaa', name:'示例 Lightroom 预设', masks:false, key:'示例分组一/示例 Lightroom 预设', fav:false}, {id:'22222222-bbbb', name:'示例带蒙版预设', masks:true, key:'示例分组一/示例带蒙版预设', fav:false}]},
     {folder:'示例分组二', presets:[{id:'33333333-cccc', name:'示例用户预设', masks:false, key:'示例分组二/示例用户预设', fav:true}]}]};
   const favs = empty ? {ok:true, groups:{preset:[],lr_preset:[],note:[],photo:[]}, total:0, photo_fav:false} :
