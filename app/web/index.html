@@ -2069,7 +2069,7 @@ $('#a_updcheck').onclick=async()=>{
 /* ---- environment wizard (0.14.0)：四项只读检查；页面只能取状态、点按钮，不传路径 ---- */
 const WZ = {st:null, timer:null, busy:false, fresh:false};
 const WZ_ICON = {ready:'✓', todo:'!', wait:'…'}, WZ_TAG = {ready:'已就绪', todo:'需要处理', wait:'等待'};
-const WZ_ACTIONS = {choose_folder:'wizard_pick_folder', choose_lightroom:'wizard_pick_lightroom', choose_ai:'open_settings'};
+const WZ_ACTIONS = {choose_folder:'wizard_pick_folder', choose_lightroom:'wizard_pick_lightroom', choose_ai:'open_settings', stop_old_servers:'wizard_stop_old_servers'};
 function wzMsg(t, bad){ const m=$('#w_msg'); m.textContent=t||''; m.className='msg-line'+(bad?' bad':''); }
 function wzRender(){
   const st = WZ.st; if (!st) return;
