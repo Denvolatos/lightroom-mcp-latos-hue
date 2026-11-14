@@ -29,6 +29,7 @@ USER_READ_TIMEOUT = 40          # 用户主动触发的读取（PR #7 把所有�
 
 REBUILD_BACKOFF_START = 60.0    # 借用模式：重建助手进程后，至少这么久才允许下一次；每次翻倍
 REBUILD_BACKOFF_MAX = 600.0
+FG_SETTLE_SECONDS = 0.3         # 前台请求结束后，缩略图再等这么久才发下一批
 
 MSG_READ_TIMEOUT ="Lightroom 没有在时限内回应，可能正忙。稍后会自动重试。"
 MSG_READ_OFFLINE = "Lightroom 插件未连接。请确认 Lightroom 已打开且插件已启用。"
@@ -60,6 +61,27 @@ def patient(lr):
         yield
     finally:
         tl.on = old
+
+
+@contextlib.contextmanager
+def foreground(lr):
+    """前台请求（选中照片、取中栏预览）：这段时间里缩略图线程先让路，不往插件那条队里塞新的一批（见 wait_foreground_idle）。
+    lr 是测试里的假对象（没有这个开关）时什么也不做。"""
+    enter = getattr(lr, "_fg_enter", None)
+    if enter is None:
+        yield
+        return
+    enter()
+    try:
+        yield
+    finally:
+        lr._fg_exit()
+
+
+def wait_foreground_idle(lr, timeout: float) -> bool:
+    """后台请求（缩略图）发下一批之前调用：等前台请求都结束（最多 timeout 秒，防止饿死）。假对象直接返回 True。"""
+    wait = getattr(lr, "_fg_wait", None)
+    return True if wait is None else wait(timeout)
 
 
 def version_name_error(name) -> str | None:
@@ -164,6 +186,9 @@ class LrService:
         self._clock = clock
         self._inflight = 0                            # 窗口这边正在等回复的命令数（有在途命令时不重建通道）
         self._inflight_lock = threading.Lock()
+        self._fg = 0                                  # 进行中的前台请求数（见 foreground()）
+        self._fg_last_end = -1e9
+        self._fg_cond = threading.Condition()
         self._rebuild_delay = REBUILD_BACKOFF_START   # 借用模式重建助手进程的指数退避
         self._rebuild_next = 0.0
         self._bridge = bridge
@@ -221,6 +246,30 @@ class LrService:
         finally:
             with self._inflight_lock:
                 self._inflight -= 1
+
+    # ---- 前台优先（见模块级 foreground / wait_foreground_idle）--------
+    def _fg_enter(self) -> None:
+        with self._fg_cond:
+            self._fg += 1
+
+    def _fg_exit(self) -> None:
+        with self._fg_cond:
+            self._fg -= 1
+            self._fg_last_end = time.monotonic()
+            self._fg_cond.notify_all()
+
+    def _fg_wait(self, timeout: float, settle: float = FG_SETTLE_SECONDS) -> bool:
+        """等到没有前台请求、且最近一次结束已过 settle 秒（选中刚结束、预览马上要开始的那一小段空档也让出来）。"""
+        end = time.monotonic() + timeout
+        with self._fg_cond:
+            while True:
+                now = time.monotonic()
+                gap = settle - (now - self._fg_last_end)
+                if self._fg == 0 and gap <= 0:
+                    return True
+                if now >= end:
+                    return False
+                self._fg_cond.wait(min(end - now, gap if self._fg == 0 else end - now))
 
     @property
     def inflight(self) -> int:

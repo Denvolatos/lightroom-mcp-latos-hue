@@ -392,7 +392,7 @@ def test_thumbstore_defaults_match_spec():
     assert s._max_cache == 500 and s.max_bytes == 64 * 1024 * 1024
 
 
-def test_thumbnails_batches_of_at_most_8_and_cache_hits(env):
+def test_thumbnails_small_batches_and_cache_hits(env):
     env.lr.catalog = [cat(i, touch(env.base / f"p{i:02}.jpg")) for i in range(20)]
     env.lib.refresh_sync()
     ids = [p["id"] for p in env.lib.state()["photos"]]
@@ -401,14 +401,15 @@ def test_thumbnails_batches_of_at_most_8_and_cache_hits(env):
     n = 0
     while env.lib.process_thumbs_once():
         n += 1
-    assert n == 3 and [len(c) for c in env.lr.thumb_calls] == [8, 8, 4] and all(len(c) <= pl.THUMB_BATCH for c in env.lr.thumb_calls)
+    assert pl.THUMB_BATCH == 2                                                # 1.1.1：8 → 2，一批别占住插件队列太久
+    assert n == 10 and [len(c) for c in env.lr.thumb_calls] == [2] * 10
     items = [i for e in env.events if e["type"] == "library_thumbs" for i in e["items"]]
     assert len(items) == 20 and all(i["url"].startswith("http://127.0.0.1:4321/p/") for i in items)
     r2 = env.lib.request_thumbs(ids)                                          # 第二次全部命中缓存，不再向 Lightroom 取
-    assert r2["pending"] == [] and len(r2["thumbs"]) == 20 and len(env.lr.thumb_calls) == 3
+    assert r2["pending"] == [] and len(r2["thumbs"]) == 20 and len(env.lr.thumb_calls) == 10
     assert env.lib.process_thumbs_once() is False
     assert env.lib.stats["hits"] == 20 and env.lib.stats["requested"] == 40 and env.lib.cache_hit_rate() == 0.5
-    assert env.lib.stats["fetched"] == 20 and env.lib.stats["batch_max"] == 8
+    assert env.lib.stats["fetched"] == 20 and env.lib.stats["batch_max"] == 2
     assert len(env.lib.state()["thumbs"]) == 20                               # 页面重新加载时能拿到已缓存的 URL
 
 
@@ -429,8 +430,9 @@ def test_new_request_replaces_unstarted_queue(env):
     ids = [p["id"] for p in env.lib.state()["photos"]]
     env.lib.request_thumbs(ids[:20])
     env.lib.request_thumbs(ids[20:25])                                        # 页面滚动了：前面排队的不再需要
-    env.lib.process_thumbs_once()
-    assert env.lr.thumb_calls == [ids[20:25]]
+    while env.lib.process_thumbs_once():
+        pass
+    assert [i for c in env.lr.thumb_calls for i in c] == ids[20:25]
 
 
 def test_failed_thumbnails_and_retry(env):
@@ -481,18 +483,77 @@ def test_unknown_error_code_is_shown_in_message(env):
     assert env.lib.state()["failed"][pid] == "无法读取缩略图（Lightroom 说：渲染失败）"
 
 
-def test_whole_batch_failure_marks_every_photo(env):
+def test_whole_batch_failure_requeues_once_after_backoff_then_marks(env):
+    """1.1.1：整批失败（超时、通道忙）不立刻把这一批永久标成失败；放回队列，退避后再试一次，仍失败才标。"""
     seed(env, 2, 0)
     env.lib.refresh_sync()
     ids = [p["id"] for p in env.lib.state()["photos"]]
 
     class BridgeTimeout(Exception):
         pass
-    env.lr.library_thumbnails = lambda *a, **k: (_ for _ in ()).throw(BridgeTimeout("x"))
+    calls = []
+    env.lr.library_thumbnails = lambda b, *a, **k: (calls.append(list(b)), (_ for _ in ()).throw(BridgeTimeout("x")))[1]
     env.lib.request_thumbs(ids)
     env.lib.process_thumbs_once()
-    assert set(env.lib.state()["failed"]) == set(ids)
+    assert env.lib.state()["failed"] == {} and len(calls) == 1                 # 第一次：不报失败
+    assert env.lib.process_thumbs_once() is False and len(calls) == 1          # 退避期内不再发
+    env.clock.t += pl.THUMB_BACKOFF
+    env.lib.process_thumbs_once()
+    assert calls[-1] == ids and set(env.lib.state()["failed"]) == set(ids)     # 再试仍失败：才算失败
     assert all("时限" in m for m in env.lib.state()["failed"].values())
+    env.clock.t += pl.THUMB_BACKOFF
+    assert env.lib.process_thumbs_once() is False and len(calls) == 2          # 只重试一次
+
+
+def test_whole_batch_failure_recovers_on_retry(env):
+    seed(env, 2, 0)
+    env.lib.refresh_sync()
+    ids = [p["id"] for p in env.lib.state()["photos"]]
+    orig, n = env.lr.library_thumbnails, []
+
+    def flaky(b, size=256):
+        n.append(1)
+        if len(n) == 1:
+            raise RuntimeError("通道忙")
+        return orig(b, size)
+    env.lr.library_thumbnails = flaky
+    env.lib.request_thumbs(ids)
+    env.lib.process_thumbs_once()
+    env.clock.t += pl.THUMB_BACKOFF
+    env.lib.process_thumbs_once()
+    assert set(env.lib.state()["thumbs"]) == set(ids) and env.lib.state()["failed"] == {}
+
+
+def test_thumbnails_wait_for_foreground_requests():
+    """有选中或预览请求在进行时，缩略图线程不发下一批；前台请求结束（再稍等片刻）后才发。"""
+    from lr_service import LrService, foreground
+    lr = LrService(bridge=object(), edit_service=object())
+    order = []
+    with foreground(lr):
+        t = threading.Thread(target=lambda: (lr._fg_wait(5), order.append("thumb")))
+        t.start()
+        time.sleep(0.2)
+        order.append("fg_done")
+    t.join(5)
+    assert order == ["fg_done", "thumb"]
+    t0 = time.monotonic()
+    assert lr._fg_wait(5)
+    assert time.monotonic() - t0 < 1                                          # 没有前台请求：不会一直等
+    with foreground(lr):
+        assert lr._fg_wait(0.1) is False                                       # 最多等 timeout 秒，防止饿死
+
+
+def test_select_and_preview_are_foreground_requests(env):
+    seed(env, 1, 0)
+    env.lib.refresh_sync()
+    pid = env.lib.state()["photos"][0]["id"]
+    seen = []
+    env.lr._fg_enter = lambda: seen.append("enter")
+    env.lr._fg_exit = lambda: seen.append("exit")
+    orig = env.lr.library_select
+    env.lr.library_select = lambda *a: (seen.append("select"), orig(*a))[1]
+    env.lib.select([pid])
+    assert seen == ["enter", "select", "exit"]
 
 
 def test_thumbnail_request_validation(env):

@@ -20,7 +20,7 @@ import time
 from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from lr_service import friendly_read_error
+from lr_service import foreground, friendly_read_error
 
 log = logging.getLogger("latoshue.preview")
 
@@ -268,15 +268,16 @@ class PreviewManager:
             return self._publish({"state": "none", "message": MSG_NONE})
         edge = self.edge
         try:
-            version = develop_version(self.lr.develop_of(pid))
-            entry = self.store.get(pid, edge, version)
-            if entry is None:
-                self._loading(pid, detail)
-                t0 = time.monotonic()
-                raw, _ = self.lr.preview_bytes(pid, edge)
-                self.last_fetch_seconds = round(time.monotonic() - t0, 3)
-                self.fetch_count += 1
-                entry = self.store.put(pid, edge, version, raw, jpeg_size(raw))
+            with foreground(self.lr):                # 前台请求：缩略图线程先让路
+                version = develop_version(self.lr.develop_of(pid))
+                entry = self.store.get(pid, edge, version)
+                if entry is None:
+                    self._loading(pid, detail)
+                    t0 = time.monotonic()
+                    raw, _ = self.lr.preview_bytes(pid, edge)
+                    self.last_fetch_seconds = round(time.monotonic() - t0, 3)
+                    self.fetch_count += 1
+                    entry = self.store.put(pid, edge, version, raw, jpeg_size(raw))
         except Exception as e:
             # 异常原文（可能带本机路径、端口）只进日志；界面上只给一句分好类的原因
             log.warning("preview refresh failed: %s: %s", type(e).__name__, e)

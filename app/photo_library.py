@@ -7,7 +7,7 @@
   2. 磁盘扫描软件文件夹（复用 importer.scan_folder 的规则：扩展名白名单、深度、隐藏/系统目录、不跟随链接）。
 磁盘上有、目录里没有 -> “尚未加入 Lightroom”；目录里有、磁盘上找不到 -> “文件缺失”。
 
-缩略图：页面只请求可见格；后台线程每批最多 8 张向 Lightroom 取（插件一次回传多张受 20 秒上限限制），存进内存缓存
+缩略图：页面只请求可见格；后台线程每批最多 THUMB_BATCH（2）张向 Lightroom 取，前台请求（选中、预览）优先（插件一次回传多张受 20 秒上限限制），存进内存缓存
 （最多 500 张且总量 64 MB，最久未用先淘汰），由本机图片服务（preview.PreviewServer，只服务缓存里的图、带随机口令）提供 URL。
 照片被调整/撤销/还原后缓存失效并重新取。
 
@@ -24,12 +24,15 @@ import time
 import secrets
 
 import importer as imp
+from lr_service import foreground, wait_foreground_idle
 from preview import PreviewStore
 from settings import browse_folder
 
 MAX_PHOTOS = 2000                 # 图库最多显示的照片数
 PAGE = 500                        # 每页向 Lightroom 取的张数（插件上限 500）
-THUMB_BATCH = 8                   # 每批缩略图张数上限
+THUMB_BATCH = 2                   # 每批缩略图张数上限（1.1.1 从 8 降到 2：插件对所有命令串行，一批别占住队列太久）
+THUMB_BACKOFF = 2.0               # 整批失败（超时、通道忙）后，等这么久再重试
+FG_WAIT_MAX = 10.0                # 缩略图为前台请求让路最多等这么久（防止一直被饿着）
 THUMB_SIZE = 256
 THUMB_VERSION = "t"
 MAX_SELECT = 50
@@ -185,6 +188,8 @@ class PhotoLibrary:
         self._wanted: set[str] = set()
         self._failed: dict[str, str] = {}
         self._retried: set[str] = set()
+        self._batch_retried: set[str] = set()    # 因整批失败已放回队列重试过一次的
+        self._thumb_hold_until = float("-inf")   # 整批失败后的退避：这之前不发新的一批
         self._dirty: dict[str, float] = {}
         self._stale_inflight: set[str] = set()
         self.stats = {"requested": 0, "hits": 0, "fetched": 0, "failed": 0, "batches": 0, "batch_max": 0, "fetch_seconds": 0.0, "bytes": 0}
@@ -361,7 +366,7 @@ class PhotoLibrary:
                 pass
 
     def request_thumbs(self, ids, retry=False) -> dict:
-        """页面请求可见格的缩略图。已缓存的立刻返回 URL；其余排队，由后台线程每批 ≤8 张取，结果经 library_thumbs 事件送出。
+        """页面请求可见格的缩略图。已缓存的立刻返回 URL；其余排队，由后台线程每批 ≤THUMB_BATCH 张取，结果经 library_thumbs 事件送出。
         只接受当前图库里已知的标识；每次请求会取代上一次尚未开始的排队（页面滚动后不再可见的不用取）。"""
         if not isinstance(ids, (list, tuple)):
             return {"ok": False, "message": "照片列表无效。"}
@@ -392,6 +397,7 @@ class PhotoLibrary:
                 if retry:
                     self._failed.pop(i, None)
                     self._retried.discard(i)
+                    self._batch_retried.discard(i)
                 if i in self._failed:
                     thumbs[i] = {"error": self._failed[i]}
                     continue
@@ -403,7 +409,11 @@ class PhotoLibrary:
         return {"ok": True, "thumbs": thumbs, "pending": pending}
 
     def process_thumbs_once(self) -> bool:
-        """取一批（≤8 张）缩略图。返回是否取了。线程里反复调用；测试里可直接调用。"""
+        """取一批（≤THUMB_BATCH 张）缩略图。返回是否取了。线程里反复调用；测试里可直接调用。
+        1.1.1：发之前先等前台请求（选中、中栏预览）结束；整批失败（超时、通道忙、未连接）时放回队列、退避后再试一次。"""
+        if self._clock() < self._thumb_hold_until:
+            return False
+        wait_foreground_idle(self.lr, FG_WAIT_MAX)
         now = self._clock()
         with self._lock:
             for uid, t in list(self._dirty.items()):          # 被调整过的照片：等一会儿再重新取
@@ -430,6 +440,7 @@ class PhotoLibrary:
             self.stats["batches"] += 1
             self.stats["batch_max"] = max(self.stats["batch_max"], len(batch))
             self.stats["fetch_seconds"] = round(self.stats["fetch_seconds"] + dt, 3)
+            requeue = []
             for uid in batch:
                 self._inflight.discard(uid)
                 t = got.get(uid)
@@ -437,10 +448,15 @@ class PhotoLibrary:
                     self._stale_inflight.discard(uid)
                     self._dirty[uid] = self._clock()
                     continue
+                if batch_error and uid not in self._batch_retried and uid in self._wanted:
+                    self._batch_retried.add(uid)                 # 整批失败：不算这张照片的错，放回队列，退避后再试一次
+                    requeue.append(uid)
+                    continue
                 if t and t.get("ok") and t.get("jpeg"):
                     e = self.store.put(uid, THUMB_SIZE, THUMB_VERSION, t["jpeg"], (t.get("width"), t.get("height")))
                     self._failed.pop(uid, None)
                     self._retried.discard(uid)
+                    self._batch_retried.discard(uid)
                     self.stats["fetched"] += 1
                     self.stats["bytes"] += len(t["jpeg"])
                     items.append({"id": uid, "url": self.server.url_for(e)})
@@ -454,6 +470,9 @@ class PhotoLibrary:
                     self._failed[uid] = msg
                     self.stats["failed"] += 1
                     items.append({"id": uid, "error": msg})
+            if requeue:
+                self._queue = requeue + [i for i in self._queue if i not in requeue]
+                self._thumb_hold_until = self._clock() + THUMB_BACKOFF
         if items:
             self.emit({"type": "library_thumbs", "items": items})
         return True
@@ -540,10 +559,11 @@ class PhotoLibrary:
             self._selecting = True
             try:
                 try:
-                    data = self.lr.library_select(ids, active, None)           # 先直接选，不切换 Lightroom 的文件夹
-                    folder = self._retry_folder(data, ids, active)
-                    if folder:                       # 没选中（照片不在 Lightroom 当前显示的来源里）：切到照片自己的文件夹再试一次
-                        data = self.lr.library_select(ids, active, folder)
+                    with foreground(self.lr):        # 前台请求：缩略图线程先让路
+                        data = self.lr.library_select(ids, active, None)       # 先直接选，不切换 Lightroom 的文件夹
+                        folder = self._retry_folder(data, ids, active)
+                        if folder:                   # 没选中（照片不在 Lightroom 当前显示的来源里）：切到照片自己的文件夹再试一次
+                            data = self.lr.library_select(ids, active, folder)
                 except Exception as e:           # noqa: BLE001
                     sel = self._read_lr_selection()
                     if sel is not None:
