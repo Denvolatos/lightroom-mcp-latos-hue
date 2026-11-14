@@ -83,12 +83,19 @@ class AdjustmentTracker:
         if name != SET_TOOL:
             self._calls[tid] = {"name": name, "row_ids": []}
             return False
-        inp = ev.get("input") or {}
+        inp = ev.get("input")
+        inp = inp if isinstance(inp, dict) else {}
         reason = str(inp.get("reason") or "").strip() or self._text.strip()[:120]
         ids = []
         target = inp.get("photo")
-        photo = self.current_photo if target in (None, "", "selected") else target
-        for key, to in (inp.get("changes") or {}).items():
+        photo = self.current_photo if target in (None, "", "selected") or not isinstance(target, str) else target
+        changes = inp.get("changes")
+        if isinstance(changes, str):                  # 个别模型把 changes 写成 JSON 字符串
+            try:
+                changes = json.loads(changes)
+            except ValueError:
+                changes = None
+        for key, to in (changes.items() if isinstance(changes, dict) else ()):
             rid = f"{tid}:{key}"
             ids.append(rid)
             self.rows.append({"rid": rid, "edit_id": None, "key": key, "label": param_name(key),
@@ -121,7 +128,8 @@ class AdjustmentTracker:
                 if r:
                     r["status"], r["note"] = status, text[:200]
             return True
-        by_key = {c.get("parameter"): c for c in data.get("changes", [])}
+        changes = data.get("changes")
+        by_key = {c.get("parameter"): c for c in (changes if isinstance(changes, list) else []) if isinstance(c, dict)}
         record = load_record(data["edit_id"], self.edit_dir) or {}
         for rid in call["row_ids"]:
             r = self._row(rid)

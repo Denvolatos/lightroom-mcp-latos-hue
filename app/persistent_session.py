@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import threading
@@ -18,7 +19,9 @@ import claude_bridge as cb
 from ports import clean_stale_announcements
 from timing import TurnTimer
 
-INTERRUPT_GRACE = 6          # 发出中断后，等多少秒还没结束就强制重启进程
+log = logging.getLogger("latoshue.session")
+
+INTERRUPT_GRACE = 6         # 发出中断后，等多少秒还没结束就强制重启进程
 
 
 def kill_tree(proc) -> None:
@@ -176,16 +179,28 @@ class PersistentSession:
     def _read_stdout(self, proc, gen: int) -> None:
         try:
             for line in proc.stdout:
-                for ev in cb.parse_line(line, self._parse_state):
-                    self._dispatch(ev)
-        except Exception:
-            pass
+                self._handle_line(line)
+        except Exception as e:                            # 管道本身出错（进程已结束等）：按进程退出处理
+            log.warning("claude stdout read failed: %s: %s", type(e).__name__, e)
         with self._lock:                                  # 输出结束：进程已退出
             if gen != self.generation:
                 return                                    # 已被新进程取代（主动重建）
             turn = self._turn
         if turn is not None and not turn.got_done:
             self._finish_turn_abnormal(turn)
+
+    def _handle_line(self, line: str) -> None:
+        """处理一行输出。单个事件出错只记日志、继续读后面的输出，避免读取线程退出后这一轮卡到超时。"""
+        try:
+            events = cb.parse_line(line, self._parse_state)
+        except Exception as e:
+            log.warning("claude event parse failed: %s: %s", type(e).__name__, e)
+            return
+        for ev in events:
+            try:
+                self._dispatch(ev)
+            except Exception as e:
+                log.warning("claude event %s handling failed: %s: %s", ev.get("type"), type(e).__name__, e)
 
     def _dispatch(self, ev: dict) -> None:
         if ev["type"] == "session":
@@ -216,11 +231,16 @@ class PersistentSession:
                 self._turn = None
             elif turn.done.is_set():
                 return
-        for ev in events:
-            turn.emit(ev)
-        self.last_timing = turn.timer.summary()
-        turn.timer.write()
-        turn.done.set()
+        try:
+            for ev in events:
+                try:
+                    turn.emit(ev)
+                except Exception as e:                    # 界面处理出错也要让这一轮结束
+                    log.warning("emit %s failed: %s: %s", ev.get("type"), type(e).__name__, e)
+            self.last_timing = turn.timer.summary()
+            turn.timer.write()
+        finally:
+            turn.done.set()
 
     def _finish_turn_abnormal(self, turn: _Turn) -> None:
         if turn.done.is_set():
