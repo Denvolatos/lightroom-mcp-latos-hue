@@ -354,6 +354,26 @@ class LrService:
         return {"count": count if isinstance(count, int) and not isinstance(count, bool) else len(photos),
                 "active_id": r.get("active_id"), "photos": photos}
 
+    def selected_all_info(self, limit: int = 20) -> dict | None:
+        """和 selected_all 相同（同样一次 list_selected），另带 "info": {照片 id: 插件返回的完整条目（相机、ISO 等）}，
+        供中栏预览直接使用（1.1.1：选区轮询与预览共用这一次读取）。读不到返回 None，并记下给界面的一句话原因。"""
+        if not self.connected:
+            return None
+        try:
+            r = self._call("list_selected", {"limit": max(1, min(int(limit), 20))},
+                           timeout=self._read_timeout(POLL_READ_TIMEOUT))
+            self.last_selected_error = None
+        except Exception as e:
+            log.warning("list_selected failed: %s: %s", type(e).__name__, e)
+            self.last_selected_error = friendly_read_error(e)
+            return None
+        raw = [p for p in (r.get("photos") or []) if isinstance(p, dict) and p.get("id")]
+        photos = [{"id": p.get("id"), "name": p.get("name"), "rating": p.get("rating") or 0, "flag": p.get("flag") or "none"}
+                  for p in raw]
+        count = r.get("count")
+        return {"count": count if isinstance(count, int) and not isinstance(count, bool) else len(photos),
+                "active_id": r.get("active_id"), "photos": photos, "info": {p["id"]: p for p in raw}}
+
     def selected_detail(self) -> dict | None:
         """当前选中（活动）照片的 id、文件名与基本信息（相机、ISO、光圈等，取自插件的 list_selected）；读不到返回 None。"""
         if not self.connected:

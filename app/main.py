@@ -285,9 +285,16 @@ class Api:
         self._photolib.invalidate_thumbs(ids)
 
     def _photolib_selected(self) -> None:
-        """在图库里选中照片后立即刷新“当前照片”（中栏预览、右栏本次调整等），不等 3 秒轮询。"""
-        self._backend.refresh_photo()
-        self._preview.request(0)
+        """在图库里选中照片后立即刷新“当前照片”。选中命令已经带回了 Lightroom 的实际选区：
+        直接把当前照片交给预览立即取图、交给右栏“本次调整”，不再读两次 list_selected；
+        完整选区（数量、相机信息等）在后台线程补读一次，不阻塞界面调用。"""
+        cur = self._photolib.active_photo()
+        if cur:
+            self._backend.adopt_photo(cur["id"], cur["name"])
+            self._preview.show({"id": cur["id"], "name": cur["name"]})
+        else:
+            self._preview.request(0)
+        self._backend.refresh_photo_async()
 
     def _push_rows(self) -> None:
         with self._lock:

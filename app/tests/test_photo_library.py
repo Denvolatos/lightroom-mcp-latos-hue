@@ -1081,6 +1081,21 @@ def test_api_adjust_event_invalidates_only_that_photo(api):
     assert "101" in api.library_state()["thumbs"]
 
 
+def test_api_gallery_select_hands_photo_to_preview_without_reading_selection(api):
+    """1.1.1：图库选中后，当前照片直接交给预览（立即到期）和右栏，不在界面调用里同步读 list_selected。"""
+    touch(api._base / "A.jpg")
+    api._photolib.lr.catalog = [cat(1, api._base / "A.jpg")]
+    api.library_refresh()
+    reads = []
+    api._backend.refresh_photo = lambda: reads.append("sync")                 # 不应在界面线程里同步调用
+    woke = []
+    api._backend.refresh_photo_async = lambda: woke.append(1)
+    r = api.library_select(["101"], "101")
+    assert r["ok"] and reads == [] and woke == [1]
+    assert api._backend.photo == {"id": "101", "name": "A.jpg"} and api._tracker.current_photo == "101"
+    assert api._preview._due is not None and api._preview._fresh_hint()["id"] == "101"
+
+
 def test_api_signatures_take_no_paths(api):
     assert list(inspect.signature(api.library_state).parameters) == []
     assert list(inspect.signature(api.library_refresh).parameters) == []

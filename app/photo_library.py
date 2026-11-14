@@ -592,6 +592,12 @@ class PhotoLibrary:
         return {"ok": ok, "status": status, "message": msg, "selected": list(self.sel_ids), "active": self.active,
                 "not_selected": [i for i in (data.get("not_selected") or []) if isinstance(i, str)]}
 
+    def active_photo(self) -> dict | None:
+        """图库当前的“当前照片”（刚选中后就是 Lightroom 回报的那张）：{"id","name"}；没有返回 None。"""
+        with self._lock:
+            p = self._by_uid.get(self.active) if self.active else None
+            return {"id": p["uid"], "name": p["name"]} if p else None
+
     def _retry_folder(self, data: dict, ids: list[str], active) -> str | None:
         """第一次（不带 show_folder）没全选中时，返回要切换到的文件夹：优先当前照片，否则第一张没选中的照片所在的文件夹。
         路径只来自后端自己的图库数据；文件夹不存在、或结果不确定时不重试。"""

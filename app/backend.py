@@ -6,7 +6,9 @@
 - claude 进程意外退出 -> 用 --resume 重建；
 - 窗口自己的 Bridge 长时间连不上 -> 换新端口重新登记（插件约 2 秒内重新发现）；
 - 助手那条通道长时间没连上而窗口这条已连上 -> 重建 claude 进程（新进程换新端口）；
-- 定期清理失效的服务公告；定期读取当前选中的照片（换照片时“本次调整”表格只显示这张照片的记录）。
+- 定期清理失效的服务公告。
+选区轮询（1.1.1 起单独一个线程，约每 1 秒）：一次 list_selected 同时得到“当前这一张”和“全部选中的照片”，
+同时交给中栏预览（PreviewManager.show），预览不再自己读选区；选区没变时预览不调 get_develop。
 全部在 app/ 内完成，用户不需要重载插件或重启软件。
 """
 from __future__ import annotations
@@ -15,6 +17,7 @@ import threading
 import time
 
 import connection as conn
+from lr_service import wait_foreground_idle
 from ports import clean_stale_announcements
 
 TICK_SECONDS = 2.0
@@ -23,8 +26,9 @@ SIDE_MAX_ATTEMPTS = 3           # 连续重建次数上限，之后冷却一段�
 SIDE_COOLDOWN_SECONDS = 120
 LR_RESTART_SECONDS = 30         # 窗口自己的 Bridge 连不上时，每隔这么久换端口重登记一次
 CLEAN_SECONDS = 30
-PHOTO_POLL_SECONDS = 3
-WAIT_READY_SECONDS = 25         # 发送消息时若尚未连接，最多等多久
+PHOTO_POLL_SECONDS = 1.0       # 选区轮询周期（1.1.1：3 → 1，且和预览共用一次 list_selected）
+POLL_YIELD_SECONDS = 3.0       # 选区轮询为正在进行的前台请求（取预览、选中）最多让路这么久
+WAIT_READY_SECONDS = 25        # 发送消息时若尚未连接，最多等多久
 
 
 class Backend:
@@ -48,6 +52,11 @@ class Backend:
         self.photo: dict | None = None
         self.selection: dict = {"count": 0, "photos": [], "active_id": None}   # Lightroom 当前选中的全部照片（只读）
         self._sel_key: tuple | None = None
+        self._photo_lock = threading.Lock()         # refresh_photo / adopt_photo 的结果按发起顺序生效，回得慢的旧结果丢弃
+        self._photo_seq = 0
+        self._photo_applied = 0
+        self._poll_wake = threading.Event()
+        self._poll_thread: threading.Thread | None = None
         self.events: list[str] = []                 # 恢复动作记录（便于测试与排查，不含敏感内容）
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -113,8 +122,9 @@ class Backend:
             except Exception:
                 pass
         if self.previews is not None and st["app"]:
-            self.previews.poll()
-        if st["app"] and not busy and now - self._last_photo_poll >= PHOTO_POLL_SECONDS:
+            self.previews.poll()                    # 只是偶尔复查一次调整参数（Lightroom 里手动改了），见 preview.POLL_SECONDS
+        # 选区轮询：start() 之后在单独的线程里跑（不再阻塞巡检）；没启动线程（测试）时在这里顺带做
+        if self._poll_thread is None and st["app"] and now - self._last_photo_poll >= PHOTO_POLL_SECONDS:
             self._last_photo_poll = now
             self.refresh_photo()
         return st
@@ -132,24 +142,67 @@ class Backend:
             return False
 
     def refresh_photo(self) -> None:
-        """一次 list_selected 同时得到“当前这一张”和“全部选中的照片”（没有增加调用次数）。"""
-        if hasattr(self.lr, "selected_all"):
-            allsel = self.lr.selected_all()
+        """一次 list_selected 同时得到“当前这一张”和“全部选中的照片”，并交给中栏预览（预览不再自己读选区）。
+        可被多个线程同时调用：结果按发起顺序生效，比后来者先发起、却后回来的结果直接丢弃（不会让旧照片盖住新照片）。"""
+        with self._photo_lock:
+            self._photo_seq += 1
+            seq = self._photo_seq
+        read_all = getattr(self.lr, "selected_all_info", None) or getattr(self.lr, "selected_all", None)
+        detail = None
+        if read_all is not None:
+            allsel = read_all()
             if allsel is None:
                 return
             aid = allsel.get("active_id")
-            sel = {"id": aid, "name": next((p.get("name") for p in allsel["photos"] if p.get("id") == aid), None)} if aid                 else {"id": None, "name": None}
-            self._set_selection(allsel)
+            sel = {"id": aid, "name": next((p.get("name") for p in allsel["photos"] if p.get("id") == aid), None)} if aid \
+                else {"id": None, "name": None}
+            detail = dict(sel)
+            if isinstance(allsel.get("info"), dict):                # 预览信息条用的相机、ISO 等（只有 selected_all_info 带）
+                detail["info"] = allsel["info"].get(aid) or {}
         else:
+            allsel = None
             sel = self.lr.selected_photo()
             if sel is None:
                 return
+        with self._photo_lock:
+            if seq < self._photo_applied:
+                return                                  # 过期：更新的结果已经用上了
+            self._photo_applied = seq
+            if allsel is not None:
+                self._set_selection(allsel)
+            self._apply_photo(sel)
+        if detail is not None and self.previews is not None and hasattr(self.previews, "show"):
+            self.previews.show(detail)
+
+    def adopt_photo(self, photo_id, name=None) -> None:
+        """软件自己刚选中了这张照片（图库点选，插件已回报选中结果）：不再读一次选区，直接把它当成当前照片。
+        之前发起、还没回来的轮询结果会被丢弃；下一次轮询再以 Lightroom 实际选区为准。"""
+        with self._photo_lock:
+            self._photo_seq += 1
+            self._photo_applied = self._photo_seq
+            self._apply_photo({"id": photo_id, "name": name})
+
+    def _apply_photo(self, sel: dict) -> None:
         old = (self.photo or {}).get("id")
         self.photo = sel
         self.tracker.current_photo = sel.get("id")
         if sel.get("id") != old:
             self.emit({"type": "photo", "id": sel.get("id"), "name": sel.get("name")})
             self.emit({"type": "adjust", "rows": self.tracker.snapshot(sel.get("id"))})
+
+    def refresh_photo_async(self) -> None:
+        """尽快在后台读一次选区（不占用调用者的线程）。轮询线程在跑就叫醒它，否则临时起一个线程。"""
+        if self._poll_thread is not None:
+            self._poll_wake.set()
+            return
+        threading.Thread(target=self._safe_refresh, daemon=True).start()
+
+    def _safe_refresh(self) -> None:
+        try:
+            if self.lr.connected:
+                self.refresh_photo()
+        except Exception:                           # noqa: BLE001 - 后台线程不能悄悄死掉
+            pass
 
     def _set_selection(self, allsel: dict) -> None:
         key = (allsel.get("count"), allsel.get("active_id"), tuple((p["id"], p.get("name")) for p in allsel["photos"]))
@@ -190,7 +243,9 @@ class Backend:
         if self._thread is not None:
             return
         self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._thread.start()
+        self._poll_thread.start()
 
     def _loop(self) -> None:
         while not self._stop.wait(TICK_SECONDS):
@@ -199,5 +254,17 @@ class Backend:
             except Exception:
                 pass
 
+    def _poll_loop(self) -> None:
+        """选区轮询线程：约每 PHOTO_POLL_SECONDS 一次（refresh_photo_async 可以提前叫醒）。
+        list_selected 可能要排在插件队列里等，放在这里就不会拖住 tick（状态灯、自动恢复）。"""
+        while not self._stop.is_set():
+            self._poll_wake.wait(PHOTO_POLL_SECONDS)
+            self._poll_wake.clear()
+            if self._stop.is_set():
+                break
+            wait_foreground_idle(self.lr, POLL_YIELD_SECONDS)   # 预览正在取图：先让它（当前照片已由 adopt_photo / show 告知）
+            self._safe_refresh()
+
     def stop(self) -> None:
         self._stop.set()
+        self._poll_wake.set()

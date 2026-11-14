@@ -333,12 +333,12 @@ def test_poll_detects_selection_change_and_manual_edit():
     try:
         m.poll()
         m.process_due()
-        clock.t += 3.1
+        clock.t += pv.POLL_SECONDS + 0.1                     # 1.1.1：复查周期变长（换照片由 show() 立即处理）
         lr.exposure["P1"] = 0.5                              # 用户在 Lightroom 里手动改了
         m.poll()
         m.process_due()
         assert events[-1]["same"] is False
-        clock.t += 3.1
+        clock.t += pv.POLL_SECONDS + 0.1
         lr.detail = {"id": "P2", "name": "B.ARW", "info": {"name": "B.ARW"}}
         m.poll()
         m.process_due()
