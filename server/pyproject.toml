@@ -22,8 +22,8 @@ classifiers = [
 test = ["pytest", "lupa"]   # lupa: runs the plug-in's Lua logic against a fake SDK (tests skip without it)
 
 [project.urls]
-Homepage = "https://github.com/Denvolatos/lightroom-mcp-win"
-Issues = "https://github.com/Denvolatos/lightroom-mcp-win/issues"
+Homepage = "https://github.com/Denvolatos/lightroom-mcp-latos-hue"
+Issues = "https://github.com/Denvolatos/lightroom-mcp-latos-hue/issues"
 
 [project.scripts]
 lrmcp = "lightroom_mcp.__main__:main"

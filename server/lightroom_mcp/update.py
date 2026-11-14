@@ -19,8 +19,9 @@ from pathlib import Path
 
 from . import __version__, config
 
-LATEST_URL = "https://api.github.com/repos/Denvolatos/lightroom-mcp-win/releases/latest"
-RELEASES_PAGE = "https://github.com/Denvolatos/lightroom-mcp-win/releases/latest"
+REPO = "Denvolatos/lightroom-mcp-latos-hue"   # renamed from lightroom-mcp-win (GitHub redirects the old name)
+LATEST_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
+RELEASES_PAGE = f"https://github.com/{REPO}/releases/latest"
 CHECK_EVERY_SECONDS = 24 * 3600
 TIMEOUT_SECONDS = 5.0
 _TAG = re.compile(r"^v?(\d{1,4})\.(\d{1,5})\.(\d{1,5})$")

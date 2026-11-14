@@ -41,6 +41,11 @@ class BridgeTimeout(BridgeError):
     """The plug-in may have applied a write without returning its result."""
 
 
+class BridgeNotRun(BridgeError):
+    """The call gave up (timeout, or the server stopped) while the command was still waiting in the queue: the plug-in
+    never took it, so nothing was done and it is safe to try again. Not a BridgeTimeout: the result is certain."""
+
+
 def restrict_to_current_user(path: Path) -> None:
     """Best effort: only the current user may read the token file (Windows ACL)."""
     user = os.environ.get("USERNAME")
@@ -104,9 +109,12 @@ class Bridge:
         self.poll_hold = poll_hold
         self.connect_wait = connect_wait
         self.token = secrets.token_urlsafe(32)
-        self._jobs: "queue.Queue[tuple[int, str]]" = queue.Queue()
+        self._jobs: "queue.Queue[tuple[int, str, float]]" = queue.Queue()  # (id, command line, caller's deadline)
         self._events: dict[int, threading.Event] = {}
         self._results: dict[int, str] = {}
+        # Commands the plug-in has taken and not answered yet: id -> the caller's deadline (time.time()). The plug-in does not
+        # poll while it runs a command (an export can take minutes), so these count as "connected" too.
+        self._inflight: dict[int, float] = {}
         self._ids = itertools.count(1)
         self._lock = threading.Lock()
         self._latest_gen = 0.0
@@ -182,8 +190,14 @@ class Bridge:
 
     def stop(self) -> None:
         """Announcement first (a new server may take this port the next moment), then wake every waiting /poll so the
-        plug-in's long poll returns at once instead of after ``poll_hold`` seconds, then close the socket."""
+        plug-in's long poll returns at once instead of after ``poll_hold`` seconds, then close the socket. Every call that
+        is still waiting returns at once too: BridgeTimeout (result unknown) if the plug-in had taken its command,
+        BridgeNotRun if the command was still queued."""
         self._stopping.set()
+        with self._lock:
+            waiting = list(self._events.values())
+        for event in waiting:
+            event.set()
         if self.info_file is not None:
             self.info_file.unlink(missing_ok=True)
         if self.port == self.legacy_port:
@@ -197,7 +211,18 @@ class Bridge:
     # ---- state -----------------------------------------------------
     @property
     def connected(self) -> bool:
-        return self.last_seen > 0 and time.time() - self.last_seen < config.PLUGIN_SEEN_SECONDS
+        """The plug-in polled within PLUGIN_SEEN_SECONDS, or it is still working on a command it has taken (it does not
+        poll meanwhile; without this a long export made the plug-in look disconnected after 25 s)."""
+        if self.last_seen > 0 and time.time() - self.last_seen < config.PLUGIN_SEEN_SECONDS:
+            return True
+        return self.executing
+
+    @property
+    def executing(self) -> bool:
+        """A command was taken by the plug-in and its caller is still waiting for the result."""
+        now = time.time()
+        with self._lock:
+            return any(deadline > now for deadline in self._inflight.values())
 
     def wait_connected(self, timeout: float) -> bool:
         end = time.monotonic() + timeout
@@ -220,14 +245,30 @@ class Bridge:
             if not key.isidentifier() or any(c.isspace() for c in text):
                 raise ValueError(f"bad parameter {key!r}")
             parts.append(f"{key}={text}")
+        if self._stopping.is_set():
+            raise BridgeNotRun(f"本机服务正在停止，命令 {command} 没有发给 Lightroom，可以稍后重试。")
         job_id = next(self._ids)
         event = threading.Event()
-        self._events[job_id] = event
-        self._jobs.put((job_id, "cmd " + str(job_id) + " " + " ".join(parts)))
-        if not event.wait(timeout):
-            self._events.pop(job_id, None)
-            raise BridgeTimeout(f"插件没有在 {timeout:.0f} 秒内回应命令 {command}。Lightroom 可能正忙或已卡住。")
-        raw = self._results.pop(job_id, "")
+        with self._lock:
+            self._events[job_id] = event
+        self._jobs.put((job_id, "cmd " + str(job_id) + " " + " ".join(parts), time.time() + timeout))
+        event.wait(timeout)  # set by the result, or by stop()
+        with self._lock:
+            raw = self._results.pop(job_id, None)
+            if raw is None:  # no result: the caller gives up; a result that still comes is dropped (_store_result)
+                self._events.pop(job_id, None)
+                taken = self._inflight.pop(job_id, None) is not None
+        if raw is None:
+            stopping = self._stopping.is_set()
+            if taken:
+                if stopping:
+                    raise BridgeTimeout(f"本机服务停止了，命令 {command} 已交给 Lightroom 但结果没有回来，不确定是否已执行。")
+                raise BridgeTimeout(f"插件没有在 {timeout:.0f} 秒内回应命令 {command}。Lightroom 可能正忙或已卡住。")
+            if stopping:
+                raise BridgeNotRun(f"本机服务停止了，命令 {command} 还没交给 Lightroom，没有执行，可以放心重试。")
+            raise BridgeNotRun(
+                f"插件没有在 {timeout:.0f} 秒内取走命令 {command}（Lightroom 可能正忙），命令没有执行，可以放心重试。"
+            )
         try:
             reply = json.loads(raw)
         except json.JSONDecodeError as e:
@@ -261,18 +302,23 @@ class Bridge:
             if remaining <= 0:
                 break
             try:
-                job_id, line = self._jobs.get(timeout=min(0.2, remaining))
+                job_id, line, caller_deadline = self._jobs.get(timeout=min(0.2, remaining))
             except queue.Empty:
                 continue
-            if job_id in self._events:  # a timed-out caller no longer needs this command
-                return line
+            with self._lock:
+                if job_id in self._events:  # a timed-out caller no longer needs this command
+                    self._inflight[job_id] = caller_deadline
+                    return line
         return "none"
 
     def _store_result(self, job_id: int, body: str) -> None:
-        self._results[job_id] = body
-        event = self._events.pop(job_id, None)
-        if event:
-            event.set()
+        with self._lock:
+            self._inflight.pop(job_id, None)
+            event = self._events.pop(job_id, None)
+            if event is None:
+                return  # nobody waits for it any more (timed out): drop it instead of keeping it forever
+            self._results[job_id] = body
+        event.set()
 
 
 class _Handler(BaseHTTPRequestHandler):

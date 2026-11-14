@@ -20,8 +20,10 @@ local escapes = {
 	["\t"] = "\\t",
 }
 
+-- Explicit ASCII ranges, not %c / %s / %d: those follow the C locale, and with a western code page (cp1252) the bytes
+-- 0x80-0x9F of UTF-8 text (Chinese names and paths) would count as control characters and be escaped one by one.
 local function quote(s)
-	local escaped = s:gsub('[%c"\\]', function(c)
+	local escaped = s:gsub('[%z\1-\31\127"\\]', function(c)
 		return escapes[c] or string.format("\\u%04x", c:byte())
 	end)
 	return '"' .. escaped .. '"'
@@ -120,7 +122,7 @@ function Json.decode(text)
 		error({ lrmcp = "收到的数据格式不对（" .. message .. "），已取消。" }, 0)
 	end
 	local function skip()
-		pos = text:find("%S", pos) or (#text + 1)
+		pos = text:find("[^ \t\r\n]", pos) or (#text + 1)
 	end
 	local parseValue
 
@@ -226,7 +228,7 @@ function Json.decode(text)
 			pos = pos + 4
 			return nil
 		end
-		local num = text:match("^-?%d+%.?%d*[eE]?[+-]?%d*", pos)
+		local num = text:match("^-?[0-9]+%.?[0-9]*[eE]?[+-]?[0-9]*", pos)
 		local value = num and tonumber(num)
 		if value == nil or value ~= value or value == math.huge or value == -math.huge then
 			bad("无法识别的内容")

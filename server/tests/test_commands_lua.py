@@ -98,7 +98,25 @@ function catalog:getTargetPhotos()
 end
 function catalog:findPhotoByUuid(id) if id == FAKE.uuid then return photo end return FAKE.libphotos[id] end
 function catalog:getFolderByPath(p) return FAKE.libfolders[p] end
+function catalog:getFolders()   -- the top-level folders: those that are nobody's child
+  local out = {}
+  for p, f in pairs(FAKE.libfolders) do if not FAKE.childfolders[p] then out[#out + 1] = f end end
+  return out
+end
+function catalog:batchGetRawMetadata(photos, keys)
+  FAKE.batch_calls = FAKE.batch_calls + 1
+  if FAKE.batch_fails then error("batch failed") end
+  local out = {}
+  for _, ph in ipairs(photos) do
+    local v = {}
+    for _, k in ipairs(keys) do v[k] = ph:getRawMetadata(k) end
+    out[ph] = v
+  end
+  return out
+end
+function catalog:getActiveSources() return FAKE.sources or {} end
 function catalog:setActiveSources(sources)
+  FAKE.sources_calls = (FAKE.sources_calls or 0) + 1
   FAKE.sources = sources
   if FAKE.sources_fail then return false end
   local function apply()
@@ -175,6 +193,7 @@ local modules = {
                   fileAttributes = function() return { fileSize = 12345 } end },
   LrPathUtils = { child = child, getStandardFilePath = function() return "C:\\Users\\test" end,
                   leafName = function(p) return (p:match("([^\\]+)$")) end,
+                  parent = function(p) return (p:match("^(.*)\\[^\\]+$")) end,
                   removeExtension = function(p) return (p:gsub("%.[^%.\\]+$", "")) end,
                   isAbsolute = function(p) return p:match("^%a:[\\/]") ~= nil or p:sub(1, 1) == "/" end },
 }
@@ -239,6 +258,7 @@ function ADD_LIB_PHOTO(uuid, path, o)
     return nil
   end
   function ph:getFormattedMetadata() return nil end
+  function ph:checkPhotoAvailability() return not FAKE.offline[uuid] end
   function ph:requestJpegThumbnail(w, h, cb)
     FAKE.thumb_calls[#FAKE.thumb_calls + 1] = { uuid = uuid, w = w, h = h }
     local plan = FAKE.thumb_plan[uuid]
@@ -255,10 +275,18 @@ function ADD_LIB_PHOTO(uuid, path, o)
   return ph
 end
 function ADD_LIB_FOLDER(path, uuids, children)   -- uuids: photos directly in the folder; children: other folder paths
-  local f = { own = {} }
+  local f = { own = {}, path = path }
   for _, u in ipairs(uuids) do f.own[#f.own + 1] = FAKE.libphotos[u] end
+  function f:getPath() return path end
+  function f:getChildren()
+    local out = {}
+    for _, c in ipairs(children or {}) do out[#out + 1] = FAKE.libfolders[c] end
+    return out
+  end
+  for _, c in ipairs(children or {}) do FAKE.childfolders[c] = true end
   function f:getPhotos(includeChildren)
     FAKE.getphotos_arg = includeChildren
+    FAKE.getphotos_calls = FAKE.getphotos_calls + 1
     local out = {}
     for _, ph in ipairs(self.own) do out[#out + 1] = ph end
     if includeChildren then
@@ -289,7 +317,8 @@ function SET_VIEW(uuids) FAKE.view = {} for _, u in ipairs(uuids) do FAKE.view[u
 function RESET()
   FAKE.clock, FAKE.pending, FAKE.libphotos, FAKE.libfolders = 0, {}, {}, {}
   FAKE.thumb_plan, FAKE.thumb_calls, FAKE.thumb_async, FAKE.selected, FAKE.view = {}, {}, false, nil, nil
-  FAKE.sources, FAKE.sources_fail, FAKE.select_fails, FAKE.select_calls = nil, false, false, 0
+  FAKE.offline, FAKE.childfolders, FAKE.batch_calls, FAKE.batch_fails, FAKE.getphotos_calls = {}, {}, 0, false, 0
+  FAKE.sources, FAKE.sources_fail, FAKE.select_fails, FAKE.select_calls, FAKE.sources_calls = nil, false, false, 0, 0
   FAKE.files, FAKE.folders, FAKE.last_export, FAKE.export_fails = {}, {}, nil, false
   FAKE.in_catalog, FAKE.add_fails, FAKE.in_gate = {}, false, false
   FAKE.meta = { rating = nil, pick = 0, label = "", title = "", caption = "", keywords = { newKeyword("Torino") } }
@@ -928,6 +957,37 @@ def test_list_folder_photos_folder_not_in_catalog_is_not_an_error(lib):
     assert data["ok"] and data["data"]["in_catalog"] is False and data["data"]["total"] == 0 and data["data"]["photos"] == []
 
 
+# ---- 1.1.1: a browse root that is not itself a catalog folder; fewer catalog reads per page ----------------------------
+def test_list_a_parent_folder_that_is_not_in_the_catalog_lists_its_catalog_subfolders(lib):
+    """Only D:\\ceshi\\app_library_test was imported, so D:\\ceshi is not a catalog folder; its photos must still be listed."""
+    data = lib.run("list_folder_photos", path=enc("D:\\ceshi"))["data"]
+    assert data["in_catalog"] is True and data["total"] == 3
+    assert [p["name"] for p in data["photos"]] == ["a.ARW", "b.JPG", "c.jpg"]
+    assert [p["subfolder"] for p in data["photos"]] == ["app_library_test", "app_library_test", "app_library_test/sub/deep"]
+    assert "D:\\other\\z.jpg" not in [p["path"] for p in data["photos"]]          # a sibling of D:\ceshi stays out
+    # the same when a whole drive is browsed, and nothing for a folder with no catalog folder under it
+    assert lib.run("list_folder_photos", path=enc("D:\\"))["data"]["total"] == 3
+    assert lib.run("list_folder_photos", path=enc("D:\\ceshi"), recursive=0)["data"]["in_catalog"] is False
+    assert lib.run("list_folder_photos", path=enc("D:\\ceshi\\app"))["data"]["in_catalog"] is False   # a name prefix is not a parent
+
+
+def test_list_later_pages_reuse_the_sorted_list_and_metadata_is_read_in_batches(lib):
+    first = lib.run("list_folder_photos", path=enc(ROOT), limit=2)["data"]
+    calls, batches = lib.fake("getphotos_calls"), lib.fake("batch_calls")
+    assert batches == 2                                     # path+uuid of all photos, then the fields of this page
+    second = lib.run("list_folder_photos", path=enc(ROOT), offset=2, limit=2)["data"]
+    assert lib.fake("getphotos_calls") == calls            # the folder was not enumerated again
+    assert [p["name"] for p in first["photos"] + second["photos"]] == ["a.ARW", "b.JPG", "c.jpg"]
+    lib.run("list_folder_photos", path=enc(ROOT))           # offset 0 always reads the catalog again
+    assert lib.fake("getphotos_calls") > calls
+
+
+def test_list_still_works_when_batch_reading_is_refused(lib):
+    lib.set_flag("batch_fails", True)
+    data = lib.run("list_folder_photos", path=enc(ROOT))["data"]
+    assert data["total"] == 3 and data["photos"][0]["format"] == "RAW" and data["photos"][1]["rating"] == 3
+
+
 BAD_FOLDERS = [
     "\\\\server\\share\\x", "//server/share/x", "relative\\x", "/etc", "D:x",
     "D:\\a\\..\\b", "D:/a/../a", "C:\\Windows", "C:\\Program Files\\X", "C:\\ProgramData\\x",
@@ -973,6 +1033,27 @@ def test_thumbnail_timeout_does_not_hang_and_others_still_come(lib):
     assert data[0] == {"id": U1, "ok": False, "error": "timeout"}
     assert data[1]["ok"] is True
     assert 8 <= lib.fake("clock") < 9    # one 8 second wait, not forever
+
+
+def test_thumbnail_batch_shares_one_deadline(lib):
+    """1.1.1: a batch of thumbnails that never come waits 8 s in all, not 8 s per photo (it held the plug-in for 64 s)."""
+    for u in (U1, U2, U3):
+        lib.thumb_plan(u, "never")
+    data = lib.run("get_thumbnails", ids=f"{U1},{U2},{U3},{U4}")["data"]["thumbnails"]
+    assert [t["ok"] for t in data] == [False, False, False, True] and data[0]["error"] == "timeout"
+    assert 8 <= lib.fake("clock") < 9
+    assert lib.thumb_calls() == 4        # all requested at once
+
+
+def test_thumbnail_of_an_offline_original_returns_missing_quickly(lib):
+    g = lib.fake("offline")
+    g[U1] = True
+    g[U2] = True
+    lib.thumb_plan(U1, "never")          # no preview either
+    data = lib.run("get_thumbnails", ids=f"{U1},{U2}")["data"]["thumbnails"]
+    assert data[0] == {"id": U1, "ok": False, "error": "missing"}
+    assert data[1]["ok"] is True         # Lightroom still had a preview of the other one
+    assert lib.fake("clock") < 1.5
 
 
 def test_thumbnail_unknown_id_and_lightroom_error(lib):
@@ -1057,11 +1138,49 @@ def test_select_photo_outside_the_view_is_reported_honestly(lib):
 
 
 def test_select_show_folder_not_in_catalog_or_refused_by_lightroom(lib):
-    data = lib.run("select_photos", ids=U1, show_folder=enc("D:\\nowhere"))["data"]
-    assert data["folder_shown"] is False and "不在目录" in data["reason"] and data["selected"] == [U1]
+    lib.set_view([U1])     # U4's own folder (D:\other) is not in the catalog, nor is the folder the app shows
+    data = lib.run("select_photos", ids=U4, show_folder=enc("D:\\nowhere"))["data"]
+    assert data["folder_shown"] is False and "不在目录" in data["reason"] and data["selected"] == []
+    assert lib.fake("sources_calls") == 0
+    lib.set_view([U4])
     lib.set_flag("sources_fail", True)
     data = lib.run("select_photos", ids=U1, show_folder=enc(ROOT))["data"]
     assert data["folder_shown"] is False and "没有切换" in data["reason"]
+
+
+# ---- 1.1.1: select first, switch the folder only when needed, and then to the photo's own folder ----------------------
+def test_select_photos_in_the_view_never_switches_the_folder(lib):
+    data = lib.run("select_photos", ids=f"{U1},{U3}", show_folder=enc(ROOT))["data"]
+    assert data["all_selected"] is True and data.get("folder_shown") is None     # nil: no switch was needed
+    assert lib.fake("sources_calls") == 0 and lib.fake("select_calls") == 1 and lib.fake("clock") == 0
+
+
+def test_select_switches_to_the_photos_own_folders_not_the_browse_root(lib):
+    lib.set_view([U4])
+    data = lib.run("select_photos", ids=f"{U1},{U3}", show_folder=enc(ROOT))["data"]
+    assert data["all_selected"] is True and data["folder_shown"] is True
+    shown = sorted(f["path"] for f in lib.fake("sources").values())
+    assert shown == sorted([ROOT, ROOT + "\\sub\\deep"])       # U3 lives in sub\deep, not directly in ROOT
+    assert lib.fake("sources_calls") == 1
+
+
+def test_select_does_not_switch_again_when_the_folder_is_already_shown(lib):
+    lib.set_view([U1])
+    lib.run("select_photos", ids=U3, show_folder=enc(ROOT))       # switches to sub\deep once
+    assert lib.fake("sources_calls") == 1
+    lib.set_view([])                                              # e.g. a filter hides it: switching again would not help
+    data = lib.run("select_photos", ids=U3, show_folder=enc(ROOT))["data"]
+    assert lib.fake("sources_calls") == 1 and data["folder_shown"] is True and data["all_selected"] is False
+    assert lib.fake("select_calls") == 3                           # one attempt only, no waiting
+
+
+def test_select_after_a_switch_waits_only_briefly(lib):
+    lib.set_view([U4])
+    lib.set_flag("view_delay", True)
+    lib.set_flag("select_fails", False)
+    data = lib.run("select_photos", ids=U1, show_folder=enc(ROOT))["data"]
+    assert data["all_selected"] is True and lib.fake("clock") <= 0.15
+    lib.reset()
 
 
 def test_select_reports_lightrooms_refusal(lib):
@@ -1075,3 +1194,74 @@ def test_select_reports_lightrooms_refusal(lib):
 def test_select_refuses_bad_parameters(lib, extra):
     assert not lib.run("select_photos", **extra)["ok"]
     assert lib.fake("select_calls") == 0
+
+
+# ---- 1.1.1: no locale-dependent character classes (cp1252 broke UTF-8 text) ------------------------------------------
+@pytest.fixture
+def western_locale():
+    """The C locale of the process decides what Lua's %c / %w / %s and string.lower mean. A western Windows (cp1252) made the
+    bytes 0x80-0x9F of Chinese UTF-8 text "control characters". Lua in lupa shares the C runtime of Python, so set it here."""
+    import locale
+
+    old = locale.setlocale(locale.LC_CTYPE)
+    for name in ("English_United States.1252", "en_US.ISO8859-1", "en_US.iso88591"):
+        try:
+            locale.setlocale(locale.LC_CTYPE, name)
+            break
+        except locale.Error:
+            continue
+    else:
+        pytest.skip("no western single-byte locale on this computer")
+    yield
+    locale.setlocale(locale.LC_CTYPE, old)
+
+
+# 中文照片成图: UTF-8 bytes include 0xAD (中) and 0x90 (成), which cp1252 counts as control characters (like 0x81 0x8D
+# 0x8F 0x9D), so the old %c escaped them one by one and broke the text.
+ZH = "\u4e2d\u6587\u7167\u7247\u6210\u56fe"
+
+
+def test_json_keeps_utf8_text_under_a_western_locale(lr, western_locale):
+    assert lr.decode(json.dumps(ZH, ensure_ascii=False)) == json.dumps(ZH, ensure_ascii=False)
+    assert lr.decode(r'"a\u0001b\u007f"') == r'"a\u0001b\u007f"'     # real control characters are still escaped
+    assert lr.decode(' [ 1 , -2.5e3 ] ') == "[1,-2500]"
+
+
+def test_chinese_title_and_folder_are_accepted_under_a_western_locale(lr, western_locale):
+    reply = lr.run("set_metadata", photo="selected", edit="m1", title=enc(ZH))
+    assert reply["ok"], reply
+    assert reply["data"]["after"]["title"] == ZH
+    folder = "D:\\" + ZH + "\\" + "\u5bfc\u51fa"
+    lr.make_folder(folder)
+    reply = lr.run("export_photo", photo="selected", folder=enc(folder))
+    assert reply["ok"] and reply["data"]["folder"] == folder, reply
+    bad = lr.run("set_metadata", photo="selected", edit="m2", title=enc("a\x7fb"))
+    assert not bad["ok"]
+
+
+def test_library_paths_with_chinese_names_under_a_western_locale(lr, western_locale):
+    root = "D:\\" + ZH
+    sub = root + "\\" + "\u5b50\u6587\u4ef6\u5939"     # 子文件夹
+    lr.lib_photo("UUID-ZH-1", sub + "\\A.JPG")
+    lr.lib_folder(sub, ["UUID-ZH-1"])
+    lr.lib_folder(root, [], [sub])
+    data = lr.run("list_folder_photos", path=enc(root))["data"]
+    assert data["total"] == 1 and data["photos"][0]["subfolder"] == "\u5b50\u6587\u4ef6\u5939"
+    assert data["photos"][0]["path"] == sub + "\\A.JPG"
+
+
+def test_plugin_lua_uses_no_locale_dependent_patterns():
+    """%a %c %l %p %u %w (and their upper-case forms), %s / %d inside a pattern, and string.lower / upper depend on the
+    C locale. The plug-in must use explicit ASCII ranges instead (string.format's %s and %d are fine)."""
+    import re
+
+    bad = []
+    for path in sorted(PLUGIN.glob("*.lua")):
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            code = line.split("--", 1)[0] if not line.lstrip().startswith("--") else ""
+            if re.search(r"%[aAcClLpPuUwW]", code) or re.search(r"[:.](lower|upper)\s*\(", code):
+                bad.append(f"{path.name}:{n}")
+            for pattern in re.findall(r"[:.](?:find|match|gmatch|gsub)\s*\(\s*(?:[\w.]+\s*,\s*)?[\"']((?:[^\"'\\]|\\.)*)[\"']", code):
+                if re.search(r"%[sSdD]", pattern):
+                    bad.append(f"{path.name}:{n}")
+    assert not bad, f"locale-dependent patterns at {bad}"

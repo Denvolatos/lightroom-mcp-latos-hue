@@ -27,6 +27,18 @@ local function fail(message)
 	error({ lrmcp = message }, 0)
 end
 
+-- Lua's character classes (%c, %w, %a, %s ...) and string.lower/upper follow the C locale of the process. With a western
+-- code page (cp1252) the bytes 0x80-0xFF count as letters, control or space characters, so the bytes of UTF-8 text (Chinese
+-- paths and names) would be refused, cut apart or changed. Only explicit ASCII ranges are used here.
+local CONTROL_CHARS = "[%z\1-\31\127]" -- ASCII control characters: 0x00-0x1F and 0x7F
+local ASCII_LOWER = {}
+for code = 65, 90 do
+	ASCII_LOWER[string.char(code)] = string.char(code + 32)
+end
+local function asciiLower(text)
+	return (text:gsub("[A-Z]", ASCII_LOWER))
+end
+
 local function photoFromRef(catalog, ref)
 	if ref == nil or ref == "selected" then
 		local photo = catalog:getTargetPhoto()
@@ -227,7 +239,7 @@ function M.get_preview(params)
 		fail("这是视频文件，暂不支持预览。")
 	end
 	LrFileUtils.createAllDirectories(previewDir)
-	local uuid = tostring(photo:getRawMetadata("uuid")):gsub("[^%w]", ""):sub(1, 8)
+	local uuid = tostring(photo:getRawMetadata("uuid")):gsub("[^A-Za-z0-9]", ""):sub(1, 8)
 	-- unique per call: two AI sessions may ask for a preview of the same photo within the same second, and a shared
 	-- file name would let one session read the other's picture
 	previewCounter = previewCounter + 1
@@ -326,7 +338,7 @@ function M.set_develop(params)
 		fail("只读模式已开启（" .. readonlyPath .. " 存在），不允许修改照片。")
 	end
 	local editId = params.edit
-	if not editId or not editId:match("^[%w%-]+$") then
+	if not editId or not editId:match("^[A-Za-z0-9%-]+$") then
 		fail("缺少或不合法的修改编号。")
 	end
 	local restoring = params.restore == "1"
@@ -520,7 +532,7 @@ local function findPreset(uuid)
 end
 
 function M.list_presets(params)
-	local query = params.query and params.query ~= "" and params.query:lower() or nil
+	local query = params.query and params.query ~= "" and asciiLower(params.query) or nil
 	local limit = math.max(1, math.min(tonumber(params.limit) or 30, 50))
 	local rows, total, matched = {}, 0, 0
 	for _, folder in ipairs(LrApplication.developPresetFolders()) do
@@ -528,7 +540,7 @@ function M.list_presets(params)
 		for _, preset in ipairs(folder:getDevelopPresets()) do
 			total = total + 1
 			local name = tostring(preset:getName())
-			if not query or name:lower():find(query, 1, true) or folderName:lower():find(query, 1, true) then
+			if not query or asciiLower(name):find(query, 1, true) or asciiLower(folderName):find(query, 1, true) then
 				matched = matched + 1
 				if #rows < limit then
 					local s = preset:getSetting() or {}
@@ -560,11 +572,11 @@ function M.apply_preset(params)
 		fail("只读模式已开启（" .. readonlyPath .. " 存在），不允许修改照片。")
 	end
 	local editId = params.edit
-	if not editId or not editId:match("^[%w%-]+$") then
+	if not editId or not editId:match("^[A-Za-z0-9%-]+$") then
 		fail("缺少或不合法的修改编号。")
 	end
 	local presetId = params.preset
-	if not presetId or not presetId:match("^[%w%-]+$") then
+	if not presetId or not presetId:match("^[A-Za-z0-9%-]+$") then
 		fail("缺少或不合法的预设 id（用 lr_list_presets 查）。")
 	end
 	local preset = findPreset(presetId)
@@ -637,7 +649,7 @@ function M.restore_settings(params)
 		fail("只读模式已开启（" .. readonlyPath .. " 存在），不允许修改照片。")
 	end
 	local editId = params.edit
-	if not editId or not editId:match("^[%w%-]+$") then
+	if not editId or not editId:match("^[A-Za-z0-9%-]+$") then
 		fail("缺少或不合法的修改编号。")
 	end
 	local blob = params.blob
@@ -663,7 +675,7 @@ function M.restore_settings(params)
 		if count > 300 then
 			fail("要还原的项目太多。")
 		end
-		if type(key) ~= "string" or not key:match("^[%w_]+$") then
+		if type(key) ~= "string" or not key:match("^[A-Za-z0-9_]+$") then
 			fail("不合法的参数名。")
 		end
 		if key == "MaskGroupBasedCorrections" then
@@ -733,7 +745,7 @@ local function urlDecode(text)
 end
 
 local function hasControlChars(text)
-	return text:find("[%c]") ~= nil
+	return text:find(CONTROL_CHARS) ~= nil
 end
 
 local function keywordNames(photo)
@@ -788,7 +800,7 @@ function M.set_metadata(params)
 		fail("只读模式已开启（" .. readonlyPath .. " 存在），不允许修改照片。")
 	end
 	local editId = params.edit
-	if not editId or not editId:match("^[%w%-]+$") then
+	if not editId or not editId:match("^[A-Za-z0-9%-]+$") then
 		fail("缺少或不合法的修改编号。")
 	end
 	local rating, flag, color, title, caption, addNames, removeNames
@@ -805,7 +817,7 @@ function M.set_metadata(params)
 		end
 	end
 	if params.color ~= nil then
-		color = params.color:lower()
+		color = asciiLower(params.color)
 		if not LABELS[color] then
 			fail("颜色标签必须是 red、yellow、green、blue、purple 或 none。")
 		end
@@ -881,7 +893,7 @@ function M.set_metadata(params)
 	local verified = true
 	if rating ~= nil and after.rating ~= rating then verified = false end
 	if flag ~= nil and after.flag ~= PICK_TO_FLAG[flag] then verified = false end
-	if color ~= nil and after.color_label:lower() ~= color then verified = false end
+	if color ~= nil and asciiLower(after.color_label) ~= color then verified = false end
 	if title ~= nil and after.title ~= title then verified = false end
 	if caption ~= nil and after.caption ~= caption then verified = false end
 	local nowHas = {}
@@ -912,7 +924,7 @@ local BLOCKED_FOLDERS = {
 }
 
 local function checkExportFolder(path)
-	if path == "" or #path > 400 or path:find("%c") then
+	if path == "" or #path > 400 or path:find(CONTROL_CHARS) then
 		fail("导出文件夹的路径不合法（为空、太长或含控制字符）。")
 	end
 	if path:sub(1, 2) == "\\\\" or path:sub(1, 2) == "//" then
@@ -921,7 +933,7 @@ local function checkExportFolder(path)
 	if not LrPathUtils.isAbsolute(path) then
 		fail("导出文件夹必须是完整路径，比如 D:\\照片\\导出 。")
 	end
-	local norm = (path:gsub("\\", "/")):lower() .. "/"
+	local norm = asciiLower((path:gsub("\\", "/"))) .. "/"
 	norm = norm:gsub("//+", "/")
 	for part in norm:gmatch("[^/]+") do
 		if part == ".." then
@@ -994,7 +1006,7 @@ function M.export_photo(params)
 
 	-- the file name comes from the photo's own file name, only safe characters; the first free name is used
 	local leaf = LrPathUtils.leafName(photo:getRawMetadata("path") or "photo")
-	local base = (LrPathUtils.removeExtension(leaf):gsub("[^%w%-_]", "_"))
+	local base = (LrPathUtils.removeExtension(leaf):gsub("[^A-Za-z0-9%-_]", "_"))
 	if base == "" then
 		base = "photo"
 	end
@@ -1051,16 +1063,16 @@ local IMPORT_EXTENSIONS = {
 }
 
 local function checkImportPath(path)
-	if path == "" or #path > 400 or path:find("%c") then
+	if path == "" or #path > 400 or path:find(CONTROL_CHARS) then
 		fail("照片路径不合法（为空、太长或含控制字符）。")
 	end
 	if path:sub(1, 2) == "\\\\" or path:sub(1, 2) == "//" then
 		fail("不允许导入网络路径上的照片。请用本机磁盘上的文件。")
 	end
-	if not path:match("^%a:[\\/]") then
+	if not path:match("^[A-Za-z]:[\\/]") then
 		fail("照片路径必须是本机的完整路径，比如 D:\\照片\\a.jpg 。")
 	end
-	local norm = (path:gsub("\\", "/")):lower()
+	local norm = asciiLower((path:gsub("\\", "/")))
 	norm = norm:gsub("//+", "/")
 	for part in norm:gmatch("[^/]+") do
 		if part == ".." then
@@ -1073,7 +1085,7 @@ local function checkImportPath(path)
 		end
 	end
 	local ext = path:match("%.([^%.\\/]+)$")
-	if not ext or not IMPORT_EXTENSIONS[ext:lower()] then
+	if not ext or not IMPORT_EXTENSIONS[asciiLower(ext)] then
 		fail("不支持这种文件格式（只接受常见的照片格式：jpg jpeg arw cr2 cr3 nef nrw raf orf rw2 dng tif tiff heic heif png）：" .. path)
 	end
 	local kind = LrFileUtils.exists(path)
@@ -1137,8 +1149,11 @@ end
 local LIST_DEFAULT, LIST_MAX = 200, 500
 local THUMB_MAX_IDS, THUMB_MIN, THUMB_MAX, THUMB_DEFAULT = 24, 64, 512, 256
 local THUMB_MAX_BYTES = 150 * 1024
-local THUMB_TIMEOUT = 8 -- seconds per photo
+local THUMB_BATCH_TIMEOUT = 8 -- seconds for a whole batch (all thumbnails are requested at the same time)
+local THUMB_RETRY_TIMEOUT = 2 -- seconds for the one smaller retry of thumbnails that were too large
+local THUMB_MISSING_TIMEOUT = 1 -- seconds for a photo whose original is offline or missing
 local SELECT_MAX_IDS = 50
+local SELECT_RETRY_WAITS = { 0.1, 0.15, 0.25, 0.5 } -- seconds before each new attempt after a folder switch (1.0 s in all)
 
 local function urlDecode(text)
 	return (text:gsub("%%(%x%x)", function(h)
@@ -1149,16 +1164,16 @@ end
 -- a folder of the catalog: local drive path, no network path, no "..", not under BLOCKED_FOLDERS. It need not exist on disk
 -- (a folder can be offline) and is not created; whether it is in the catalog is found out with getFolderByPath.
 local function checkLibraryFolder(path)
-	if path == "" or #path > 400 or path:find("%c") then
+	if path == "" or #path > 400 or path:find(CONTROL_CHARS) then
 		fail("文件夹路径不合法（为空、太长或含控制字符）。")
 	end
 	if path:sub(1, 2) == "\\\\" or path:sub(1, 2) == "//" then
 		fail("不允许使用网络路径。请用本机磁盘上的文件夹。")
 	end
-	if not path:match("^%a:[\\/]") then
+	if not path:match("^[A-Za-z]:[\\/]") then
 		fail("文件夹路径必须是本机的完整路径，比如 D:\\照片 。")
 	end
-	local norm = (path:gsub("\\", "/")):lower()
+	local norm = asciiLower((path:gsub("\\", "/")))
 	norm = norm:gsub("//+", "/")
 	for part in norm:gmatch("[^/]+") do
 		if part == ".." then
@@ -1190,7 +1205,7 @@ local function parseIds(raw, maxCount, what)
 	end
 	local ids, seen = {}, {}
 	for id in urlDecode(raw):gmatch("[^,]+") do
-		if #id > 64 or not id:match("^[%w%-]+$") then
+		if #id > 64 or not id:match("^[A-Za-z0-9%-]+$") then
 			fail("照片 id 不合法：只能是字母、数字和连字符。")
 		end
 		if not seen[id] then
@@ -1207,6 +1222,108 @@ local function parseIds(raw, maxCount, what)
 	return ids
 end
 
+-- "D:\A\b\" -> "d:/a/b": for comparing folder paths (ASCII case only, see asciiLower)
+local function folderKey(path)
+	return (asciiLower((path:gsub("\\", "/"))):gsub("/+$", ""))
+end
+
+-- The catalog folders at or under root when root itself is not a catalog folder. Lightroom only knows the folders photos were
+-- imported from: if only D:\Photos\2026 was imported, D:\Photos is usually not in the catalog, but its subfolders are.
+-- Walks down from the top-level folders only along root's path, so it does not visit the whole catalog.
+local function catalogFoldersUnder(catalog, root)
+	local rootKey = folderKey(root)
+	local out = {}
+	local function visit(folder, depth)
+		local okPath, p = LrTasks.pcall(function()
+			return folder:getPath()
+		end)
+		if not okPath or type(p) ~= "string" then
+			return
+		end
+		local key = folderKey(p)
+		if key:sub(1, #rootKey + 1) == rootKey .. "/" then
+			out[#out + 1] = folder -- getPhotos(true) also covers its subfolders
+		elseif rootKey:sub(1, #key + 1) == key .. "/" and depth < 64 then
+			local okChildren, children = LrTasks.pcall(function()
+				return folder:getChildren()
+			end)
+			for _, child in ipairs(okChildren and children or {}) do
+				visit(child, depth + 1)
+			end
+		end
+	end
+	local okTop, top = LrTasks.pcall(function()
+		return catalog:getFolders()
+	end)
+	for _, folder in ipairs(okTop and top or {}) do
+		visit(folder, 0)
+	end
+	return out
+end
+
+-- getRawMetadata for many photos in one call (much faster for thousands of photos); nil if Lightroom refuses
+local function batchRaw(catalog, photos, keys)
+	if #photos == 0 then
+		return {}
+	end
+	local ok, res = LrTasks.pcall(function()
+		return catalog:batchGetRawMetadata(photos, keys)
+	end)
+	if ok and type(res) == "table" then
+		return res
+	end
+	return nil
+end
+
+local function rawOf(batch, photo, key)
+	local values = batch and batch[photo]
+	if values ~= nil then
+		return values[key]
+	end
+	return photo:getRawMetadata(key)
+end
+
+-- The app asks for a folder page by page (offset 0, 500, 1000 ...). The sorted list of the first page is kept for a short
+-- time, so the later pages do not enumerate, read and sort the whole folder again.
+local LIST_CACHE_SECONDS = 60
+local listCache = nil
+
+local function sortedEntries(catalog, path, recursive, offset)
+	local cacheKey = folderKey(path) .. (recursive and "|r" or "|f")
+	local now = LrDate.currentTime()
+	if offset > 0 and listCache and listCache.key == cacheKey and now - listCache.at < LIST_CACHE_SECONDS then
+		return listCache.found, listCache.entries
+	end
+	local folders = {}
+	local folder = catalog:getFolderByPath(path)
+	if folder then
+		folders[1] = folder
+	elseif recursive then
+		folders = catalogFoldersUnder(catalog, path)
+	end
+	local photos = {}
+	for _, f in ipairs(folders) do
+		for _, photo in ipairs(f:getPhotos(recursive) or {}) do
+			photos[#photos + 1] = photo
+		end
+	end
+	local batch = batchRaw(catalog, photos, { "path", "uuid" })
+	local entries = {}
+	for _, photo in ipairs(photos) do
+		local p = rawOf(batch, photo, "path") or ""
+		entries[#entries + 1] = { photo = photo, path = p, key = asciiLower((p:gsub("\\", "/"))), uuid = rawOf(batch, photo, "uuid") or "" }
+	end
+	table.sort(entries, function(a, b)
+		if a.key ~= b.key then
+			return a.key < b.key
+		end
+		return a.uuid < b.uuid
+	end)
+	local found = folder ~= nil or #folders > 0
+	listCache = { key = cacheKey, at = now, found = found, entries = entries }
+	return found, entries
+end
+
 function M.list_folder_photos(params)
 	local path = folderPathArg(params.path)
 	local recursive = params.recursive ~= "0"
@@ -1219,31 +1336,29 @@ function M.list_folder_photos(params)
 		fail(string.format("limit 要在 1 到 %d 之间。", LIST_MAX))
 	end
 	local catalog = LrApplication.activeCatalog()
-	local folder = catalog:getFolderByPath(path)
-	if not folder then
+	-- in_catalog: the folder, or (when it is not in the catalog itself) at least one catalog folder under it
+	local found, entries = sortedEntries(catalog, path, recursive, offset)
+	if not found then
 		return { in_catalog = false, total = 0, offset = offset, folder = path, photos = Json.array({}) }
 	end
-	local entries = {}
-	for _, photo in ipairs(folder:getPhotos(recursive) or {}) do
-		local p = photo:getRawMetadata("path") or ""
-		entries[#entries + 1] = { photo = photo, path = p, key = p:gsub("\\", "/"):lower(), uuid = photo:getRawMetadata("uuid") or "" }
-	end
-	table.sort(entries, function(a, b)
-		if a.key ~= b.key then
-			return a.key < b.key
-		end
-		return a.uuid < b.uuid
-	end)
-	local root = (path:gsub("\\", "/")):lower():gsub("/+$", "")
-	local out = {}
+	local root = folderKey(path)
+	local page = {}
 	for i = offset + 1, math.min(#entries, offset + limit) do
-		local e = entries[i]
+		page[#page + 1] = entries[i]
+	end
+	local pagePhotos = {}
+	for i, e in ipairs(page) do
+		pagePhotos[i] = e.photo
+	end
+	local batch = batchRaw(catalog, pagePhotos, { "fileFormat", "rating", "pickStatus", "dateTimeOriginalISO8601", "dimensions", "isVirtualCopy" })
+	local out = {}
+	for _, e in ipairs(page) do
 		local photo = e.photo
-		local dims = photo:getRawMetadata("dimensions") or {}
-		local pick = photo:getRawMetadata("pickStatus")
+		local dims = rawOf(batch, photo, "dimensions") or {}
+		local pick = rawOf(batch, photo, "pickStatus")
 		local dir = (e.path:gsub("\\", "/")):match("^(.*)/[^/]*$") or ""
 		local subfolder = ""
-		if dir:lower():sub(1, #root) == root then
+		if asciiLower(dir):sub(1, #root) == root then
 			subfolder = dir:sub(#root + 2)
 		end
 		out[#out + 1] = {
@@ -1251,18 +1366,17 @@ function M.list_folder_photos(params)
 			name = LrPathUtils.leafName(e.path),
 			path = e.path,
 			subfolder = subfolder,
-			format = photo:getRawMetadata("fileFormat"),
-			rating = photo:getRawMetadata("rating"),
+			format = rawOf(batch, photo, "fileFormat"),
+			rating = rawOf(batch, photo, "rating"),
 			flag = (pick == 1 and "pick") or (pick == -1 and "reject") or "none",
-			captured = photo:getRawMetadata("dateTimeOriginalISO8601"),
+			captured = rawOf(batch, photo, "dateTimeOriginalISO8601"),
 			width = dims.width,
 			height = dims.height,
-			is_virtual_copy = photo:getRawMetadata("isVirtualCopy") and true or false,
+			is_virtual_copy = rawOf(batch, photo, "isVirtualCopy") and true or false,
 		}
 	end
 	return { in_catalog = true, total = #entries, offset = offset, folder = path, recursive = recursive, photos = Json.array(out) }
 end
-
 -- width and height from the JPEG's start-of-frame marker (nil when it cannot be read)
 local function jpegSize(data)
 	local pos, n = 3, #data
@@ -1285,29 +1399,60 @@ local function jpegSize(data)
 	return nil
 end
 
--- ask for one thumbnail and wait (this task sleeps, Lightroom keeps running) at most THUMB_TIMEOUT seconds. Returns data or nil, error.
-local function fetchThumbnail(photo, size)
-	local done, data, err = false, nil, nil
+-- Thumbnails of one batch are all requested at once and share one deadline, so a batch holds the plug-in (which runs one
+-- command at a time) for at most THUMB_BATCH_TIMEOUT seconds, plus THUMB_RETRY_TIMEOUT for the one smaller retry of a
+-- thumbnail that came back too large; before 1.1.1 every photo waited up to 8 s in turn. This task sleeps while waiting,
+-- Lightroom keeps running.
+local function startThumbnail(photo, size, deadline)
+	local job = { done = false, deadline = deadline }
 	local ok, request = LrTasks.pcall(function()
 		return photo:requestJpegThumbnail(size, size, function(d, e)
-			done, data, err = true, d, e
+			job.done, job.data, job.err = true, d, e
 		end)
 	end)
 	if not ok then
-		return nil, tostring(type(request) == "table" and request.lrmcp or request)
+		job.done, job.err = true, tostring(type(request) == "table" and request.lrmcp or request)
 	end
-	local deadline = LrDate.currentTime() + THUMB_TIMEOUT
-	while not done and LrDate.currentTime() < deadline do
+	job.request = request -- the request object must stay referenced until the callback has run
+	return job
+end
+
+local function waitThumbnails(jobs)
+	while true do
+		local now, waiting = LrDate.currentTime(), false
+		for _, job in pairs(jobs) do
+			if not job.done and now < job.deadline then
+				waiting = true
+				break
+			end
+		end
+		if not waiting then
+			return
+		end
 		LrTasks.sleep(0.05)
 	end
-	local keep = request -- the request object must stay referenced until the callback has run
-	if not done then
+end
+
+-- data, or nil and an error code
+local function thumbnailResult(job, missing)
+	if job.done and type(job.data) == "string" and job.data ~= "" then
+		return job.data
+	end
+	if missing then
+		return nil, "missing" -- the original is offline or gone and Lightroom has no preview to give
+	end
+	if not job.done then
 		return nil, "timeout"
 	end
-	if type(data) ~= "string" or data == "" then
-		return nil, tostring(err or "no_data")
-	end
-	return data
+	return nil, tostring(job.err or "no_data")
+end
+
+-- true when Lightroom says the original file is not available (offline drive, moved or deleted file)
+local function originalMissing(photo)
+	local ok, available = LrTasks.pcall(function()
+		return photo:checkPhotoAvailability()
+	end)
+	return ok and available == false
 end
 
 function M.get_thumbnails(params)
@@ -1321,18 +1466,38 @@ function M.get_thumbnails(params)
 		size = math.floor(size)
 	end
 	local catalog = LrApplication.activeCatalog()
-	local out = {}
-	for _, id in ipairs(ids) do
+	local start = LrDate.currentTime()
+	local photos, missing, jobs = {}, {}, {}
+	for i, id in ipairs(ids) do
 		local photo = catalog:findPhotoByUuid(id)
-		if not photo then
+		if photo then
+			photos[i] = photo
+			-- a missing original: Lightroom may still have a preview, so ask, but do not wait the whole batch time for it
+			missing[i] = originalMissing(photo)
+			jobs[i] = startThumbnail(photo, size, start + (missing[i] and THUMB_MISSING_TIMEOUT or THUMB_BATCH_TIMEOUT))
+		end
+	end
+	waitThumbnails(jobs)
+
+	-- too large: one retry at 60 % of the size, for all of them together
+	local retries = {}
+	local retryDeadline = math.min(start + THUMB_BATCH_TIMEOUT, LrDate.currentTime()) + THUMB_RETRY_TIMEOUT
+	for i, job in pairs(jobs) do
+		local data = thumbnailResult(job, false)
+		if data and #data > THUMB_MAX_BYTES then
+			retries[i] = startThumbnail(photos[i], math.max(THUMB_MIN, math.floor(size * 0.6)), retryDeadline)
+		end
+	end
+	waitThumbnails(retries)
+
+	local out = {}
+	for i, id in ipairs(ids) do
+		if not photos[i] then
 			out[#out + 1] = { id = id, ok = false, error = "not_found" }
 		else
-			local data, err = fetchThumbnail(photo, size)
+			local data, err = thumbnailResult(retries[i] or jobs[i], missing[i])
 			if data and #data > THUMB_MAX_BYTES then
-				data, err = fetchThumbnail(photo, math.max(THUMB_MIN, math.floor(size * 0.6)))
-				if data and #data > THUMB_MAX_BYTES then
-					data, err = nil, "too_large"
-				end
+				data, err = nil, "too_large"
 			end
 			if data then
 				local w, h = jpegSize(data)
@@ -1344,7 +1509,6 @@ function M.get_thumbnails(params)
 	end
 	return { size = size, thumbnails = Json.array(out) }
 end
-
 local function selectedIds(catalog)
 	-- getTargetPhotos() returns the whole filmstrip when nothing is selected, so look at getTargetPhoto() first
 	local ids = {}
@@ -1362,7 +1526,7 @@ function M.select_photos(params)
 	local activeId = params.active
 	if activeId ~= nil and activeId ~= "" then
 		activeId = urlDecode(activeId)
-		if #activeId > 64 or not activeId:match("^[%w%-]+$") then
+		if #activeId > 64 or not activeId:match("^[A-Za-z0-9%-]+$") then
 			fail("active 不合法：只能是照片 id。")
 		end
 	else
@@ -1397,56 +1561,111 @@ function M.select_photos(params)
 		end
 	end
 
-	local folderShown, folderNote = nil, nil
-	if folderPath then
-		local folder = catalog:getFolderByPath(folderPath)
-		if not folder then
-			folderShown, folderNote = false, "这个文件夹不在目录里，没有切换文件夹。"
-		else
-			local ok, res = LrTasks.pcall(function()
-				return catalog:setActiveSources({ folder })
-			end)
-			folderShown = ok and res == true
-			if not folderShown then
-				folderNote = "Lightroom 没有切换到这个文件夹。"
-			end
-		end
-	end
-
-	-- Right after setActiveSources Lightroom needs a moment to show the folder; until then the photos are not in the current
-	-- view and setSelectedPhotos selects nothing without an error (seen on real Lightroom 15.2): wait, select, read back, and
-	-- try again a few times. Without a folder switch there is one attempt only.
-	local attempts = folderShown and 5 or 1
-	if folderShown then
-		LrTasks.sleep(0.3)
-	end
-	local ok, err, selected, notSelected
-	for attempt = 1, attempts do
-		ok, err = LrTasks.pcall(function()
+	-- select and read back what Lightroom really selected
+	local function trySelect()
+		local okSel, errSel = LrTasks.pcall(function()
 			catalog:setSelectedPhotos(active, others)
 		end)
-		selected = selectedIds(catalog)
+		local now = selectedIds(catalog)
 		local got = {}
-		for _, id in ipairs(selected) do
+		for _, id in ipairs(now) do
 			got[id] = true
 		end
-		notSelected = {}
+		local missed = {}
 		for _, p in ipairs(found) do
 			local id = p:getRawMetadata("uuid")
 			if not got[id] then
-				notSelected[#notSelected + 1] = id
+				missed[#missed + 1] = id
 			end
 		end
-		if not ok or #notSelected == 0 or attempt == attempts then
-			break
+		return okSel, errSel, now, missed
+	end
+
+	-- First select directly: usually the photos are already in the view and Lightroom need not switch anything (switching
+	-- reloads the grid). Only if some photo is not selected and show_folder was given, switch to the folders the photos
+	-- themselves are in (not the browse root: without "include subfolders" its view does not contain them), and only if
+	-- Lightroom is not already showing exactly those folders.
+	local ok, err, selected, notSelected = trySelect()
+	local folderShown, folderNote = nil, nil
+	if ok and #notSelected > 0 and folderPath then
+		local targets, keys, wanted, lost = {}, {}, 0, false
+		for _, p in ipairs(found) do
+			local folder
+			local photoPath = p:getRawMetadata("path")
+			if photoPath then
+				folder = catalog:getFolderByPath(LrPathUtils.parent(photoPath))
+			end
+			if not folder then
+				lost = true
+			else
+				local key = asciiLower(tostring(folder:getPath() or ""))
+				if not keys[key] then
+					keys[key] = true
+					wanted = wanted + 1
+					targets[#targets + 1] = folder
+				end
+			end
 		end
-		LrTasks.sleep(0.4)
+		if lost then -- a photo whose own folder cannot be found: the folder the app shows is the best guess
+			local fallback = catalog:getFolderByPath(folderPath)
+			local key = fallback and asciiLower(tostring(fallback:getPath() or ""))
+			if fallback and not keys[key] then
+				keys[key] = true
+				wanted = wanted + 1
+				targets[#targets + 1] = fallback
+			end
+		end
+		if #targets == 0 then
+			folderShown, folderNote = false, "照片所在的文件夹不在目录里，没有切换文件夹。"
+		else
+			-- the current sources, compared by path (collections have no getPath and never match)
+			local same = false
+			local okSrc, current = LrTasks.pcall(function()
+				return catalog:getActiveSources()
+			end)
+			if okSrc and type(current) == "table" and #current == wanted then
+				same = true
+				for _, source in ipairs(current) do
+					local okPath, sourcePath = LrTasks.pcall(function()
+						return source:getPath()
+					end)
+					if not okPath or type(sourcePath) ~= "string" or not keys[asciiLower(sourcePath)] then
+						same = false
+						break
+					end
+				end
+			end
+			if same then
+				folderShown = true -- already shown; switching again would only reload the grid
+			else
+				local okSet, res = LrTasks.pcall(function()
+					return catalog:setActiveSources(targets)
+				end)
+				folderShown = okSet and res == true
+				if not folderShown then
+					folderNote = "Lightroom 没有切换到照片所在的文件夹。"
+				else
+					-- Right after setActiveSources Lightroom needs a moment to show the folder; until then setSelectedPhotos
+					-- selects nothing without an error (seen on real Lightroom 15.2): short waits, a few attempts (at most ~1 s).
+					for _, wait in ipairs(SELECT_RETRY_WAITS) do
+						LrTasks.sleep(wait)
+						ok, err, selected, notSelected = trySelect()
+						if not ok or #notSelected == 0 then
+							break
+						end
+					end
+				end
+			end
+		end
 	end
 	local reason
 	if not ok then
 		reason = "Lightroom 拒绝了选中操作：" .. tostring(type(err) == "table" and err.lrmcp or err)
 	elseif #notSelected > 0 then
 		reason = "有照片没有被选中：它们可能不在 Lightroom 当前显示的文件夹或集合里。可以带上 show_folder 让 Lightroom 先切到照片所在的文件夹。"
+	end
+	if reason and folderNote then
+		reason = folderNote .. reason -- why the folder was not switched comes first
 	end
 	return {
 		selected = Json.array(selected),

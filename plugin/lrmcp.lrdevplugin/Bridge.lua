@@ -25,6 +25,7 @@ local function log(text)
 end
 
 local FIRST_PORT, PORT_COUNT = 58770, 20 -- the range the servers use; anything else is ignored
+local DEAD_AFTER, DEAD_WAIT, DEAD_WAIT_MAX = 3, 30, 60 -- unreachable attempts in a row, then seconds between attempts
 local dir = LrPathUtils.child(LrPathUtils.getStandardFilePath("home"), "LrMcp")
 local serversDir = LrPathUtils.child(dir, "servers")
 local legacyTokenPath = LrPathUtils.child(dir, "token") -- written by a 0.2.x server, which always uses FIRST_PORT
@@ -55,7 +56,7 @@ local function readKeyValues(path)
 	end
 	local values = {}
 	for line in text:gmatch("[^\r\n]+") do
-		local k, v = line:match("^(%w+)=(.*)$")
+		local k, v = line:match("^([A-Za-z0-9]+)=(.*)$")
 		if k then
 			values[k] = v
 		end
@@ -68,7 +69,7 @@ local function readLegacyToken()
 		return nil
 	end
 	local text = LrFileUtils.readFile(legacyTokenPath)
-	return text and (text:gsub("%s+", ""))
+	return text and (text:gsub("[ \t\r\n]+", ""))
 end
 
 local function authHeaders(token, extra)
@@ -95,13 +96,13 @@ end
 -- "cmd <id> <command> key=value ..."  or (dev builds only)  "run <id> <script name>"
 local function parse(body)
 	local words = {}
-	for w in body:gmatch("%S+") do
+	for w in body:gmatch("[^ \t\r\n]+") do
 		words[#words + 1] = w
 	end
 	if words[1] == "cmd" and #words >= 3 then
 		local params = {}
 		for i = 4, #words do
-			local k, v = words[i]:match("^([%w_]+)=(.*)$")
+			local k, v = words[i]:match("^([A-Za-z0-9_]+)=(.*)$")
 			if k then
 				params[k] = v
 			end
@@ -157,6 +158,7 @@ local function pollServer(port, infoPath)
 	local gen = tostring(LrDate.currentTime()) -- a newer plug-in instance (after a reload) has a larger gen
 	local entry = state.servers[port]
 	local token, pid, fails = nil, nil, 0
+	local unreachable = 0 -- failures in a row without any HTTP answer (refused, timeout): probably a dead server
 	log(string.format("polling server on port %d, plug-in %s, gen=%s", port, Version, gen))
 
 	-- "gone" | "changed" (new token or pid: failure count and back-off start over) | "same"
@@ -169,12 +171,27 @@ local function pollServer(port, infoPath)
 			local hadOne = token ~= nil
 			token, pid = newToken, newPid
 			if hadOne then
-				fails = 0
+				fails, unreachable = 0, 0
 				log(string.format("announcement on port %d changed, using the new one", port))
 			end
 			return "changed"
 		end
 		return "same"
+	end
+
+	-- A server that was killed leaves its announcement behind; asking a closed port again and again every few seconds only
+	-- slows the plug-in down. After DEAD_AFTER unreachable attempts in a row wait 30 s, later 60 s, but look at the
+	-- announcement every second, so a new server (new token) or a removed file is noticed at once.
+	local function waitLong(seconds)
+		for _ = 1, seconds do
+			if state.stop then
+				return
+			end
+			LrTasks.sleep(1)
+			if sync() ~= "same" then
+				return
+			end
+		end
 	end
 
 	while not state.stop do
@@ -192,7 +209,7 @@ local function pollServer(port, infoPath)
 			local body, hdrs = LrHttp.get(base .. "/poll", headers, 15)
 			local status = hdrs and hdrs.status
 			if status == 200 and body then
-				fails = 0
+				fails, unreachable = 0, 0
 				entry.connected, entry.lastOk, entry.lastError = true, LrDate.currentTime(), nil
 				refreshOverall()
 				if body == "stop" then
@@ -214,12 +231,21 @@ local function pollServer(port, infoPath)
 			else
 				-- 401/403 (the server restarted with a new token), refused, timeout: look at the announcement now
 				fails = fails + 1
+				unreachable = status and 0 or (unreachable + 1)
 				entry.connected = false
 				entry.lastError = (hdrs and hdrs.error and hdrs.error.errorCode) or tostring(status)
 				refreshOverall()
 				local seen = sync()
 				if seen == "same" then
-					LrTasks.sleep(math.min(5, 1 + fails))
+					if unreachable >= DEAD_AFTER then
+						local seconds = unreachable >= 2 * DEAD_AFTER and DEAD_WAIT_MAX or DEAD_WAIT
+						if unreachable == DEAD_AFTER or unreachable == 2 * DEAD_AFTER then
+							log(string.format("port %d does not answer (%d times), asking every %d s", port, unreachable, seconds))
+						end
+						waitLong(seconds)
+					else
+						LrTasks.sleep(math.min(5, 1 + fails))
+					end
 				end -- "gone" ends the loop above, "changed" retries at once with the new token
 			end
 		end
@@ -238,7 +264,7 @@ LrTasks.startAsyncTask(function()
 		local wanted = {}
 		if LrFileUtils.exists(serversDir) then
 			for path in LrFileUtils.files(serversDir) do
-				local port = tonumber(LrPathUtils.leafName(path):match("^(%d+)%.txt$"))
+				local port = tonumber(LrPathUtils.leafName(path):match("^([0-9]+)%.txt$"))
 				if port and port >= FIRST_PORT and port < FIRST_PORT + PORT_COUNT then
 					wanted[port] = path
 				end
@@ -251,8 +277,16 @@ LrTasks.startAsyncTask(function()
 			if not running[port] then
 				running[port] = true
 				state.servers[port] = { connected = false }
+				-- Every server has its own task: a slow or dead server does not hold up the polls of the others (each
+				-- LrHttp call only blocks its own task). An unexpected Lua error must not stop this server from ever being
+				-- polled again: catch it, log it, forget the poller; the next round of this loop starts a new one.
 				LrTasks.startAsyncTask(function()
-					pollServer(port, path or nil)
+					local ok, err = LrTasks.pcall(pollServer, port, path or nil)
+					if not ok then
+						log(string.format("poller for port %d failed: %s", port, tostring(err)))
+						state.servers[port] = nil
+						refreshOverall()
+					end
 					running[port] = nil
 				end)
 			end

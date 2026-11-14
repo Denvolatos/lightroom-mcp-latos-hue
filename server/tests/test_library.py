@@ -125,7 +125,8 @@ def test_thumbnails_decode_and_check_jpeg(env):
     assert data["thumbnails"][1] == {"id": "B-2", "ok": False, "error": "timeout"}
     command, params, timeout = plugin.calls[0]
     assert command == "get_thumbnails" and params["size"] == "128" and urllib.parse.unquote(params["ids"]) == "A-1,B-2,C-3"
-    assert timeout >= 30 + 8 * 3     # long enough for the plug-in's 8 s per photo
+    # 1.1.1: the plug-in waits at most ~10 s for the whole batch, so the call no longer grows with the number of photos
+    assert 8 + 2 < timeout <= 60
 
 
 def test_thumbnails_reject_non_jpeg_bad_base64_and_oversize(env):
@@ -180,6 +181,25 @@ def test_thumbnails_duplicates_are_asked_once(env):
     plugin.reply = {"thumbnails": []}
     service.get_thumbnails(["A-1", "A-1"])
     assert urllib.parse.unquote(plugin.calls[0][1]["ids"]) == "A-1"
+
+
+def test_thumbnail_timeout_is_the_same_for_one_and_24_photos(env):
+    plugin, service, _ = env
+    plugin.reply = {"thumbnails": [{"id": "A-1", "ok": False, "error": "missing"}]}
+    assert service.get_thumbnails(["A-1"])["thumbnails"][0] == {"id": "A-1", "ok": False, "error": "missing"}
+    service.get_thumbnails([f"ID-{i}" for i in range(24)])
+    assert plugin.calls[0][2] == plugin.calls[1][2] <= 60
+
+
+def test_a_read_that_was_never_taken_is_the_same_busy_message(env):
+    from lightroom_mcp.bridge import BridgeNotRun
+
+    plugin, service, folder = env
+    plugin.raises = BridgeNotRun("not run")
+    with pytest.raises(LibraryError, match="没有在时限内回复"):
+        service.get_thumbnails(["A-1"])
+    with pytest.raises(LibraryError, match="没有在时限内回复"):
+        service.list_folder_photos(folder)
 
 
 def test_thumbnails_timeout(env):

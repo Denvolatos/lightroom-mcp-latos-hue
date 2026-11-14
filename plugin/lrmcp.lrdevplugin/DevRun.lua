@@ -23,7 +23,7 @@ end
 
 -- Plain file name only: letters, digits, _ and -, ending in .lua. No path separators, no "..".
 local function validName(name)
-	return name:match("^[%w_%-]+%.lua$") ~= nil
+	return name:match("^[A-Za-z0-9_%-]+%.lua$") ~= nil
 end
 
 function M.run(jobId, name)
