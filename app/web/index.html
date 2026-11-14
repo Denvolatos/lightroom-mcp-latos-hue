@@ -1688,7 +1688,7 @@ $('#pmask').onclick=e=>{ if(e.target.id==='pmask' && (PK.stage==='form'||PK.stag
 /* ---- 图库（软件内浏览与选择照片；Lightroom 只是后台引擎）---- */
 const GAL_MAX_SEL = 50;
 const G = {st:null, byId:{}, thumbs:{}, failed:{}, sel:[], active:null, anchor:null, q:'', sort:'name', filter:'all', collapsed:{},
-  order:[], cells:new Map(), vis:new Set(), busySel:false, wantSel:null, io:null, reqTimer:null, loadTimer:null, demo:false};
+  order:[], cells:new Map(), cellSig:new Map(), sig:null, qTimer:null, vis:new Set(), busySel:false, wantSel:null, io:null, reqTimer:null, loadTimer:null, demo:false};
 const gapi = () => window.pywebview.api;
 function gmsg(t, bad){ const m=$('#gal_msg'); m.textContent=t||''; m.classList.toggle('bad', !!bad); }
 function galDemoState(){
@@ -1745,14 +1745,26 @@ function galImgErr(img){ const c=img.closest('.cell'); if (!c) return; const id=
 function cellHtml(p){
   return `<div class="cell${p.added?'':' na'}" data-id="${esc(p.id)}" title="${esc(p.name)}${p.captured?'　'+esc(p.captured):''}">${cellInner(p)}</div>`;
 }
-function refreshCell(id){ const el=G.cells.get(id), p=G.byId[id]; if (!el||!p) return; el.className='cell'+(p.added?'':' na'); el.innerHTML=cellInner(p); applySelClass(el,id); }
+function refreshCell(id){ const el=G.cells.get(id), p=G.byId[id]; if (!el||!p) return; el.className='cell'+(p.added?'':' na'); el.innerHTML=cellInner(p); applySelClass(el,id); G.cellSig.set(id, cellHtml(p)); }
 function applySelClass(el,id){ el.classList.toggle('sel', G.sel.indexOf(id)>=0); el.classList.toggle('act', id===G.active); }
 function applySelClasses(){ G.cells.forEach((el,id)=>applySelClass(el,id)); }
 function buildGallery(){
   const box=$('#gal_scroll'), st=G.st, top=box.scrollTop;
-  if (G.io){ G.io.disconnect(); } G.cells.clear(); G.vis.clear(); G.order=[];
   $('#gal_title').textContent = '浏览照片' + (st.total ? `（${st.total} 张）` : '') + (st.state==='loading' && st.total ? '　正在刷新…' : '');
   $('#gal_scope').textContent = st.base ? `当前浏览：${st.base}（含子文件夹；导入位置在设置中单独选择）` : '选择照片文件夹后，可浏览其中及子文件夹的照片';
+  const listMode = !(st.state==='idle' || (st.state==='loading' && !(st.photos||[]).length)) && st.state!=='error' && !!st.base && !!st.total;
+  const groups = listMode ? galGroups(galVisible()) : null;
+  const sig = listMode ? 'L|'+groups.map(g=>g.name+':'+(G.collapsed[g.name]?1:0)+':'+g.photos.map(p=>p.id+(p.added?'+':'-')).join(',')).join('|') : null;
+  /* 照片 id、分组、折叠都没变（例如刷新只是把“正在读取”变成“就绪”）：不重建格子，只更新内容有变化的那几格 */
+  if (sig && sig===G.sig && G.cells.size){
+    let changed = 0;
+    groups.forEach(g=>g.photos.forEach(p=>{ const el=G.cells.get(p.id);
+      if (el && G.cellSig.get(p.id)!==cellHtml(p)){ el.title = p.name+(p.captured?'　'+p.captured:''); refreshCell(p.id); changed++; } }));
+    if (changed) scheduleThumbs();          // 有格子变回“读取中”时，补要一次可见格子的缩略图
+    applySelClasses(); renderBar(); return;
+  }
+  G.sig = sig;
+  if (G.io){ G.io.disconnect(); } G.cells.clear(); G.cellSig.clear(); G.vis.clear(); G.order=[];
   let h='';
   if (st.state==='idle' || (st.state==='loading' && !(st.photos||[]).length)){ h = `<div class="gempty"><span class="spin"></span>正在读取图库…</div>`; }
   else if (st.state==='error'){ h = `<div class="gempty" style="color:var(--bad)">${esc(st.message||'无法读取图库。')}</div>`; }
@@ -1762,9 +1774,8 @@ function buildGallery(){
       (st.base_exists ? '' : `<br>软件文件夹尚不存在，完成一次导入后会自动创建。`) +
       `<div class="gpath">${esc(st.base)}</div><button class="btn small" id="gal_open2">在资源管理器中打开</button></div>`;
   } else {
-    const list = galVisible();
-    if (!list.length) h = `<div class="gempty">没有符合条件的照片。</div>`;
-    galGroups(list).forEach(g=>{
+    if (!groups.length) h = `<div class="gempty">没有符合条件的照片。</div>`;
+    groups.forEach(g=>{
       const closed = !!G.collapsed[g.name];
       h += `<div class="ghead" data-g="${esc(g.name)}"><span>${closed?'▸':'▾'}</span><span class="gn">${esc(g.name)}</span><span class="gc">${g.photos.length}</span></div>`;
       h += `<div class="ggrid${closed?' hide':''}">` + g.photos.map(cellHtml).join('') + `</div>`;
@@ -1772,7 +1783,7 @@ function buildGallery(){
     });
   }
   box.innerHTML = h; box.scrollTop = top;
-  box.querySelectorAll('.cell').forEach(el=>{ G.cells.set(el.dataset.id, el); applySelClass(el, el.dataset.id); });
+  box.querySelectorAll('.cell').forEach(el=>{ const id=el.dataset.id; G.cells.set(id, el); if (G.byId[id]) G.cellSig.set(id, cellHtml(G.byId[id])); applySelClass(el, id); });
   const o2=$('#gal_open2'); if (o2) o2.onclick=openBaseFolder;
   const choose=$('#gal_choose'); if (choose) choose.onclick=changeGalleryFolder;
   if (!G.demo && 'IntersectionObserver' in window){
@@ -1894,7 +1905,7 @@ $('#gal').addEventListener('keydown', e=>{
   const tag=(document.activeElement&&document.activeElement.tagName)||'';
   if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='a' && tag!=='INPUT' && tag!=='SELECT'){ e.preventDefault(); selectAllShown(); }
 });
-$('#gal_q').oninput=()=>{ G.q=$('#gal_q').value; if (G.st) buildGallery(); };
+$('#gal_q').oninput=()=>{ clearTimeout(G.qTimer); G.qTimer=setTimeout(()=>{ G.q=$('#gal_q').value; if (G.st) buildGallery(); }, 200); };   // 停顿 0.2 秒再筛选，打字时不卡
 $('#gal_sort').onchange=()=>{ G.sort=$('#gal_sort').value; if (G.st) buildGallery(); };
 $('#gal_filter').onchange=()=>{ G.filter=$('#gal_filter').value; if (G.st) buildGallery(); };
 $('#gal_refresh').onclick=async()=>{ if (G.demo||!REAL()) return; gmsg(''); G.st=Object.assign({}, G.st, {state:'loading'}); buildGallery(); try { await gapi().library_refresh(); } catch(e){} };
