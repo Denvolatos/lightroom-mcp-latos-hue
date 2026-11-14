@@ -71,3 +71,8 @@ while True:
             result()
     elif text == "silent":
         time.sleep(30)
+    elif text == "ticker":                       # 持续有输出，总时长超过测试里设的空闲超时
+        for i in range(10):
+            delta(f"{i}")
+            time.sleep(0.2)
+        result()

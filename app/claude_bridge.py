@@ -23,7 +23,8 @@ from timing import TurnTimer
 SERVER_NAME = "lightroom_mcp"
 REPO = Path(__file__).resolve().parent.parent
 WORKDIR = Path.home() / "LrMcp" / "app_workdir"   # 空的中性文件夹，避免读到项目 CLAUDE.md
-TIMEOUT_SECONDS = 180
+TIMEOUT_SECONDS = 180          # 空闲超时：这么久没有任何输出才停止（有确认卡片在等用户时暂停计时）
+MAX_TURN_SECONDS = 900         # 一轮的总上限（防止无限挂起）
 
 # 只读工具（以 server/lightroom_mcp/tools.py 里 READ_ONLY 标注为准）
 READONLY_TOOLS = [
@@ -166,7 +167,63 @@ def friendly_error(text: str) -> str:
 
 
 MSG_NO_CLAUDE = "未找到 claude 命令行。请安装 Claude Code，并在终端运行 claude 完成 /login 登录。"
-MSG_TIMEOUT = f"等待超过 {TIMEOUT_SECONDS} 秒仍无结果，已停止。请简化请求后重试。"
+MSG_TIMEOUT = (f"超过 {TIMEOUT_SECONDS} 秒没有任何进展（或一轮总计超过 {MAX_TURN_SECONDS // 60} 分钟），已停止。"
+               "请简化请求后重试。")
+
+
+class IdleWatchdog:
+    """一轮对话的超时：每收到一个事件调用 touch() 重新计时；paused() 为真（有确认卡片在等用户）时暂停计时；
+    另有总上限 total。idle / total 不传时在创建时读取 TIMEOUT_SECONDS / MAX_TURN_SECONDS（测试可改）。
+    用法：start() 起后台线程，到时调用 on_timeout()；或 wait(event) 阻塞到 event 被设置（True）或超时（False）。"""
+
+    def __init__(self, on_timeout=None, idle: float | None = None, total: float | None = None, paused=None,
+                 clock=time.monotonic):
+        self.idle = float(TIMEOUT_SECONDS if idle is None else idle)
+        self.total = float(MAX_TURN_SECONDS if total is None else total)
+        self.on_timeout = on_timeout
+        self.paused = paused or _waiting_for_user
+        self.clock = clock
+        self.started = self.last = clock()
+        self.fired = False
+        self._cancel = threading.Event()
+        self.tick = max(0.02, min(1.0, self.idle / 4))
+
+    def touch(self) -> None:
+        self.last = self.clock()
+
+    def expired(self) -> bool:
+        now = self.clock()
+        try:
+            if self.paused():
+                self.last = now
+        except Exception:
+            pass
+        return now - self.last > self.idle or now - self.started > self.total
+
+    def wait(self, event: threading.Event) -> bool:
+        while not event.wait(self.tick):
+            if self.expired():
+                self.fired = True
+                return False
+        return True
+
+    def start(self) -> "IdleWatchdog":
+        def loop():
+            if not self.wait(self._cancel) and self.on_timeout is not None:
+                self.on_timeout()
+        threading.Thread(target=loop, daemon=True).start()
+        return self
+
+    def cancel(self) -> None:
+        self._cancel.set()
+
+
+def _waiting_for_user() -> bool:
+    try:
+        from confirm_hub import waiting_for_user
+    except Exception:
+        return False
+    return waiting_for_user()
 
 
 # ---------------------------------------------------------------- 事件解析
@@ -287,13 +344,13 @@ class ClaudeSession:
             return
         proc = self._proc
         timer.mark("spawn")
-        watchdog = threading.Timer(TIMEOUT_SECONDS, self._timeout)
         self._timed_out = False
-        watchdog.start()
+        watchdog = IdleWatchdog(self._timeout).start()      # 空闲超时：每行输出重新计时
         err_chunks: list[str] = []
         threading.Thread(target=lambda: err_chunks.append(proc.stderr.read()), daemon=True).start()
         try:
             for line in proc.stdout:
+                watchdog.touch()
                 for ev in parse_line(line, state):
                     if ev["type"] == "session":
                         self.session_id = ev["id"] or self.session_id

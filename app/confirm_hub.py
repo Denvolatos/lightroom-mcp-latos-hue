@@ -23,6 +23,16 @@ MSG_PICK_READONLY = "AI 挑片期间只能查看照片，不允许任何修改�
 AUTO_TOOLS = ("lr_set_develop", "lr_restore", "lr_restore_original")   # “逐项确认”关闭时自动放行的工具
 
 
+# 有确认卡片在等用户时，AI 一轮的“空闲超时”暂停计时（见 claude_bridge.IdleWatchdog）。进程内所有 ConfirmHub 共用。
+_waiting = 0
+_waiting_lock = threading.Lock()
+
+
+def waiting_for_user() -> bool:
+    """当前是否有确认卡片在等用户点击。"""
+    return _waiting > 0
+
+
 def _num(v) -> str:
     if isinstance(v, (int, float)) and not isinstance(v, bool):
         return format(float(v), ".4g")
@@ -146,8 +156,15 @@ class ConfirmHub:
         with self._lock:
             self._pending[cid] = slot
         card = describe_request(tool_name, tool_input, cur)
-        self.emit({"type": "confirm", "id": cid, "tool_use_id": tool_use_id, "timeout": self.timeout, **card})
-        slot["event"].wait(self.timeout)
+        global _waiting
+        with _waiting_lock:
+            _waiting += 1
+        try:
+            self.emit({"type": "confirm", "id": cid, "tool_use_id": tool_use_id, "timeout": self.timeout, **card})
+            slot["event"].wait(self.timeout)
+        finally:
+            with _waiting_lock:
+                _waiting -= 1
         with self._lock:
             self._pending.pop(cid, None)
         self.emit({"type": "confirm_done", "id": cid, "allow": slot["allow"], "message": slot["message"]})

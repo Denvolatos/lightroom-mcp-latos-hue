@@ -49,6 +49,7 @@ class _Turn:
         self.stopped = False
         self.timed_out = False
         self.got_done = False
+        self.watch: cb.IdleWatchdog | None = None
 
 
 class PersistentSession:
@@ -179,6 +180,9 @@ class PersistentSession:
     def _read_stdout(self, proc, gen: int) -> None:
         try:
             for line in proc.stdout:
+                turn = self._turn
+                if turn is not None and turn.watch is not None:
+                    turn.watch.touch()                    # 空闲超时：每收到一行输出重新计时
                 self._handle_line(line)
         except Exception as e:                            # 管道本身出错（进程已结束等）：按进程退出处理
             log.warning("claude stdout read failed: %s: %s", type(e).__name__, e)
@@ -266,9 +270,10 @@ class PersistentSession:
         except (OSError, ValueError):
             return False
 
-    def send(self, prompt: str, emit, timeout: float | None = None) -> None:
-        timeout = cb.TIMEOUT_SECONDS if timeout is None else timeout
+    def send(self, prompt: str, emit, timeout: float | None = None, total: float | None = None) -> None:
+        """timeout：空闲超时（这么久没有任何输出才算超时；有确认卡片在等用户时暂停计时）；total：一轮总上限。"""
         turn = _Turn(emit)
+        turn.watch = cb.IdleWatchdog(idle=timeout, total=total)
         err = None
         with self._lock:
             if self._turn is not None:
@@ -289,7 +294,7 @@ class PersistentSession:
             emit({"type": "error", "message": err})
             emit({"type": "done", "tokens": 0, "cost": None, "text": "", "is_error": True})
             return
-        if not turn.done.wait(timeout):
+        if not turn.watch.wait(turn.done):
             turn.timed_out = True
             with self._lock:
                 self._kill()                              # 超时：结束进程，稍后用 --resume 重建

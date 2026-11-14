@@ -13,10 +13,11 @@ import time
 from pathlib import Path
 
 from frozen import helper_command
-from claude_bridge import ENABLED_WRITE_TOOLS, MSG_TIMEOUT, READONLY_TOOLS, SYSTEM_PROMPT, TOOL_LABELS, WORKDIR
+from claude_bridge import (ENABLED_WRITE_TOOLS, MSG_TIMEOUT, READONLY_TOOLS, SYSTEM_PROMPT, TOOL_LABELS, WORKDIR,
+                           IdleWatchdog)
 from .base import AIProvider, NOT_INSTALLED, NOT_LOGGED_IN, READY, UNKNOWN, make_status
 
-TIMEOUT_SECONDS = 180
+TIMEOUT_SECONDS = 180            # 空闲超时（每个事件重新计时，确认卡片等待中暂停）
 TOOLS = READONLY_TOOLS + ENABLED_WRITE_TOOLS
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -157,8 +158,7 @@ class CodexProvider(AIProvider):
             if proc.poll() is None:
                 proc.kill()
 
-        watchdog = threading.Timer(TIMEOUT_SECONDS, timeout)
-        watchdog.start()
+        watchdog = IdleWatchdog(timeout, idle=TIMEOUT_SECONDS).start()
 
         def write_prompt():
             try:
@@ -170,6 +170,7 @@ class CodexProvider(AIProvider):
         threading.Thread(target=write_prompt, daemon=True).start()
         try:
             for line in proc.stdout:
+                watchdog.touch()
                 try:
                     event = json.loads(line)
                 except ValueError:
