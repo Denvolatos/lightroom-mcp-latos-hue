@@ -216,6 +216,7 @@ def test_switch_claude_to_codex_and_back_rebinds_every_service(api, monkeypatch)
     shutdowns = []
     monkeypatch.setattr(claude.session, "shutdown", lambda: shutdowns.append("claude"))
     old_lr = api._lr
+    api._borrowing = True                       # 1.1.1：常驻 claude 那条通道连上后才借用；这里模拟已经借用
 
     api._settings.data["provider"] = "codex"
     assert api._apply_provider_choice()

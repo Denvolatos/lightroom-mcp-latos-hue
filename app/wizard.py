@@ -17,13 +17,20 @@ import time
 
 READY, TODO, WAIT = "ready", "todo", "wait"
 FOLDER, LIGHTROOM, PLUGIN, AI = "folder", "lightroom", "plugin", "ai"
+OLD_SERVERS = "old_servers"            # 1.1.1：旧版服务（只有发现时才出现在清单最后）
 ORDER = (FOLDER, LIGHTROOM, PLUGIN, AI)
-TITLES = {FOLDER: "照片工作文件夹", LIGHTROOM: "Lightroom", PLUGIN: "Lightroom 插件", AI: "AI 助手"}
+TITLES = {FOLDER: "照片工作文件夹", LIGHTROOM: "Lightroom", PLUGIN: "Lightroom 插件", AI: "AI 助手",
+          OLD_SERVERS: "旧版服务"}
 STALE_SECONDS = 5.0                    # 结果超过这么久，下一次取状态时顺带在后台重新检查
 
 # 界面上的按钮对应的动作（页面只能点按钮，不能传路径）
 ACT_FOLDER, ACT_LIGHTROOM, ACT_AI = "choose_folder", "choose_lightroom", "choose_ai"
-LABELS = {ACT_FOLDER: "选择文件夹", ACT_LIGHTROOM: "选择 Lightroom 程序", ACT_AI: "更换 AI 来源"}
+ACT_STOP_OLD = "stop_old_servers"      # 页面对应 api.wizard_stop_old_servers()
+LABELS = {ACT_FOLDER: "选择文件夹", ACT_LIGHTROOM: "选择 Lightroom 程序", ACT_AI: "更换 AI 来源",
+          ACT_STOP_OLD: "关闭旧版服务"}
+HINT_OLD_SERVERS = ("这些是以前版本的 lrmcp 服务，Lightroom 插件会同时轮询它们，每条命令要多等约 10 秒。"
+                    "点“关闭旧版服务”结束它们（只结束登记过的旧版 lrmcp 进程）。如果它们是别的 AI 工具"
+                    "（比如以前配置的 Claude Desktop）启动的，也请把那边的 lrmcp 升级或移除，否则下次还会出现。")
 MSG_CHOOSE_AI = "请选择要使用的 AI。"
 HINT_CHOOSE_AI = ("软件用的是你电脑上已经安装并登录的 AI 命令行，不保存你的账号。点下面的按钮选一个；"
                   "还没安装的也可以先选，选了之后这里会告诉你下一步怎么装、怎么登录。以后可以在“设置”里更换。")
@@ -33,6 +40,8 @@ MSG_FAILED = "这一项暂时没能检查，请点“重新检查”。"
 MSG_ALL_READY = "都准备好了，可以开始修图。"
 HINT_OPEN_LR = ("请先打开 Lightroom。设置里有“自动启动 Lightroom”开关，打开后，以后启动本软件时会自动在后台打开它。"
                 "这里不会替你打开。")
+HINT_AI_SIDE = ("AI 助手正在启动或重新建立与 Lightroom 的连接，一般几秒到半分钟。图库、导出、预设不受影响。"
+                "如果一直没好，请确认已登录（在终端运行 claude 并输入 /login），再点“重新检查”。")
 HINT_PLUGIN = ("请在 Lightroom 的 文件 → 增效工具管理器 里确认 LrMCP 显示“已安装并正在运行”；"
                "如果不是，点“重新载入增效工具”，等几秒再点下面的“重新检查”。")
 
@@ -69,8 +78,10 @@ class WizardChecker:
     """
 
     def __init__(self, get_settings, *, find_lightroom, is_running, get_connection, get_provider,
-                 get_autolaunch=lambda: {"state": "idle"}, isdir=os.path.isdir, spawn=None, clock=time.monotonic):
+                 get_autolaunch=lambda: {"state": "idle"}, isdir=os.path.isdir, spawn=None, clock=time.monotonic,
+                 get_old_servers=lambda: []):
         self._settings, self._find, self._running = get_settings, find_lightroom, is_running
+        self._old_servers = get_old_servers
         self._conn, self._provider, self._autolaunch = get_connection, get_provider, get_autolaunch
         self._isdir, self._clock = isdir, clock
         self._spawn = spawn or self._spawn_thread
@@ -137,7 +148,25 @@ class WizardChecker:
         out[LIGHTROOM] = self._safe(LIGHTROOM, lambda: self._check_lightroom(s))
         out[PLUGIN] = self._safe(PLUGIN, lambda: self._check_plugin(out[LIGHTROOM]))
         out[AI] = self._safe(AI, self._check_ai)
-        return [out[k] for k in ORDER]
+        items = [out[k] for k in ORDER]
+        old = self._check_old_servers()
+        if old is not None:
+            items.append(old)
+        return items
+
+    def _check_old_servers(self) -> dict | None:
+        """发现仍在运行的旧版服务时返回一项“需要处理”（带“关闭旧版服务”按钮）；没发现或检查出错时不显示这一项。"""
+        try:
+            found = list(self._old_servers() or [])
+        except Exception:                                # noqa: BLE001
+            return None
+        if not found:
+            return None
+        ports = "、".join(str(s.get("port")) for s in found if isinstance(s, dict) and s.get("port"))
+        text = f"发现 {len(found)} 个旧版服务在拖慢 Lightroom" + (f"（端口 {ports}）。" if ports else "。")
+        item = _item(OLD_SERVERS, TODO, text, HINT_OLD_SERVERS, ACT_STOP_OLD)
+        item["count"] = len(found)
+        return item
 
     @staticmethod
     def _safe(key: str, fn) -> dict:
@@ -169,9 +198,14 @@ class WizardChecker:
         except Exception:                                # noqa: BLE001
             return {}
 
+    @staticmethod
+    def _app_connected(conn: dict) -> bool:
+        """插件是否连上了窗口自己的通道（conn["app"]）。“connected”还要求 AI 那一侧也连上，不能用来判断插件。"""
+        return bool(conn.get("app")) if "app" in conn else bool(conn.get("connected"))
+
     def _check_lightroom(self, s: dict) -> dict:
         conn = self._connection()
-        if conn.get("connected") or self._running():     # 插件都连上了，Lightroom 一定在运行（查进程偶尔会失败）
+        if self._app_connected(conn) or self._running():     # 插件都连上了，Lightroom 一定在运行（查进程偶尔会失败）
             return _item(LIGHTROOM, READY, "Lightroom 正在运行。")
         if self._autolaunching():
             return _item(LIGHTROOM, WAIT, "正在自动启动 Lightroom，请稍候…")
@@ -186,11 +220,14 @@ class WizardChecker:
         if lr["state"] != READY:
             return _item(PLUGIN, WAIT, "等待 Lightroom。", "Lightroom 打开之后才能检查插件。")
         conn = self._connection()
-        if conn.get("connected"):
+        if self._app_connected(conn):
             ver = conn.get("plugin_version")
             return _item(PLUGIN, READY, "插件已连接" + (f"（版本 {ver}）。" if ver else "。"))
         if conn.get("state") == "connecting" or self._autolaunching():
             return _item(PLUGIN, WAIT, "正在连接 Lightroom 的插件，请稍候…")
+        if conn.get("borrowing") and conn.get("claude_alive") is False:
+            # 借用 AI 助手通道时，助手进程不在：问题在 AI 那一侧（见 AI 项），不要叫用户去重新载入插件
+            return _item(PLUGIN, WAIT, "等待 AI 助手恢复与 Lightroom 的连接…", "这一项不用处理，请看下面“AI 助手”一项。")
         return _item(PLUGIN, TODO, "Lightroom 已经打开，但插件还没连上。", HINT_PLUGIN)
 
     @staticmethod
@@ -211,6 +248,10 @@ class WizardChecker:
         name = p.get("name") or "AI 来源"
         title_text = f"{name}：" + (p.get("reason") or "状态未知。")
         if p.get("available"):
+            conn = self._connection()
+            if conn.get("ai_side") is False and self._app_connected(conn):
+                # 插件已连上软件，AI 那一侧（常驻助手里的 Lightroom 服务）还没连上：归到这一项提示
+                return _item(AI, WAIT, f"{name}：已安装，正在连接 Lightroom…", HINT_AI_SIDE, ACT_AI)
             return _item(AI, READY, title_text, p.get("next_step") or "", ACT_AI)
         hint = p.get("next_step") or "请到设置里换一个可用的 AI 来源，或按上面的提示处理。"
         return _item(AI, TODO, title_text, hint, ACT_AI)

@@ -28,7 +28,7 @@ ICON_ICO = ASSETS / "latos-hue-ribbon.ico"
 WIDTH, HEIGHT = 460, 280
 TITLE = "Latos Hue 修图助手"
 WATCHDOG_SECONDS = 20.0
-MIN_SECONDS = 3.5                    # 最短停留（从窗口系统启动算起）：主界面加载很快时，也让图标和名称完整露出一下（仪式感）
+MIN_SECONDS = 1.5                    # 最短停留（从窗口系统启动算起）：主界面加载很快时，也让图标和名称完整露出一下（仪式感）
 CORNER = 32                          # 圆角直径（像素）
 
 # 进度文字（大白话）

@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import subprocess
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 from lr_autostart import valid_lightroom_path
@@ -22,6 +25,7 @@ SETTINGS_FILE = Path.home() / "LrMcp" / "app_settings.json"
 APP_VERSION = "1.1.0"                   # 桌面软件 Latos Hue 的版本（发布标签 v1.1.0）
 PROJECT_URL = "https://github.com/Denvolatos/lightroom-mcp-latos-hue"
 DATA_DIR_TEXT = "~/LrMcp"
+READ_RETRY_SECONDS = 0.3                # 设置文件读失败时，隔这么久再试一次
 
 EDGE_CHOICES = (768, 1024, 1536, 2048)  # 与界面里"预览清晰度"的可选档位一致
 DEFAULT_PROVIDER = "claude"
@@ -75,27 +79,41 @@ def _is_within(child: Path, parent: Path) -> bool:
     return c == p or c.startswith(p.rstrip("\\/") + os.sep)
 
 
-def validate_folder(path: str) -> dict:
-    """返回 {"ok": bool, "message": 中文原因, "exists": bool, "path": 规范化后的路径}。
-    不存在但位置合法时 ok=True、exists=False（由界面询问是否创建）。"""
-    raw = (path or "").strip().strip('"')
-    bad = lambda msg: {"ok": False, "message": msg, "exists": False, "path": raw}
+def _folder_format(path) -> tuple:
+    """只看路径格式（不访问磁盘）：返回 (规范化后的 Path 或 None, 中文原因, 原始文本)。"""
+    raw = (path or "").strip().strip('"') if isinstance(path, str) or path is None else ""
     if not raw:
-        return bad("请选择软件文件夹。")
+        return None, "请选择软件文件夹。", raw
     if raw.startswith("\\\\") or raw.startswith("//"):
-        return bad("不支持网络路径，请选择本机文件夹。")
+        return None, "不支持网络路径，请选择本机文件夹。", raw
     p = Path(raw)
     if not p.is_absolute() or not p.drive:
-        return bad("请填写完整的本机路径（例如 C:\\Users\\用户名\\Pictures\\修图助手）。")
+        return None, "请填写完整的本机路径（例如 C:\\Users\\用户名\\Pictures\\修图助手）。", raw
     try:
         p = Path(os.path.abspath(raw))
     except (OSError, ValueError):
-        return bad("路径无效。")
+        return None, "路径无效。", raw
     if p.parent == p:
-        return bad("不能使用磁盘根目录，请选择一个文件夹。")
+        return None, "不能使用磁盘根目录，请选择一个文件夹。", raw
     for root in _protected_roots():
         if _is_within(p, root):
-            return bad("不能使用系统或程序目录，请选择其他位置。")
+            return None, "不能使用系统或程序目录，请选择其他位置。", raw
+    return p, "", raw
+
+
+def folder_format_ok(path) -> bool:
+    """读取已保存的设置时用：只校验格式，不要求文件夹现在存在或可写（移动硬盘暂时没接上、盘符暂时不在、
+    “受控文件夹访问”拦截了写入测试时都要保留原值）。存在与否、能否写入由运行时判断并提示（向导、导入、导出）。"""
+    return _folder_format(path)[0] is not None
+
+
+def validate_folder(path: str) -> dict:
+    """返回 {"ok": bool, "message": 中文原因, "exists": bool, "path": 规范化后的路径}。
+    不存在但位置合法时 ok=True、exists=False（由界面询问是否创建）。"""
+    p, why, raw = _folder_format(path)
+    bad = lambda msg: {"ok": False, "message": msg, "exists": False, "path": raw}
+    if p is None:
+        return bad(why)
     if p.exists():
         if not p.is_dir():
             return bad("该路径是文件，不是文件夹。")
@@ -186,8 +204,9 @@ def clean_lightroom_path(v) -> str:
     return valid_lightroom_path(v) or ""
 
 
-def clean_export_field(key: str, v):
-    """导出相关字段的单项校验：合法返回规范值，不合法返回 None（export_size 的合法值 0 也会返回 0，故用 is None 判断）。"""
+def clean_export_field(key: str, v, loading: bool = False):
+    """导出相关字段的单项校验：合法返回规范值，不合法返回 None（export_size 的合法值 0 也会返回 0，故用 is None 判断）。
+    loading=True（读取已保存的设置）：导出文件夹只校验格式，所在磁盘暂时不在也保留原值。"""
     if key == "export_format":
         return v if isinstance(v, str) and v in EXPORT_FORMATS else None
     if key == "export_metadata":
@@ -204,6 +223,8 @@ def clean_export_field(key: str, v):
         v = v.strip()
         if not v:
             return ""
+        if loading:
+            return os.path.abspath(v) if folder_format_ok(v) else None
         return os.path.abspath(v) if validate_folder(v)["ok"] else None
     return None
 
@@ -221,7 +242,8 @@ def sanitize(data) -> dict:
     d = defaults()
     out["schema"] = SCHEMA_VERSION
     bf = out.get("base_folder")
-    out["base_folder"] = bf.strip() if isinstance(bf, str) and bf.strip() and validate_folder(bf)["ok"] else d["base_folder"]
+    # 只校验格式并保留原值（与 gallery_folder 一样）：磁盘暂时不在时不能清空，否则下一次任何保存都会把空值写回文件
+    out["base_folder"] = bf.strip() if isinstance(bf, str) and folder_format_ok(bf) else d["base_folder"]
     gf = out.get("gallery_folder")
     gallery = validate_gallery_folder(gf, must_exist=False) if isinstance(gf, str) else {"ok": False}
     out["gallery_folder"] = gallery["path"] if gallery["ok"] else ""
@@ -238,7 +260,7 @@ def sanitize(data) -> dict:
     out["wizard_done"] = out["wizard_done"] if isinstance(out.get("wizard_done"), bool) else d["wizard_done"]
     out["check_updates"] = out["check_updates"] if isinstance(out.get("check_updates"), bool) else d["check_updates"]
     for k in EXPORT_FIELD_LABELS:
-        c = clean_export_field(k, out.get(k))
+        c = clean_export_field(k, out.get(k), loading=True)
         out[k] = d[k] if c is None else c
     return out
 
@@ -256,36 +278,85 @@ def restrict_to_current_user(path: Path) -> None:
         pass
 
 
+def _same_folder(a, b) -> bool:
+    """两个文件夹设置是否指同一个位置（只比较文本，不访问磁盘）。"""
+    a = a.strip() if isinstance(a, str) else ""
+    b = b.strip() if isinstance(b, str) else ""
+    if not a or not b:
+        return a == b
+    try:
+        return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+    except (OSError, ValueError):
+        return a == b
+
+
 class SettingsStore:
     def __init__(self, path: Path | None = None, restrict=restrict_to_current_user):
         self.path = Path(path) if path is not None else SETTINGS_FILE
         self._restrict = restrict
+        self._lock = threading.RLock()          # js_api 每次调用都在独立线程里，导出服务也会调 update
         self.data = self.load()
 
-    def load(self) -> dict:
+    def _read(self):
+        """读一次文件。返回 (内容, 是否出错)；文件不存在不算出错。utf-8-sig：老版记事本另存会加 BOM。"""
         try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            raw = json.loads(self.path.read_text(encoding="utf-8-sig"))
+        except FileNotFoundError:
+            return None, False
         except (OSError, ValueError):
-            raw = None
+            return None, True
+        return (raw, False) if isinstance(raw, dict) else (None, True)
+
+    def load(self) -> dict:
+        """读设置。读失败（杀毒/同步软件占着文件、内容损坏）先重试一次；仍失败就把坏文件改名为 .bad-时间戳 留档，
+        并按“已有设置文件”处理（provider_chosen 不判成 False，不会被当成全新安装要求重新选 AI）。"""
+        raw, failed = self._read()
+        if failed:
+            time.sleep(READ_RETRY_SECONDS)
+            raw, failed = self._read()
+        if failed:
+            try:
+                bad = self.path.with_name(self.path.name + ".bad-" + time.strftime("%Y%m%d-%H%M%S"))
+                os.replace(self.path, bad)
+            except OSError:
+                pass
+            raw = {}
         return sanitize(raw)
 
     def save(self, data: dict) -> None:
         text = json.dumps(data, ensure_ascii=False, indent=2)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_name(self.path.name + ".tmp")
-        tmp.write_text(text, encoding="utf-8")
-        self._restrict(tmp)
-        os.replace(tmp, self.path)
-        self.data = data
+        with self._lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_name(f"{self.path.name}.{secrets.token_hex(4)}.tmp")
+            try:
+                tmp.write_text(text, encoding="utf-8")
+                self._restrict(tmp)
+                os.replace(tmp, self.path)
+            except OSError:
+                try:
+                    tmp.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                raise
+            self.data = data
 
     def update(self, changes: dict, *, selectable=lambda pid: pid == DEFAULT_PROVIDER, create_missing: bool = False) -> dict:
         """校验并保存。返回 {"ok", "errors": {字段: 中文原因}, "needs_create": bool, "settings": 当前设置}。
-        只处理 changes 里出现的字段；任一字段校验失败则整体不保存。"""
+        只处理 changes 里出现的字段；任一字段校验失败则整体不保存。整个过程持锁：并发保存不会丢失彼此的修改。"""
+        with self._lock:
+            return self._update(changes, selectable, create_missing)
+
+    def _update(self, changes: dict, selectable, create_missing: bool) -> dict:
         new = dict(self.data)
         errors: dict[str, str] = {}
         needs_create = False
-        if "base_folder" in changes:
-            v = validate_folder(str(changes["base_folder"] or ""))
+        raw_base = str(changes.get("base_folder") or "").strip().strip('"') if "base_folder" in changes else None
+        if raw_base is not None and _same_folder(raw_base, self.data.get("base_folder")):
+            pass        # 没有变化（设置对话框每次保存都会带上它）：不再校验，免得文件夹暂时不在时连其他开关都存不进去
+        elif raw_base == "":
+            new["base_folder"] = ""     # 允许空值（还没选或想清除），由环境检查向导单独提醒
+        elif raw_base is not None:
+            v = validate_folder(raw_base)
             if not v["ok"]:
                 errors["base_folder"] = v["message"]
             elif not v["exists"]:

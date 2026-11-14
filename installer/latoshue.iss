@@ -38,6 +38,8 @@ InfoBeforeFile=latoshue_before.txt
 InfoAfterFile=latoshue_after.txt
 ; only offer to close Latos Hue itself - never Lightroom (the plug-in files are not matched by this filter)
 CloseApplications=yes
+; the app holds this mutex while it runs (app/main.py MUTEX_NAME): Setup asks to close it first
+AppMutex=Local\LatosHue.SingleInstance
 CloseApplicationsFilter={#AppExe},latoshue-helper.exe
 RestartApplications=no
 

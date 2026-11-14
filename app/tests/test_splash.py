@@ -236,16 +236,23 @@ def test_api_progress_text_is_forwarded(api):
     api._splash_text("没有启动界面也不报错")
 
 
+DEFAULT_MIN_SECONDS = sp.MIN_SECONDS                  # 导入时记下（下面的自动夹具会把它改成 0）
+
+
+def test_default_min_display_time_is_short():
+    assert DEFAULT_MIN_SECONDS == 1.5                      # 1.1.1：从 3.5 秒缩短，主界面准备好就尽快显示
+
+
 def test_min_display_time_delays_handover_but_not_the_caller():
     now = [100.0]
     slept = []
     s, m = FakeWin("splash"), FakeWin("main")
-    c = sp.SplashController(s, m, timer_factory=FakeTimer, min_seconds=3.5, clock=lambda: now[0], sleep=slept.append)
+    c = sp.SplashController(s, m, timer_factory=FakeTimer, min_seconds=1.5, clock=lambda: now[0], sleep=slept.append)
     c.start()
     now[0] = 100.8                                    # 主界面 0.8 秒就准备好了
     assert c.finish() is True
     c._handover.join(5)
-    assert len(slept) == 1 and abs(slept[0] - 2.7) < 1e-6          # 还要再停 2.7 秒
+    assert len(slept) == 1 and abs(slept[0] - 0.7) < 1e-6          # 还要再停 0.7 秒
     assert [x[0] for x in m.calls] == ["show"] and [x[0] for x in s.calls] == ["destroy"]
 
 
@@ -253,12 +260,12 @@ def test_min_display_time_not_waited_when_already_elapsed_or_no_splash():
     now = [0.0]
     slept = []
     s, m = FakeWin("splash"), FakeWin("main")
-    c = sp.SplashController(s, m, timer_factory=FakeTimer, min_seconds=3.5, clock=lambda: now[0], sleep=slept.append)
+    c = sp.SplashController(s, m, timer_factory=FakeTimer, min_seconds=1.5, clock=lambda: now[0], sleep=slept.append)
     c.start()
     now[0] = 25.0                                     # 看门狗到点：早就超过最短停留
     finish_and_wait(c)
     assert slept == []
-    c2 = sp.SplashController(None, FakeWin("main"), timer_factory=FakeTimer, min_seconds=3.5,
+    c2 = sp.SplashController(None, FakeWin("main"), timer_factory=FakeTimer, min_seconds=1.5,
                              clock=lambda: 0.0, sleep=slept.append)
     c2.start()
     assert c2.finish() is True

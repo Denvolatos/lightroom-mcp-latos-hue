@@ -10,12 +10,14 @@ import secrets
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 import webview
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import frozen  # noqa: E402
+import connection as connmod  # noqa: E402
 from adjustments import AdjustmentTracker, fmt_value  # noqa: E402
 from names import param_name  # noqa: E402
 import lr_autostart  # noqa: E402
@@ -37,10 +39,15 @@ from library_service import LibraryService  # noqa: E402
 from preview import PreviewManager, PreviewServer, PreviewStore  # noqa: E402
 from photo_library import PhotoLibrary, ThumbStore  # noqa: E402
 from ports import STATE_DIR  # noqa: E402
+import ports as portsmod  # noqa: E402
 
 WEB = frozen.web_dir() / "index.html"
 MSG_AI_BUSY = "AI 正在处理（对话、AI 挑片或“记成经验”还没结束）。请等它完成，或先点“停止”，再试一次。"
 MSG_PLAN_STALE = "请先重新预演这批照片。"
+UNKNOWN_STATUS = {"available": False, "state": "unknown", "reason": "状态未知。", "next_step": ""}
+ABOUT_QUERY_TIMEOUT = 3.0        # 打开设置时向 Lightroom 要版本号：请求本身的超时
+ABOUT_WAIT_SECONDS = 1.5         # 设置对话框最多为它等这么久；没等到先显示“未知”，结果到了记进缓存，下次打开就有
+LR_VERSION_TTL = 300.0           # Lightroom 版本号缓存多久
 MSG_VERSION_STALE = "版本内容已经变了，或者这次确认已经用过。请重新点“应用版本”查看差异。"
 
 
@@ -71,10 +78,14 @@ class Api:
         self._probe = None                       # 未选择时用来显示各来源“已安装 / 已登录”的探测器（用到才建）
         self._state_file = state_file
         self._session = self._provider           # 兼容旧名：Backend / LrService 只用 alive、busy、restart 等
-        # 常驻模式：窗口不单独起 Bridge，借用助手里那个服务的通道（Lightroom 插件同时轮询 3 个以上服务会变慢，见 DEV_NOTES）
-        self._lr = (LrService(state_file=state_file, rpc_token=self._rpc_token, alive=lambda: self._session.alive,
-                              restart_hook=lambda: not self._session.busy and self._session.restart())
-                    if self._persistent else LrService())
+        # 常驻模式最终会借用助手里那个服务的通道，窗口不再单独起 Bridge（Lightroom 插件同时轮询 3 个以上服务会变慢，见 DEV_NOTES）。
+        # 但只有 claude 真的启动、它那条通道也连上了 Lightroom 之后才切过去（见 _watch_side）；在那之前、或 claude 没装/没登录/
+        # 启动失败时，一直用窗口自己的 Bridge，图库、导出、预设、版本照常可用。
+        self._borrowing = False
+        self._startup_errors: list[str] = []     # 启动时没能完成的步骤（见 _start_background）
+        self._mode_lock = threading.RLock()
+        self._closing = threading.Event()
+        self._lr = self._make_lr(False)
         self._hub = ConfirmHub(self._emit, current_values=self._lr.current_values)
         self._hub.start()
         self._preview = PreviewManager(self._lr, PreviewServer(PreviewStore()), self._emit)
@@ -97,8 +108,9 @@ class Api:
         # 环境检查向导（0.14.0）：四项只读检查，耗时的在后台线程；页面只能取状态、点按钮，不能传路径
         self._wizard = wizardmod.WizardChecker(lambda: self._settings.data, find_lightroom=lr_autostart.find_lightroom,
                                                is_running=lr_autostart.is_running,
-                                               get_connection=lambda: self._backend.status(),
-                                               get_provider=self._wizard_provider, get_autolaunch=self._autolaunch.state)
+                                               get_connection=self._wizard_connection,
+                                               get_provider=self._wizard_provider, get_autolaunch=self._autolaunch.state,
+                                               get_old_servers=lambda: portsmod.find_old_servers(appsettings.APP_VERSION))
         # 检查更新（0.15.0）：只提示，不下载不安装；启动时在后台查一次（设置可关），页面只能取状态、点按钮，不传地址
         self._updates = updatemod.AppUpdateChecker(appsettings.APP_VERSION,
                                                    lambda: self._settings.data.get("check_updates") is True)
@@ -117,25 +129,33 @@ class Api:
                                    has_adjustments=lambda: any(r.get("status") == "已应用" for r in self._tracker.rows))
 
     def _start_background(self) -> None:
-        """窗口一出现就预热：Bridge、常驻 claude（含 lightroom_mcp 与确认服务）同时启动，之后每条消息零启动开销。"""
+        """窗口一出现就预热：Bridge、常驻 claude（含 lightroom_mcp 与确认服务）同时启动，之后每条消息零启动开销。
+        每一步单独兜底：任何一步出错只把原因推给页面，后面的照常做；连接巡检（backend.start）最先启动，一定会执行。
+        图库刷新放在最后：它会推事件给页面，而页面还没加载好时推事件会等待，不能挡住前面的步骤。"""
         self._splash_text(splashmod.TEXT_SERVICES)
-        self._updates.start_background()         # 开关为开时后台查一次（24 小时内查过就用缓存）；失败静默
-        launching = self._autolaunch.start()     # 开关为开且 Lightroom 没在运行时，后台最小化启动它（不阻塞界面）
-
-        def warm() -> None:
-            self._lr.start()
-        threading.Thread(target=warm, daemon=True).start()
+        launching = bool(self._startup_step("自动启动 Lightroom", self._autolaunch.start))   # 开关为开时后台最小化启动
+        self._startup_step("Lightroom 通道", lambda: threading.Thread(target=self._lr.start, daemon=True).start())
+        self._startup_step("连接巡检", self._backend.start)
+        self._startup_step("检查更新", self._updates.start_background)   # 开关为开时后台查一次；失败静默
         if self._persistent:
-            token = self._hub.begin_session()
-            self._provider.start({"LRAPP_PORT": str(self._hub.port), "LRAPP_TOKEN": token,
-                                  "LRAPP_RPC_TOKEN": self._rpc_token})
-        self._preview.server.start()
-        self._preview.start()
-        self._photolib.server.start()
-        self._photolib.start()
-        self._photolib.refresh()                # 软件启动时读一次；连接恢复后再补读
-        self._backend.start()
+            self._startup_step("AI 助手", self._start_resident)
+        self._startup_step("预览服务", lambda: (self._preview.server.start(), self._preview.start()))
+        self._startup_step("图库服务", lambda: (self._photolib.server.start(), self._photolib.start()))
         self._splash_text(splashmod.TEXT_CONNECT_LR if launching else splashmod.TEXT_LOADING)
+        self._startup_step("读取图库", self._photolib.refresh)          # 软件启动时读一次；连接恢复后再补读
+
+    def _startup_step(self, name: str, fn):
+        """启动时的一步：出错不往外抛，把原因作为一条错误消息推给页面（沿用 onClaudeEvent 的 error 事件）。"""
+        try:
+            return fn()
+        except Exception as e:                   # noqa: BLE001
+            self._startup_errors.append(name)
+            try:
+                self._emit({"type": "error", "message": f"启动时“{name}”没能完成（{type(e).__name__}）。"
+                                                        "其他功能不受影响；如果一直不正常，请重新打开软件。"})
+            except Exception:                    # noqa: BLE001
+                pass
+            return None
 
     def _splash_text(self, text: str) -> None:
         if self._splash is not None:
@@ -167,38 +187,83 @@ class Api:
         if not self._ai_chosen() or want == self._provider.id or not is_selectable(want):
             return False
         next_persistent = (self._preferred_persistent and want == "claude") if want in ("claude", "codex") else self._persistent
-        old = self._provider
-        mode_changed = next_persistent != self._persistent
-        if mode_changed:
+        with self._mode_lock:
+            old = self._provider
+            self._persistent = next_persistent
+            self._state_file = STATE_DIR / "claude_side.json" if self._persistent else None
+            self._provider = create_provider(want, state_file=self._state_file, persistent=self._persistent)
+            self._session = self._provider
+            if self._borrowing:
+                # 借用的是旧 claude 的通道，它马上要关：先换回窗口自己的 Bridge
+                self._switch_lr(False)
+            else:
+                self._backend.session = self._provider
+            old.close()
+        if self._persistent:
+            self._start_resident()
+        return True
+
+    # ---- 窗口的 Lightroom 通道：自己的 Bridge / 借用常驻 claude 的通道 ----
+    def _make_lr(self, borrow: bool):
+        if borrow:
+            return LrService(state_file=self._state_file, rpc_token=self._rpc_token, alive=lambda: self._session.alive,
+                             restart_hook=lambda: not self._session.busy and self._session.restart())
+        return LrService()
+
+    def _switch_lr(self, borrow: bool) -> None:
+        """换窗口的 Lightroom 通道，并让所有持有它的功能（预览、巡检、图库、导入、导出、挑片、预设）指向新的对象。"""
+        with self._mode_lock:
             self._backend.stop()
             self._preview.stop()
             self._lr.stop()
-            self._persistent = next_persistent
-            self._state_file = STATE_DIR / "claude_side.json" if self._persistent else None
-        self._provider = create_provider(want, state_file=self._state_file, persistent=self._persistent)
-        self._session = self._provider
-        old.close()
-        if mode_changed:
-            self._lr = (LrService(state_file=self._state_file, rpc_token=self._rpc_token,
-                                  alive=lambda: self._session.alive,
-                                  restart_hook=lambda: not self._session.busy and self._session.restart())
-                        if self._persistent else LrService())
+            self._borrowing = borrow
+            self._lr = self._make_lr(borrow)
             self._hub.current_values = self._lr.current_values
             self._preview = PreviewManager(self._lr, PreviewServer(PreviewStore()), self._emit)
             self._preview.set_edge(self._settings.data["preview_edge"])
             self._backend = Backend(self._lr, self._session, self._tracker, self._emit,
                                     state_file=None, previews=self._preview,
-                                 hold_restart=self._autolaunch_in_grace)
+                                    hold_restart=self._autolaunch_in_grace)
             self._rebind_lr_services()
-            threading.Thread(target=self._lr.start, daemon=True).start()
+            if borrow:
+                self._lr.start()                 # 借用模式的 start 只是建对象，不阻塞
+            else:
+                threading.Thread(target=self._lr.start, daemon=True).start()
             self._preview.server.start()
             self._preview.start()
             self._backend.start()
-        else:
-            self._backend.session = self._provider
-        if self._persistent:
-            self._provider.start(self._provider_env())
-        return True
+
+    def _start_resident(self) -> bool:
+        """启动常驻 claude（失败不抛出），并在后台等它那条通道连上 Lightroom 后再切到借用模式。返回是否启动成功。"""
+        provider = self._provider
+        try:
+            ok = bool(provider.start(self._provider_env()))
+        except Exception:                        # noqa: BLE001 - 启动失败：继续用窗口自己的 Bridge
+            ok = False
+        threading.Thread(target=self._watch_side, args=(provider,), daemon=True).start()
+        return ok
+
+    def _side_ready(self, provider) -> bool:
+        if not bool(getattr(provider, "alive", False)) or self._state_file is None:
+            return False
+        side = connmod.read_side_state(self._state_file)
+        return bool(side.get("connected") and side.get("rpc_port"))
+
+    def _watch_side(self, provider, interval: float = 1.0) -> None:
+        """常驻 claude 那条通道连上 Lightroom 之后才切到借用模式（不在处理请求时切）。claude 没装/没登录时一直等着，
+        窗口继续用自己的 Bridge；以后 claude 被巡检重建并连上了，照样会切过去。来源换掉或软件关闭就结束。"""
+        while not self._closing.is_set():
+            if self._provider is not provider or not self._persistent or self._borrowing:
+                return
+            try:
+                if self._side_ready(provider) and not self._busy and not bool(getattr(provider, "busy", False)):
+                    with self._mode_lock:
+                        if self._provider is provider and self._persistent and not self._borrowing:
+                            self._switch_lr(True)
+                    return
+            except Exception:                    # noqa: BLE001 - 读状态出错：下次再看
+                pass
+            self._closing.wait(interval)
 
     def _rebind_lr_services(self) -> None:
         """换了 LrService / 预览服务（Claude 常驻会话与 Codex 每轮启动之间切换）后，让所有持有它们的功能指向新的对象，
@@ -209,14 +274,24 @@ class Api:
         self._pick.store = self._preview.server.store
 
     def _shutdown(self) -> None:
-        self._autolaunch.stop()                  # 只停止等待；不会关闭用户的 Lightroom
-        self._backend.stop()
-        self._preview.stop()
-        self._photolib.stop()
-        self._photolib.server.stop()
-        self._provider.close()
-        self._hub.stop()
-        self._lr.stop()
+        """关闭软件时依次停掉各项服务。每一步单独兜底：前面哪一步出错，后面的（尤其是关 claude 进程树、确认服务、
+        撤下 Bridge 公告）照样执行。"""
+        closing = getattr(self, "_closing", None)
+        if closing is not None:
+            closing.set()                        # 让等待切换通道的后台线程结束
+        steps = (lambda: self._autolaunch.stop(),        # 只停止等待；不会关闭用户的 Lightroom
+                 lambda: self._backend.stop(),
+                 lambda: self._preview.stop(),
+                 lambda: self._photolib.stop(),
+                 lambda: self._photolib.server.stop(),
+                 lambda: self._provider.close(),
+                 lambda: self._hub.stop(),
+                 lambda: self._lr.stop())
+        for step in steps:
+            try:
+                step()
+            except Exception:                    # noqa: BLE001 - 关闭时出错也要继续关后面的
+                pass
 
     def _tap(self, ev: dict) -> None:
         """软件内部事件联动图库：Lightroom 选区变化 -> 高亮；导入完成 -> 刷新图库；AI 挑片写入 -> 刷新星级与旗标。"""
@@ -547,24 +622,63 @@ class Api:
     # ---- 设置 ------------------------------------------------------
     def get_settings(self, include_status: bool = True) -> dict:
         """当前设置、AI 来源列表（含状态）、关于信息。include_status=False（启动时）不做登录检测，只取设置值。"""
-        cur = self._provider.status() if include_status else {"available": True, "state": "unknown", "reason": "", "next_step": ""}
+        unknown = {"available": True, "state": "unknown", "reason": "", "next_step": ""}
         self._pending_lr_path = ""
         detected = lr_autostart.find_lightroom(self._settings.data.get("lightroom_path") or "") if include_status else None
+        claude_st = self._provider_status("claude") if include_status else unknown
+        codex_st = self._provider_status("codex") if include_status else unknown
         return {"lightroom_detected": detected or "", "settings": dict(self._settings.data),
-                "providers": available_providers(cur if self._provider.id == "claude" or not include_status else None,
-                                                 cur if self._provider.id == "codex" or not include_status else None),
+                "providers": available_providers(claude_st, codex_st),
                 "current_provider": self._provider.id, "edges": list(appsettings.EDGE_CHOICES),
                 "default_base_folder": appsettings.default_base_folder(),
-                "about": self._about(10 if include_status else 3)}
+                "about": self._about(ABOUT_QUERY_TIMEOUT if include_status else None)}
 
-    def _about(self, timeout: float = 3) -> dict:
-        """关于信息。timeout：向 Lightroom 问版本号最多等多久。启动时（界面等着它才显示）用 3 秒，
-        用户打开设置时用 10 秒（PR #7 放宽的值）。"""
-        lr_ver = None
+    def _status_probe(self):
+        if getattr(self, "_probe", None) is None:
+            self._probe = StatusProbe()
+        return self._probe
+
+    def _provider_status(self, pid: str) -> dict:
+        """某个 AI 来源的状态。当前来源用它自己的 status()；另一个用常驻的探测器 StatusProbe（各自 30 秒缓存），
+        不再每次新建实例、每次都跑一遍 claude/codex 的登录检测子进程。"""
+        if pid == self._provider.id:
+            return self._provider.status()
+        inst = getattr(self._status_probe(), "_" + pid, None)
         try:
-            if self._lr.connected and getattr(self._lr, "_bridge", None) is not None:
-                lr_ver = str(self._lr._bridge.call("status", timeout=timeout).get("lightroom_version") or "") or None
-        except Exception:
+            return inst.status() if inst is not None else dict(UNKNOWN_STATUS)
+        except Exception:                        # noqa: BLE001
+            return dict(UNKNOWN_STATUS)
+
+    def _lr_version(self, timeout: float | None) -> str | None:
+        """Lightroom 版本号（缓存 LR_VERSION_TTL 秒）。timeout=None 只读缓存；否则在后台线程里问，最多等 ABOUT_WAIT_SECONDS。"""
+        cache = getattr(self, "_lr_ver_cache", None)          # (取到的时间, 版本号)
+        if cache and cache[1] and time.monotonic() - cache[0] < LR_VERSION_TTL:
+            return cache[1]
+        if timeout is None:
+            return None
+        bridge = getattr(self._lr, "_bridge", None)
+        if not self._lr.connected or bridge is None:
+            return None
+        got = {}
+
+        def ask() -> None:
+            try:
+                ver = str(bridge.call("status", timeout=timeout).get("lightroom_version") or "") or None
+            except Exception:                    # noqa: BLE001
+                return
+            got["v"] = ver
+            if ver:
+                self._lr_ver_cache = (time.monotonic(), ver)
+        t = threading.Thread(target=ask, daemon=True)
+        t.start()
+        t.join(min(timeout, ABOUT_WAIT_SECONDS))
+        return got.get("v")
+
+    def _about(self, timeout: float | None = ABOUT_QUERY_TIMEOUT) -> dict:
+        """关于信息。timeout：向 Lightroom 要版本号的请求超时；None（启动时，界面等着它才显示）不问 Lightroom，只用缓存。"""
+        try:
+            lr_ver = self._lr_version(timeout)
+        except Exception:                        # noqa: BLE001
             lr_ver = None
         return {"app_version": appsettings.APP_VERSION, "lightroom_version": lr_ver,
                 "plugin_version": getattr(self._lr, "plugin_version", None), "data_dir": appsettings.DATA_DIR_TEXT,
@@ -599,11 +713,16 @@ class Api:
             changes["lightroom_path"] = ""
         elif choice == "pending" and self._pending_lr_path:
             changes["lightroom_path"] = self._pending_lr_path
+        before = {k: self._settings.data.get(k) for k in ("base_folder", "gallery_folder")}
         r = self._settings.update(changes, selectable=is_selectable, create_missing=bool(create_missing))
         if r["ok"]:
             self._pending_lr_path = ""
             if "preview_edge" in changes:
                 self._preview.set_edge(r["settings"]["preview_edge"])
+            if any(r["settings"].get(k) != v for k, v in before.items()):
+                # 换了工作文件夹或浏览目录：图库按新文件夹重新读取，向导下一次重新检查（与 wizard_pick_folder 一致）
+                self._wizard.invalidate()
+                self._photolib.refresh()
         return r
 
     def choose_lightroom_path(self) -> dict:
@@ -625,16 +744,27 @@ class Api:
         return {"ok": True, "path": ok, "message": ""}
 
     # ---- 环境检查向导 ----------------------------------------------
+    def _wizard_connection(self) -> dict:
+        """向导用的连接状态：Backend.status() 再加两项，让向导把“插件没连上”和“AI 那一侧没连上”分开说：
+        borrowing：窗口是否借用常驻 claude 的通道；ai_side：常驻 claude 里的 Lightroom 服务是否连上（不用常驻会话时为 None）。"""
+        st = dict(self._backend.status())
+        st["borrowing"] = bool(getattr(self, "_borrowing", False))
+        st["ai_side"] = None
+        if self._persistent and self._state_file is not None:
+            alive = bool(getattr(self._provider, "alive", False))
+            st["ai_side"] = alive and bool(connmod.read_side_state(self._state_file).get("connected"))
+        return st
+
     def _wizard_provider(self) -> dict:
         """设置里选中的 AI 来源的状态（名称 + available/state/reason/next_step）；与 get_settings 用同一套文案。
         还没选择时返回 {"chosen": False, "choices": [...]}：每个可选来源一项，带安装/登录状态和数据去向说明。"""
         if not self._ai_chosen():
-            if self._probe is None:
-                self._probe = StatusProbe()
-            return {"chosen": False, "choices": [p for p in self._probe.rows() if p.get("selectable")]}
+            return {"chosen": False, "choices": [p for p in self._status_probe().rows() if p.get("selectable")]}
         want = self._settings.data["provider"]
-        cur = self._provider.status()
-        for p in available_providers(cur if self._provider.id == "claude" else None, cur if self._provider.id == "codex" else None):
+        # 只检查选中的那个来源（当前来源或带缓存的探测器）；另一个不检查，向导每 5 秒刷新时不再起登录检测子进程
+        want_st = self._provider_status(want)
+        for p in available_providers(want_st if want == "claude" else dict(UNKNOWN_STATUS),
+                                     want_st if want == "codex" else dict(UNKNOWN_STATUS)):
             if p["id"] == want:
                 return p
         return {"name": "AI 来源", "available": False, "state": "unknown", "reason": "没有找到所选的 AI 来源。", "next_step": ""}
@@ -671,6 +801,19 @@ class Api:
             return {"ok": True, "message": f"已选择，但 AI 没能启动：{type(e).__name__}。请点“重新检查”。"}
         self._wizard.invalidate()
         return {"ok": True, "message": ""}
+
+    def wizard_stop_old_servers(self) -> dict:
+        """向导“旧版服务”一项的按钮：结束登记文件里版本较旧、进程名核对无误的 lrmcp 服务，并删除它们的登记文件。不收任何参数。"""
+        try:
+            r = portsmod.stop_old_servers(appsettings.APP_VERSION)
+        except Exception as e:                   # noqa: BLE001
+            self._wizard.invalidate()
+            return {"ok": False, "stopped": 0, "message": f"没能关闭旧版服务（{type(e).__name__}）。"}
+        self._wizard.invalidate()
+        if r["failed"]:
+            return {"ok": False, "stopped": len(r["stopped"]),
+                    "message": f"有 {len(r['failed'])} 个旧版服务没能关闭（可能需要管理员权限）。可以重启电脑，或在任务管理器里结束 lrmcp。"}
+        return {"ok": True, "stopped": len(r["stopped"]), "message": ""}
 
     def wizard_pick_folder(self) -> dict:
         """向导第 1 项的按钮：弹出系统文件夹对话框，选中后直接保存为照片工作文件夹。路径只来自这次点击。"""
@@ -1099,11 +1242,108 @@ class Api:
         return {"ok": True, "edge": self._preview.set_edge(edge)}
 
 
+MAIN_TITLE = "修图助手"                    # 主窗口标题（单实例激活时按它找窗口）
+MUTEX_NAME = "Local\\LatosHue.SingleInstance"   # 安装器 installer/latoshue.iss 的 AppMutex 用同一个名字
+ERROR_ALREADY_EXISTS = 183
+_instance_handle = None                    # 互斥锁句柄：整个进程期间保持打开
+
+
+def acquire_single_instance(name: str = MUTEX_NAME, kernel32=None) -> bool:
+    """占用单实例互斥锁。返回 False 表示已有一个 Latos Hue 在运行。非 Windows 或任何调用失败都返回 True（不阻止启动）。
+    只在图形界面入口（main）里调用；latoshue-helper 的子命令不经过这里，不受影响。"""
+    global _instance_handle
+    if kernel32 is None and os.name != "nt":
+        return True
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k = kernel32
+        if k is None:
+            k = ctypes.WinDLL("kernel32", use_last_error=True)
+            k.CreateMutexW.restype = wintypes.HANDLE
+            k.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+            ctypes.set_last_error(0)
+        handle = k.CreateMutexW(None, False, name)
+        err = k.last_error() if hasattr(k, "last_error") else ctypes.get_last_error()
+        if not handle:
+            return True
+        if err == ERROR_ALREADY_EXISTS:
+            try:
+                k.CloseHandle(handle)
+            except Exception:                    # noqa: BLE001
+                pass
+            return False
+        _instance_handle = handle
+        return True
+    except Exception:                            # noqa: BLE001 - 检查失败不能让软件打不开
+        return True
+
+
+def activate_existing_window(titles=(MAIN_TITLE, splashmod.TITLE), user32=None) -> bool:
+    """把已经在运行的那个实例的窗口拿到前台（最小化的先还原）。主窗口还隐藏着（启动画面阶段）就激活启动画面。"""
+    if user32 is None and os.name != "nt":
+        return False
+    try:
+        if user32 is None:
+            import ctypes
+            user32 = ctypes.windll.user32
+        for title in titles:
+            hwnd = user32.FindWindowW(None, title)
+            if not hwnd or not user32.IsWindowVisible(hwnd):
+                continue
+            if user32.IsIconic(hwnd):
+                user32.ShowWindow(hwnd, 9)       # SW_RESTORE
+            user32.SetForegroundWindow(hwnd)
+            return True
+    except Exception:                            # noqa: BLE001
+        pass
+    return False
+
+
+OLD_WEBVIEW_PREFIX = ".latoshue-webview-"
+
+
+def webview_storage_dir(env=None) -> str | None:
+    """WebView2 的数据目录：固定放在本机 %LOCALAPPDATA%\\LatosHue\\WebView2（不在照片盘上，每次复用，冷启动更快）。
+    配合 pywebview 默认的 private_mode，不保存 Cookie 和网页存储。拿不到或建不了就返回 None（用 pywebview 的默认位置）。"""
+    env = os.environ if env is None else env
+    root = env.get("LOCALAPPDATA")
+    if not root:
+        return None
+    path = Path(root) / "LatosHue" / "WebView2"
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    return str(path)
+
+
+def clean_old_webview_dirs(base: str) -> list[str]:
+    """删除工作文件夹里旧版本留下的 .latoshue-webview-* 目录（只看这一层、只删目录、只删这个前缀）；失败忽略。返回删掉的名字。"""
+    import shutil
+    removed: list[str] = []
+    try:
+        if not base or not os.path.isdir(base):
+            return removed
+        entries = list(os.scandir(base))
+    except OSError:
+        return removed
+    for e in entries:
+        try:
+            if e.name.startswith(OLD_WEBVIEW_PREFIX) and e.is_dir(follow_symlinks=False):
+                shutil.rmtree(e.path, ignore_errors=True)
+                if not os.path.exists(e.path):
+                    removed.append(e.name)
+        except OSError:
+            pass
+    return removed
+
+
 def setup_windows(api, create_window=None, use_splash: bool = True):
     """创建主窗口（先隐藏）和启动窗口，返回启动界面控制器（没有启动界面时为 None，主窗口直接显示）。
     主窗口先创建，保证它是 pywebview 的主窗口：启动窗口关闭不会让程序退出。创建启动窗口出任何错，都退回"直接显示主窗口"。"""
     create_window = create_window or webview.create_window
-    api._window = create_window("修图助手", WEB.as_uri(), js_api=api, width=1440, height=860, min_size=(960, 620),
+    api._window = create_window(MAIN_TITLE, WEB.as_uri(), js_api=api, width=1440, height=860, min_size=(960, 620),
                                 background_color="#17181b", hidden=use_splash)
     if not use_splash:
         return None
@@ -1125,6 +1365,9 @@ def setup_windows(api, create_window=None, use_splash: bool = True):
 
 
 def main() -> None:
+    if not acquire_single_instance():
+        activate_existing_window()               # 已经开着一个：把它拿到前台，这次直接退出（不再起第二套 claude 和 Bridge）
+        return
     api = Api()
     ctrl = setup_windows(api, use_splash=os.environ.get("LRAPP_NO_SPLASH") != "1")
     icon = str(splashmod.ICON_ICO) if splashmod.ICON_ICO.is_file() else None   # 窗口与任务栏图标（丝带）
@@ -1135,22 +1378,13 @@ def main() -> None:
             if ctrl.splash is None:              # 没能创建启动窗口：直接显示主窗口
                 ctrl.finish()
         api._start_background()
-    base = api._settings.data["base_folder"]
-    cache = None
+    base = api._settings.data.get("base_folder") or ""
+    # 旧版本每次在照片工作文件夹里建的 WebView2 临时目录：后台顺带清掉（只删这个前缀的目录，删不掉就算了）
+    threading.Thread(target=clean_old_webview_dirs, args=(base,), daemon=True).start()
     try:
-        if base and os.path.isdir(base):
-            # WebView's private data is temporary and lives on the chosen photo drive.
-            cache = tempfile.TemporaryDirectory(prefix=".latoshue-webview-", dir=base)
-        webview.start(run, icon=icon, storage_path=cache.name if cache else None)
+        webview.start(run, icon=icon, storage_path=webview_storage_dir())
     finally:
-        try:
-            api._shutdown()
-        finally:
-            if cache is not None:
-                try:
-                    cache.cleanup()
-                except OSError:
-                    pass  # WebView may still have files open during shutdown.
+        api._shutdown()
 
 
 if __name__ == "__main__":

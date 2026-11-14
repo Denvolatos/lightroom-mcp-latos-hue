@@ -49,10 +49,13 @@ def test_defaults_when_file_missing(store):
 
 
 @pytest.mark.parametrize("content", ["{坏的", "", "[1,2]", "null", '"x"'])
-def test_corrupt_file_does_not_crash(tmp_path, content):
+def test_corrupt_file_does_not_crash(tmp_path, content, monkeypatch):
+    monkeypatch.setattr(st, "READ_RETRY_SECONDS", 0)
     p = tmp_path / "s.json"
     p.write_text(content, encoding="utf-8")
-    assert st.SettingsStore(p, restrict=lambda x: None).data == st.defaults()
+    # 文件存在但读不出：回退默认值，但不当成全新安装（provider_chosen 不判成 False），坏文件改名留档
+    assert st.SettingsStore(p, restrict=lambda x: None).data == {**st.defaults(), "provider_chosen": True}
+    assert not p.exists() and len(list(tmp_path.glob("s.json.bad-*"))) == 1
 
 
 def test_missing_and_invalid_fields_fall_back(tmp_path):
@@ -81,12 +84,20 @@ def test_existing_photo_folder_is_preserved(tmp_path):
     assert st.SettingsStore(config, restrict=lambda p: None).data["base_folder"] == str(folder)
 
 
-def test_webview_cache_uses_selected_folder_and_is_cleaned(tmp_path, monkeypatch):
+def test_webview_data_lives_in_local_appdata_not_on_the_photo_drive(tmp_path, monkeypatch):
     import main
+    photos, local = tmp_path / "photos", tmp_path / "local"
+    photos.mkdir()
+    old = photos / ".latoshue-webview-abc123"          # 旧版本留下的临时目录
+    (old / "EBWebView").mkdir(parents=True)
+    (old / "EBWebView" / "f").write_text("x", encoding="utf-8")
+    keep_dir, keep_file = photos / "IMG_0001", photos / ".latoshue-webview-note.txt"
+    keep_dir.mkdir()
+    keep_file.write_text("不是目录，不删", encoding="utf-8")
 
     class FakeApi:
         def __init__(self):
-            self._settings = type("Settings", (), {"data": {"base_folder": str(tmp_path)}})()
+            self._settings = type("Settings", (), {"data": {"base_folder": str(photos)}})()
             self.closed = False
         def _start_background(self):
             pass
@@ -95,17 +106,31 @@ def test_webview_cache_uses_selected_folder_and_is_cleaned(tmp_path, monkeypatch
 
     api = FakeApi()
     paths = []
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
     monkeypatch.setattr(main, "Api", lambda: api)
+    monkeypatch.setattr(main, "acquire_single_instance", lambda: True)
     monkeypatch.setattr(main.webview, "create_window", lambda *a, **k: object())
     def start(_callback, *, storage_path, icon):
-        cache = Path(storage_path)
-        assert cache.parent == tmp_path and cache.name.startswith(".latoshue-webview-")
-        assert cache.is_dir()
-        (cache / "temporary").write_text("cache", encoding="utf-8")
-        paths.append(cache)
+        paths.append(Path(storage_path))
     monkeypatch.setattr(main.webview, "start", start)
     main.main()
-    assert api.closed and len(paths) == 1 and not paths[0].exists()
+    assert api.closed and paths == [local / "LatosHue" / "WebView2"] and paths[0].is_dir()
+    import time
+    for _ in range(200):                               # 清理在后台线程里做
+        if not old.exists():
+            break
+        time.sleep(0.01)
+    assert not old.exists() and keep_dir.is_dir() and keep_file.is_file()
+    assert not list(photos.glob(".latoshue-webview-*/"))
+
+
+def test_webview_storage_dir_falls_back_when_unavailable(tmp_path):
+    import main
+    assert main.webview_storage_dir({}) is None
+    blocker = tmp_path / "file"
+    blocker.write_text("x", encoding="utf-8")
+    assert main.webview_storage_dir({"LOCALAPPDATA": str(blocker)}) is None     # 建不了目录：用 pywebview 默认位置
+    assert main.clean_old_webview_dirs("") == [] and main.clean_old_webview_dirs(str(tmp_path / "gone")) == []
 
 
 def test_atomic_write_roundtrip_and_restrict_called(tmp_path):
@@ -300,9 +325,10 @@ def test_switch_to_codex_updates_import_and_export_services(api, monkeypatch):
     monkeypatch.setattr(main, "PreviewManager", lambda *a, **k: MagicMock())
     monkeypatch.setattr(main, "PreviewServer", lambda *a, **k: MagicMock())
     monkeypatch.setattr(main, "Backend", lambda *a, **k: MagicMock())
+    api._borrowing = True                       # 1.1.1：常驻 claude 那条通道连上后才借用；这里模拟已经借用
     api._settings.data["provider"] = "codex"
     assert api._apply_provider_choice()
-    assert api._import.lr is new_lr and api._export.lr is new_lr
+    assert api._import.lr is new_lr and api._export.lr is new_lr and api._borrowing is False
 
 
 # ---------------------------------------------------------------- 浏览目录暂时不在：设置保留，只在运行时当作不可用
