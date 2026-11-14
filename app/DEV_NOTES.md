@@ -1024,3 +1024,26 @@ PR 新增的 `version_save / version_apply / batch_plan_from_edit / batch_apply 
 - 星级/旗标/颜色标签等在格子上的显示没有改（只用于排序）；颜色标签没有色块显示。
 - `ui_pick_check.py`、`ui_preview_check.py` 需要真机样例输入，本次没跑（没有改它们涉及的界面）。
 - 没有启动 pywebview 窗口，也没有连 Lightroom。
+
+## 1.3.0 后端（设置页：外观 / 安全 / 维护 / 关于）
+
+### 设置项（settings.py）
+- 新增 `theme`（system|light|dark）、`font_size`（small|standard|large|xlarge）、`panel_widths`（`{left:200–480, right:240–520}`，默认 260/300）、`preview_zoom`（`"fit"` 或 10–400 整数，默认 `"fit"`）。
+- 读文件时逐项回落默认（`panel_widths` 的 left/right 各自回落）；保存时严格：布尔、小数、字符串数字、多余键一律报错且整体不保存。保存 `panel_widths` 时缺的一侧沿用当前值。`schema` 仍是 1（只加字段，旧文件缺项即回落，旧版软件读新文件会保留未知键）。
+
+### 接口（main.py `Api`，实现在 `maintenance.py`，全部异常翻成 `{"ok":False,"message":中文}`）
+- `set_readonly(on)`：创建/删除 `config.READONLY_FILE`；环境变量 `LRMCP_READONLY=1` 时关闭只读会提示“环境变量仍然开着”并返回 `readonly:true`。`get_settings()` 顶层多一个 `readonly`（文件或环境变量任一为真）。
+- `clear_cache()`：清空 `ThumbStore`、`PreviewStore`（新增 `clear()`）并删除 `app_timing.jsonl`；之后 `PhotoLibrary.thumbs_cleared()`（忘记失败记录、把页面可见照片重新排队、发 `library_changed`）与 `PreviewManager.request(0)`。AI/导入/导出进行中返回 `busy:true`。绝不碰照片、设置、经验库、收藏、版本、Lightroom 目录。
+- `make_diagnostics()`：系统文件夹对话框（`_pick_diag_folder`，测试里替换）后生成 `LatosHue-diagnostics-<时间>.zip`（README.txt、diagnostics.json、log-tail.txt）。设置走白名单，路径只写“已设置/未设置”；日志走 `scrub_text`（盘符/UNC/类 Unix 路径整段替换为 `<path>`、用户名 `<user>`、邮箱、`token=`/`password=` 一类、Bearer、长密钥串、照片文件名）。日志来源只有 `~/LrMcp/server.log`（软件本身目前没有日志文件）。
+- `reset_settings()`：先把 `app_settings.json` 原样备份为 `app_settings.json.reset-<时间>.bak`，再写默认值，保留 `base_folder`、`provider`、`provider_chosen`。
+- `about_info()`、`open_link(key)`（key 为 homepage/denvolatos/galio1991，网址只在后端白名单里，页面不传 URL；`authors` 带 `key`、`url`，没有 `confirmed`）。
+
+### 取舍
+- 路径脱敏取“到行尾”的贪婪匹配（路径里可能有空格），宁可多删一点日志文字，也不漏路径。
+- 清理缓存只清内存缓存：缩略图与预览目前都不落盘（`~/LrMcp/previews` 是插件写、软件读完即删的临时文件，不属于此功能）。
+
+### 没验证的点
+- 没有跑真实窗口/Lightroom：对话框、`webbrowser.open`、`webview2_runtime`（读注册表）只在假对象或本机单元测试里验证。
+- 脱敏是规则匹配，不能保证覆盖所有格式（例如路径里夹引号、非常规扩展名）；README 已提示用户发出前自查。
+- 清理缓存后图库缩略图重新取的完整链路只验证了“重新排队 + 通知页面”，没有接真实 Lightroom 看实际重取。
+- “进行中”判断沿用现有字段（`_busy`、会话 busy、导入/导出 stage），AI 挑片是否都经 `_busy` 依赖现有实现。
