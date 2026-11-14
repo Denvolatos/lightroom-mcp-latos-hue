@@ -85,6 +85,20 @@ def _import_server():
     return edits, bridge
 
 
+def _never_sent(e: BaseException) -> bool:
+    """借用通道的请求失败时，能确定“请求根本没送到服务”的情况：连接被拒绝（端口上没有服务），
+    或服务直接以 HTTP 错误码拒绝（口令不对、路径不对，命令没有执行）。其余网络错误（连接重置、读超时、回包残缺）
+    都可能发生在请求送达之后，一律不算“没连上”。"""
+    import urllib.error
+    if isinstance(e, urllib.error.HTTPError):
+        return True
+    reason = getattr(e, "reason", None) if isinstance(e, urllib.error.URLError) else e
+    if isinstance(reason, ConnectionRefusedError):
+        return True
+    import socket
+    return isinstance(reason, socket.gaierror)
+
+
 class RemoteBridge:
     """借用常驻 claude 里 lightroom_mcp 服务的插件通道（见 lr_launcher.start_rpc）：接口与 Bridge 的 call/connected 一致。
     这样窗口进程不再单独起一个 Bridge，插件只需轮询一个新服务。"""
@@ -125,8 +139,11 @@ class RemoteBridge:
         try:
             with urllib.request.urlopen(req, timeout=timeout + 10) as r:
                 reply = json.loads(r.read().decode("utf-8"))
-        except (urllib.error.URLError, OSError, ValueError):
-            raise bridge_mod.PluginNotConnected("无法连接助手后台，请稍后再试。")
+        except Exception as e:                      # noqa: BLE001 - 按“请求是否可能已送达”分两类
+            if _never_sent(e):
+                raise bridge_mod.PluginNotConnected("无法连接助手后台，请稍后再试。") from e
+            # 请求可能已经送达、插件可能已经执行（比如回包途中助手进程被重启）：状态不确定，让修改记录可以还原
+            raise bridge_mod.BridgeTimeout("与助手后台的连接在等待回复时中断，操作结果不确定。") from e
         if reply.get("ok"):
             return reply.get("data", {})
         cls = getattr(bridge_mod, str(reply.get("error_type")), None)
