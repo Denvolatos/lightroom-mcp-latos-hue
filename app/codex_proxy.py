@@ -42,6 +42,12 @@ def _confirm(name: str, arguments: dict) -> bool:
         return False
 
 
+def server_instructions(init) -> str | None:
+    """child.initialize() 的返回里取服务端说明；取不到返回 None（代理照常工作，只是没有说明）。"""
+    text = getattr(init, "instructions", None)
+    return text if isinstance(text, str) and text.strip() else None
+
+
 async def main() -> None:
     config = lightroom_server_config()
     child_env = {k: v for k, v in os.environ.items() if k not in ("LRAPP_PORT", "LRAPP_TOKEN")}
@@ -49,7 +55,7 @@ async def main() -> None:
     params = StdioServerParameters(command=config["command"], args=config.get("args", []), env=child_env)
     async with stdio_client(params) as (child_read, child_write):
         async with ClientSession(child_read, child_write) as child:
-            await child.initialize()
+            init = await child.initialize()
             catalog = await child.list_tools()
             tools = [tool for tool in catalog.tools if tool.name in ALLOWED]
 
@@ -64,7 +70,9 @@ async def main() -> None:
                     return _error("未获用户确认，已视为拒绝，未执行。")
                 return await child.call_tool(name, arguments, read_timeout_seconds=130)
 
-            server = Server("lightroom_mcp", on_list_tools=list_tools, on_call_tool=call_tool)
+            # 把真实服务的使用说明（软件模式下已裁剪为只讲开放的工具）原样转给 Codex
+            server = Server("lightroom_mcp", instructions=server_instructions(init),
+                            on_list_tools=list_tools, on_call_tool=call_tool)
             async with stdio_server() as (read, write):
                 await server.run(read, write, server.create_initialization_options())
 

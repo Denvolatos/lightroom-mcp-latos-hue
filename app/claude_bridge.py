@@ -54,6 +54,8 @@ SYSTEM_PROMPT = (
     "仅在用户明确要求修改时才修改照片，且每次只做小幅调整；调整参数时在 reason 中写明依据。"
     "每项调整后，用简短的陈述句说明：已调整的内容、依据、预期的画面变化。"
     "若调整未被执行（被拒绝、被拦截或失败），如实说明，不重复尝试同一项调整。"
+    "可用的修改工具只有 lr_set_develop、lr_restore、lr_restore_original；套用预设、保存版本、导出、星级旗标和批量修改由用户在软件界面中操作，"
+    "用户提出这类需求时说明在软件中的操作位置，不寻找其他工具。"
     "回复保持简短。"
 )
 
@@ -82,17 +84,22 @@ def find_claude() -> str | None:
     return shutil.which("claude")
 
 
+# 让 lightroom_mcp 换用只描述本软件开放工具的说明（见 server/lightroom_mcp/tools.py 的 INSTRUCTIONS_APP）
+APP_MODE_ENV = {"LRMCP_APP_MODE": "1"}
+
+
 def lightroom_server_config(state_file: Path | None = None) -> dict:
     """lightroom_mcp 服务怎么启动：开发时优先用仓库源码（最新、全部工具），没有源码才用打包好的 lrmcp.exe。
     源码方式经 app/lr_launcher.py 启动：端口按“最久未使用”优先，并把“插件是否已连上”写进状态文件（见 lr_launcher.py）。"""
     if is_frozen() or (REPO / "server" / "lightroom_mcp").exists():
         env = {} if is_frozen() else {"PYTHONPATH": str(REPO / "server")}   # 打包后 server 包已在程序里
+        env.update(APP_MODE_ENV)
         if state_file is not None:
             env["LRAPP_BRIDGE_STATE"] = str(state_file)
         command, *args = helper_command("lr-launcher")
         return {"type": "stdio", "command": command, "args": args, "env": env}
     exe = REPO / "build" / "dist" / "lrmcp" / "lrmcp.exe"
-    return {"type": "stdio", "command": str(exe), "args": []}
+    return {"type": "stdio", "command": str(exe), "args": [], "env": dict(APP_MODE_ENV)}
 
 
 def permission_server_config() -> dict:
