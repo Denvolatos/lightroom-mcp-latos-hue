@@ -100,6 +100,8 @@
   .frame .chip { position: absolute; right: 10px; top: 10px; padding: 2px 10px; border-radius: 99px; z-index: 2;
     background: rgba(0,0,0,.6); font-size: 12px; color: var(--warn); display: none; }
   .frame.busy .chip { display: block; }
+  .stage.switching .frame .pimg { opacity: .45; transition: opacity .15s; }
+  .stage.switching #fc .chip { display: block; }
   .infobar { flex: none; padding: 2px 14px 10px; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
   .infobar .line { color: var(--text); opacity: .85; font-variant-numeric: tabular-nums; user-select: text; }
   .seg button:disabled { opacity: .5; cursor: not-allowed; }
@@ -976,6 +978,7 @@ function renderStage(){
     const examples=diff ? diff.items.slice(0,5).map(i=>`${i.label} ${i.before} → ${i.after}`).join('；') : '';
     $('#infobar').textContent=v?`版本：${v.name} · ${v.created||''}${v.note?' · '+v.note:''}。${diff?(diff.count?`与当前相差 ${diff.count} 项${examples?'：'+examples:''}${diff.count>5?' 等':''}`:'与当前完全相同'):'正在读取参数差异…'}`:'这张照片还没有保存过版本。';
     $('#cur').textContent=(p.photo||{}).name||photoName||'';
+    showSwitching();
     $('#pvctl').style.display='none'; return;
   }
   s.classList.toggle('actual', actual && real);
@@ -994,6 +997,7 @@ function renderStage(){
     setFrame('fi',{text:t}); setFrame('fc',{text:t}); $('#infobar').innerHTML=''; return; }
   const p = pv || {state:'loading', message:'正在读取预览'}, ph = p.photo || {};
   $('#cur').textContent = ph.name || photoName || '';
+  showSwitching();
   if (p.state==='ok'){
     const n = nApplied(), pi = p.current;
     setFrame('fi',{url:p.initial.url});
@@ -1004,6 +1008,24 @@ function renderStage(){
     setFrame('fi',{text:t}); setFrame('fc',{text:t});
     $('#infobar').innerHTML = ph.name ? `<div class="line">${esc(fmtInfo(ph))}</div>` : '';
   }
+}
+/* 图库里点了另一张照片：Lightroom 回复、新预览送到之前，中栏先写“正在切换到 …”，大图变淡，由 preview 事件覆盖 */
+let SWITCH = null;
+function showSwitching(){
+  const s=$('#stage'); s.classList.toggle('switching', !!SWITCH);
+  if (SWITCH) $('#cur').textContent = '正在切换到 '+SWITCH.name+'…';
+}
+function markSwitching(id){
+  const p = id && G.byId[id]; clearTimeout(markSwitching.t);
+  const ph = (pv && pv.photo) || {};
+  if (!p || !REAL() || ph.id===id){ if (SWITCH){ SWITCH=null; renderStage(); } return; }
+  SWITCH = {id, name:p.name};
+  markSwitching.t = setTimeout(()=>{ if (SWITCH){ SWITCH=null; renderStage(); } }, 15000);   // 保底：太久没有新预览就恢复原样
+  renderStage();
+}
+function previewArrived(ev){
+  const ph = ev.photo || {};
+  if (SWITCH && (ph.id===SWITCH.id || ph.name===SWITCH.name || (ev.state!=='ok' && ev.state!=='loading'))){ SWITCH=null; clearTimeout(markSwitching.t); }
 }
 function toggleZoom(){ if(!REAL()) return; actual=!actual; $('#zoom').textContent = actual ? '100%' : '适合窗口'; renderStage(); }
 $('#zoom').onclick=toggleZoom;
@@ -1094,7 +1116,7 @@ window.onClaudeEvent = function(ev){
   else if (ev.type==='status'){ showStatus(ev); }
   else if (ev.type==='lr_launch'){ onLrLaunch(ev); }
   else if (ev.type==='photo'){ photoName=ev.name; renderStage(); if(viewMode==='multi') loadVersions().catch(()=>{}); loadLib('f'); }
-  else if (ev.type==='preview'){ pv=ev; renderStage(); }
+  else if (ev.type==='preview'){ pv=ev; previewArrived(ev); renderStage(); }
   else if (ev.type==='connecting'){ cur=null; note(ev.message); }
   else if (ev.type==='confirm'){ cur=null; showConfirm(ev); }
   else if (ev.type==='confirm_done'){ closeConfirm(ev); }
@@ -1802,7 +1824,8 @@ function cellClick(id, e){
   } else { ids=[id]; G.anchor=id; }
   if (!ids.length){ clearSel(); return; }
   gmsg('');
-  const r=limitSel(ids, active); G.sel=r.ids; G.active=r.active; applySelClasses(); renderBar(); sendSel();
+  const r=limitSel(ids, active); G.sel=r.ids; G.active=r.active; applySelClasses(); renderBar();
+  markSwitching(r.active); sendSel();
 }
 function selectAllShown(){
   const ids=G.order.filter(i=>G.byId[i] && G.byId[i].added); if (!ids.length) return;
@@ -1822,6 +1845,7 @@ async function sendSel(){
   if (last){
     G.sel=(last.selected||[]).filter(i=>G.byId[i]); G.active=last.active||(G.sel.length?G.sel[G.sel.length-1]:null);
     if (last.message) gmsg(last.message, !last.ok); else if (!last.ok) gmsg('选择未生效。', true);
+    if (!last.ok || !G.active) markSwitching(null); else if (SWITCH && SWITCH.id!==G.active) markSwitching(G.active);
   }
   applySelClasses(); renderBar();
 }
