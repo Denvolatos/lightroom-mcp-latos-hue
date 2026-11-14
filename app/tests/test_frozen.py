@@ -62,7 +62,7 @@ def test_lightroom_server_config_frozen_has_no_python(monkeypatch, tmp_path):
     freeze(monkeypatch, tmp_path / "LatosHue.exe")
     cfg = claude_bridge.lightroom_server_config(tmp_path / "state.json")
     assert cfg["command"].endswith("latoshue-helper.exe") and cfg["args"] == ["--lr-launcher"]
-    assert cfg["env"] == {"LRAPP_BRIDGE_STATE": str(tmp_path / "state.json")}
+    assert cfg["env"] == {"LRAPP_BRIDGE_STATE": str(tmp_path / "state.json"), "LRMCP_APP_MODE": "1"}
 
 
 def test_lightroom_server_config_dev_unchanged():

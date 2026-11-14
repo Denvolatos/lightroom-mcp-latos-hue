@@ -8,13 +8,16 @@ from __future__ import annotations
 
 import json
 import subprocess
+import tempfile
 import time
+from pathlib import Path
 
 import claude_bridge as cb
 from persistent_session import PersistentSession
 
 from .base import AIProvider, NOT_INSTALLED, NOT_LOGGED_IN, READY, UNKNOWN, make_status
 
+ONE_SHOT_MCP_DIR = Path(tempfile.gettempdir()) / "lrmcp_oneshot"   # 不覆盖常驻会话的 lrmcp_app_mcp.json
 AUTH_TIMEOUT = 10
 AUTH_CACHE_SECONDS = 30
 
@@ -29,6 +32,19 @@ def check_login(claude_path: str, run=subprocess.run) -> bool | None:
         return v if isinstance(v, bool) else None
     except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
         return None
+
+
+class OneShot:
+    """一次性会话：send() 阻塞到结束，结束后进程已清理；stop() 可从其他线程调用。"""
+
+    def __init__(self, session: cb.ClaudeSession):
+        self.session = session
+
+    def send(self, text: str, on_event, **options) -> None:
+        self.session.send(text, on_event, confirm=True, extra_env=options.get("extra_env"))
+
+    def stop(self) -> None:
+        self.session.stop()
 
 
 class ClaudeProvider(AIProvider):
@@ -87,6 +103,13 @@ class ClaudeProvider(AIProvider):
     def close(self) -> None:
         if self.persistent:
             self.session.shutdown()
+
+    def one_shot(self, fork: bool = False):
+        """独立的一次性 claude -p 进程：挑片不带任何聊天上下文；记成经验从聊天会话分叉（--fork-session），
+        读得到本次对话、但不写回聊天会话。结束或停止时用 kill_tree 清理整棵进程。"""
+        s = cb.ClaudeSession(fork=fork, mcp_dir=ONE_SHOT_MCP_DIR)
+        s.session_id = self.session.session_id if fork else None
+        return OneShot(s)
 
     # ---- 供后台总管（Backend）使用的健康检查，原样转给会话 ----------
     @property

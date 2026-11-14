@@ -17,6 +17,7 @@ STATUS_OK = "已应用"
 STATUS_FAILED = "失败"
 STATUS_DENIED = "已拒绝"
 STATUS_UNDONE = "已撤销"
+STATUS_NOT_RUN = "未执行（本轮已结束）"   # 本轮结束（停止/超时/出错）时还没有结果的行
 
 EDIT_DIR = Path.home() / "LrMcp" / "edits"
 SET_TOOL = "lr_set_develop"
@@ -76,19 +77,37 @@ class AdjustmentTracker:
             return changed
         if t == "tool_result":
             return self._on_result(ev)
+        if t == "done":
+            return self._on_turn_end()
         return False
+
+    def _on_turn_end(self) -> bool:
+        """一轮结束后不会再有 tool_result：仍是“待确认/处理中”的行改成终态，不留假记录。"""
+        changed = False
+        for r in self.rows:
+            if r["status"] in (STATUS_PENDING, STATUS_RUNNING):
+                r["status"], r["note"], changed = STATUS_NOT_RUN, "本轮已结束，这项调整没有执行结果。", True
+        self._calls.clear()
+        return changed
 
     def _on_tool(self, ev: dict) -> bool:
         name, tid = ev.get("name", ""), ev.get("id") or ""
         if name != SET_TOOL:
             self._calls[tid] = {"name": name, "row_ids": []}
             return False
-        inp = ev.get("input") or {}
+        inp = ev.get("input")
+        inp = inp if isinstance(inp, dict) else {}
         reason = str(inp.get("reason") or "").strip() or self._text.strip()[:120]
         ids = []
         target = inp.get("photo")
-        photo = self.current_photo if target in (None, "", "selected") else target
-        for key, to in (inp.get("changes") or {}).items():
+        photo = self.current_photo if target in (None, "", "selected") or not isinstance(target, str) else target
+        changes = inp.get("changes")
+        if isinstance(changes, str):                  # 个别模型把 changes 写成 JSON 字符串
+            try:
+                changes = json.loads(changes)
+            except ValueError:
+                changes = None
+        for key, to in (changes.items() if isinstance(changes, dict) else ()):
             rid = f"{tid}:{key}"
             ids.append(rid)
             self.rows.append({"rid": rid, "edit_id": None, "key": key, "label": param_name(key),
@@ -121,7 +140,8 @@ class AdjustmentTracker:
                 if r:
                     r["status"], r["note"] = status, text[:200]
             return True
-        by_key = {c.get("parameter"): c for c in data.get("changes", [])}
+        changes = data.get("changes")
+        by_key = {c.get("parameter"): c for c in (changes if isinstance(changes, list) else []) if isinstance(c, dict)}
         record = load_record(data["edit_id"], self.edit_dir) or {}
         for rid in call["row_ids"]:
             r = self._row(rid)

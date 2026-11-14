@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import threading
@@ -18,7 +19,9 @@ import claude_bridge as cb
 from ports import clean_stale_announcements
 from timing import TurnTimer
 
-INTERRUPT_GRACE = 6          # 发出中断后，等多少秒还没结束就强制重启进程
+log = logging.getLogger("latoshue.session")
+
+INTERRUPT_GRACE = 6         # 发出中断后，等多少秒还没结束就强制重启进程
 
 
 def kill_tree(proc) -> None:
@@ -46,6 +49,7 @@ class _Turn:
         self.stopped = False
         self.timed_out = False
         self.got_done = False
+        self.watch: cb.IdleWatchdog | None = None
 
 
 class PersistentSession:
@@ -176,16 +180,31 @@ class PersistentSession:
     def _read_stdout(self, proc, gen: int) -> None:
         try:
             for line in proc.stdout:
-                for ev in cb.parse_line(line, self._parse_state):
-                    self._dispatch(ev)
-        except Exception:
-            pass
+                turn = self._turn
+                if turn is not None and turn.watch is not None:
+                    turn.watch.touch()                    # 空闲超时：每收到一行输出重新计时
+                self._handle_line(line)
+        except Exception as e:                            # 管道本身出错（进程已结束等）：按进程退出处理
+            log.warning("claude stdout read failed: %s: %s", type(e).__name__, e)
         with self._lock:                                  # 输出结束：进程已退出
             if gen != self.generation:
                 return                                    # 已被新进程取代（主动重建）
             turn = self._turn
         if turn is not None and not turn.got_done:
             self._finish_turn_abnormal(turn)
+
+    def _handle_line(self, line: str) -> None:
+        """处理一行输出。单个事件出错只记日志、继续读后面的输出，避免读取线程退出后这一轮卡到超时。"""
+        try:
+            events = cb.parse_line(line, self._parse_state)
+        except Exception as e:
+            log.warning("claude event parse failed: %s: %s", type(e).__name__, e)
+            return
+        for ev in events:
+            try:
+                self._dispatch(ev)
+            except Exception as e:
+                log.warning("claude event %s handling failed: %s: %s", ev.get("type"), type(e).__name__, e)
 
     def _dispatch(self, ev: dict) -> None:
         if ev["type"] == "session":
@@ -216,11 +235,16 @@ class PersistentSession:
                 self._turn = None
             elif turn.done.is_set():
                 return
-        for ev in events:
-            turn.emit(ev)
-        self.last_timing = turn.timer.summary()
-        turn.timer.write()
-        turn.done.set()
+        try:
+            for ev in events:
+                try:
+                    turn.emit(ev)
+                except Exception as e:                    # 界面处理出错也要让这一轮结束
+                    log.warning("emit %s failed: %s: %s", ev.get("type"), type(e).__name__, e)
+            self.last_timing = turn.timer.summary()
+            turn.timer.write()
+        finally:
+            turn.done.set()
 
     def _finish_turn_abnormal(self, turn: _Turn) -> None:
         if turn.done.is_set():
@@ -246,9 +270,10 @@ class PersistentSession:
         except (OSError, ValueError):
             return False
 
-    def send(self, prompt: str, emit, timeout: float | None = None) -> None:
-        timeout = cb.TIMEOUT_SECONDS if timeout is None else timeout
+    def send(self, prompt: str, emit, timeout: float | None = None, total: float | None = None) -> None:
+        """timeout：空闲超时（这么久没有任何输出才算超时；有确认卡片在等用户时暂停计时）；total：一轮总上限。"""
         turn = _Turn(emit)
+        turn.watch = cb.IdleWatchdog(idle=timeout, total=total)
         err = None
         with self._lock:
             if self._turn is not None:
@@ -269,7 +294,7 @@ class PersistentSession:
             emit({"type": "error", "message": err})
             emit({"type": "done", "tokens": 0, "cost": None, "text": "", "is_error": True})
             return
-        if not turn.done.wait(timeout):
+        if not turn.watch.wait(turn.done):
             turn.timed_out = True
             with self._lock:
                 self._kill()                              # 超时：结束进程，稍后用 --resume 重建

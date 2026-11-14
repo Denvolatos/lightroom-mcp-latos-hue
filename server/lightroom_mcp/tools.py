@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from functools import wraps
 from pathlib import Path
@@ -63,6 +64,49 @@ SET_DESCRIPTION = (
 )
 
 
+# ---- 桌面软件（Latos Hue）启动的服务：只开放查看类工具和 lr_set_develop / lr_restore / lr_restore_original ----
+# 软件启动服务时设 LRMCP_APP_MODE=1；独立使用 LrMCP 时没有这个变量，上面的说明保持不变。
+APP_MODE_ENV = "LRMCP_APP_MODE"
+
+INSTRUCTIONS_APP = (
+    "Assistant for Adobe Lightroom Classic inside the Latos Hue desktop app. You can look at the photo the user selected "
+    "(lr_status, lr_list_selected, lr_get_develop, lr_get_preview with histogram numbers, lr_get_metadata, lr_review_selected, "
+    "lr_list_presets, lr_list_versions, lr_compare, lr_list_edits, lr_plan_from_edit, lr_doctor), change develop settings of ONE photo "
+    "with lr_set_develop, and undo with lr_restore / lr_restore_original. Those three are the only tools that change anything. "
+    "Start with lr_status. Before changing anything look at the photo with lr_get_preview; change a little at a time and look again; "
+    "undo if it does not look better. Only the photo the user asked for, and only when the user asked for a change. The user may be "
+    "asked to confirm each change in the app; a refused change is not done, do not try it again. Explain in plain words what you "
+    "changed, why and what to expect. Reply in the user's language; the messages returned by the tools are in Chinese. "
+    "Masks (local adjustments) cannot be changed. Presets, saved versions, export, ratings/flags/keywords and batch changes are done "
+    "by the user in the app window, not by you: when they are asked for, tell the user where to do it instead of looking for a tool.\n\n"
+    "这是 Latos Hue 软件里的 Lightroom Classic 修图助手。可以查看用户选中的照片（lr_status、lr_list_selected、lr_get_develop、"
+    "带直方图数字的 lr_get_preview、lr_get_metadata、lr_review_selected、lr_list_presets、lr_list_versions、lr_compare、"
+    "lr_list_edits、lr_plan_from_edit、lr_doctor），用 lr_set_develop 修改**一张**照片的调整参数，用 lr_restore / "
+    "lr_restore_original 还原。只有这三个工具会改动照片。先用 lr_status 确认 Lightroom 已连上。修改前先用 lr_get_preview 看现状；"
+    "每次只做一小步，改完再看；不满意就还原。只改用户要求的那张，只在用户要求修改时才改。用户可能需要在软件里逐项确认，"
+    "被拒绝的调整没有执行，不要重复尝试。用大白话说明改了什么、为什么、预期会看到什么变化。用用户的语言回复；工具返回的提示是中文。"
+    "蒙版（局部调整）不能改。套用预设、保存版本、导出、星级/旗标/关键词和批量修改由用户在软件界面里操作，你不能执行："
+    "用户提到这些时，告诉用户在软件哪里操作，不要去找对应的工具。"
+)
+
+SET_DESCRIPTION_APP = SET_DESCRIPTION.replace(
+    "presets (use lr_apply_preset)", "presets (the user applies presets in the app window)").replace(
+    "预设请用 lr_apply_preset", "预设由用户在软件界面里套用")
+
+PLAN_DESCRIPTION_APP = (
+    "Plan to reuse a verified single-photo slider edit on other selected photos as relative changes. Read-only: it changes no photo. "
+    "The source photo is excluded; crop and curves are skipped. In this app you cannot carry out the batch: show the planned results "
+    "to the user and tell them to run the batch reuse in the app window.\n\n"
+    "把一次已验证的单张滑块修改转成其他照片的批量预演，只读，不会修改照片；源照片自动排除，裁剪和曲线不复用。"
+    "在本软件里你不能执行批量修改：把逐张预演结果讲给用户，并告诉用户在软件界面里执行批量复用。"
+)
+
+
+def app_mode() -> bool:
+    """由桌面软件启动（LRMCP_APP_MODE=1）时为 True：说明与工具描述只讲软件开放的工具。"""
+    return os.environ.get(APP_MODE_ENV) == "1"
+
+
 def _text(data: object) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2)
 
@@ -90,7 +134,8 @@ def _check_photo(photo: str) -> str:
 
 def build_server(bridge: Bridge | None, busy_message: str | None = None, updates: UpdateChecker | None = None) -> MCPServer:
     """Create the MCP server. ``bridge`` is None when the port was busy; tools then explain why."""
-    mcp = MCPServer("lightroom_mcp", instructions=INSTRUCTIONS, version=__version__)
+    in_app = app_mode()
+    mcp = MCPServer("lightroom_mcp", instructions=INSTRUCTIONS_APP if in_app else INSTRUCTIONS, version=__version__)
 
     def call(command: str, params: dict | None = None, timeout: float = 30.0) -> dict:
         if bridge is None:
@@ -189,7 +234,7 @@ def build_server(bridge: Bridge | None, busy_message: str | None = None, updates
 
     edits = EditService(call)
 
-    @mcp.tool(annotations=WRITES, description=SET_DESCRIPTION)
+    @mcp.tool(annotations=WRITES, description=SET_DESCRIPTION_APP if in_app else SET_DESCRIPTION)
     @_guard
     def lr_set_develop(changes: dict[str, float | list], reason: str = "", photo: str = "selected", preview: bool = False) -> list:
         photo = _check_photo(photo)
@@ -308,7 +353,7 @@ def build_server(bridge: Bridge | None, busy_message: str | None = None, updates
             raise ValueError("要真正执行批量修改，需要先用 dry_run=true 预演，并带上返回的 plan_id。")
         return _text(edits.batch_apply(plan_id, reason))
 
-    @mcp.tool(annotations=READ_ONLY)
+    @mcp.tool(annotations=READ_ONLY, description=PLAN_DESCRIPTION_APP if in_app else None)
     @_guard
     def lr_plan_from_edit(edit_id: str, photos: str | list[str] = "selected", reason: str = "") -> str:
         """Plan to reuse a verified single-photo slider edit on other selected photos as relative changes.
@@ -445,7 +490,8 @@ def build_server(bridge: Bridge | None, busy_message: str | None = None, updates
             legend.append({"what": "版本：" + record["name"], "note": record.get("note", ""), "saved": record.get("created"),
                            "stats": previews.analyze(path)})
         if len(pictures) < 2:
-            raise ValueError("要对比至少需要两张图：现在的样子加至少一个有预览图的版本。先用 lr_save_version 存一个版本。")
+            raise ValueError("要对比至少需要两张图：现在的样子加至少一个有预览图的版本。"
+                             + ("版本由用户在软件界面里保存。" if in_app else "先用 lr_save_version 存一个版本。"))
         labels = [chr(ord("A") + i) for i in range(len(pictures))]
         for label, entry in zip(labels, legend):
             entry["label"] = label

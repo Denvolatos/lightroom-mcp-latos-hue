@@ -23,6 +23,16 @@ MSG_PICK_READONLY = "AI 挑片期间只能查看照片，不允许任何修改�
 AUTO_TOOLS = ("lr_set_develop", "lr_restore", "lr_restore_original")   # “逐项确认”关闭时自动放行的工具
 
 
+# 有确认卡片在等用户时，AI 一轮的“空闲超时”暂停计时（见 claude_bridge.IdleWatchdog）。进程内所有 ConfirmHub 共用。
+_waiting = 0
+_waiting_lock = threading.Lock()
+
+
+def waiting_for_user() -> bool:
+    """当前是否有确认卡片在等用户点击。"""
+    return _waiting > 0
+
+
 def _num(v) -> str:
     if isinstance(v, (int, float)) and not isinstance(v, bool):
         return format(float(v), ".4g")
@@ -31,13 +41,41 @@ def _num(v) -> str:
     return str(v)
 
 
+def _changes(tool_input: dict) -> dict:
+    c = tool_input.get("changes") if isinstance(tool_input, dict) else None
+    return c if isinstance(c, dict) else {}
+
+
+def target_ref(tool_input: dict) -> str:
+    """请求里写的目标照片："selected"（当前选中）或照片编号。"""
+    p = tool_input.get("photo") if isinstance(tool_input, dict) else None
+    return p.strip() if isinstance(p, str) and p.strip() else "selected"
+
+
+def with_target(card: dict, target: dict | None) -> dict:
+    """卡片带上目标照片：photo_id / photo_name / photo_is_current（不知道时为 None）；
+    目标不是当前照片时，标题与 warning 里醒目提示。target: {"id", "name", "is_current"}。"""
+    if not target:
+        return card
+    card = {**card, "photo_id": target.get("id"), "photo_name": target.get("name"),
+            "photo_is_current": target.get("is_current")}
+    label = target.get("name") or target.get("id") or ""
+    if target.get("is_current") is False:
+        card["warning"] = f"注意：这项操作针对的不是当前选中的照片，而是“{label}”。"
+        card["title"] = f"{card['title']}（非当前照片：{label}）"
+    elif label:
+        card["title"] = f"{card['title']}：{label}"
+    return card
+
+
 def describe_request(tool_name: str, tool_input: dict, current: dict | None = None) -> dict:
     """把一次写入请求整理成确认卡片内容。current: {参数名: 当前值}（取不到可为空）。"""
     name = tool_name.split("__")[-1]
     current = current or {}
+    tool_input = tool_input if isinstance(tool_input, dict) else {}
     if name == "lr_set_develop":
         items = []
-        for key, to in (tool_input.get("changes") or {}).items():
+        for key, to in _changes(tool_input).items():
             items.append({"key": key, "label": param_name(key),
                           "from": _num(current[key]) if key in current else "—", "to": _num(to)})
         return {"kind": "set", "title": "拟调整", "items": items, "reason": str(tool_input.get("reason") or "")}
@@ -50,6 +88,24 @@ def describe_request(tool_name: str, tool_input: dict, current: dict | None = No
         return {"kind": "restore_original", "title": "拟还原到原始状态", "items": [],
                 "reason": "将照片还原到首次调整之前" + ("（强制覆盖后续改动）" if force else "")}
     return {"kind": "other", "title": "拟执行：" + name, "items": [], "reason": ""}
+
+
+def _values_from(develop: dict, keys: list[str]) -> dict:
+    """从 get_develop 的回复里取各参数的当前值（与 lr_service.current_values 同一套取法）。"""
+    if not keys:
+        return {}
+    try:
+        from lr_service import _import_server
+        edits_mod, _ = _import_server()
+    except Exception:
+        return {}
+    out = {}
+    for k in keys:
+        try:
+            out.update(edits_mod.current_values(develop, [k]))
+        except Exception:
+            pass
+    return out
 
 
 class ConfirmHub:
@@ -125,6 +181,10 @@ class ConfirmHub:
         """常驻会话：口令在整个会话期间有效（随进程重建而更换），每轮结束只清理未应答的确认。"""
         return self.begin_turn()
 
+    def current_token(self) -> str | None:
+        """当前有效的口令（常驻会话期间给一次性会话用；换口令会让常驻会话的确认服务失效）。"""
+        return self._token
+
     def finish_turn(self) -> None:
         self.cancel_all(MSG_CANCELLED)
 
@@ -135,23 +195,62 @@ class ConfirmHub:
             return {"allow": False, "message": MSG_PICK_READONLY}
         if self.auto_allow and tool_name.split("__")[-1] in AUTO_TOOLS:
             return {"allow": True, "message": ""}
-        cur = {}
-        if self.current_values and tool_name.split("__")[-1] == "lr_set_develop":
-            try:
-                cur = self.current_values(list((tool_input.get("changes") or {}).keys())) or {}
-            except Exception:
-                cur = {}
+        cur, target = self._target_and_values(tool_name.split("__")[-1], tool_input)
         cid = secrets.token_hex(6)
         slot = {"event": threading.Event(), "allow": False, "message": MSG_TIMEOUT, "tool_use_id": tool_use_id}
         with self._lock:
             self._pending[cid] = slot
-        card = describe_request(tool_name, tool_input, cur)
-        self.emit({"type": "confirm", "id": cid, "tool_use_id": tool_use_id, "timeout": self.timeout, **card})
-        slot["event"].wait(self.timeout)
+        card = with_target(describe_request(tool_name, tool_input, cur), target)
+        global _waiting
+        with _waiting_lock:
+            _waiting += 1
+        try:
+            self.emit({"type": "confirm", "id": cid, "tool_use_id": tool_use_id, "timeout": self.timeout, **card})
+            slot["event"].wait(self.timeout)
+        finally:
+            with _waiting_lock:
+                _waiting -= 1
         with self._lock:
             self._pending.pop(cid, None)
         self.emit({"type": "confirm_done", "id": cid, "allow": slot["allow"], "message": slot["message"]})
         return {"allow": slot["allow"], "message": slot["message"]}
+
+    def _target_and_values(self, name: str, tool_input: dict) -> tuple[dict, dict | None]:
+        """确认卡片的原值与目标照片。原值按请求里的目标照片读：目标是当前照片（或 "selected"）时用 current_values；
+        目标是别的照片时按编号读那张的参数（经 current_values 所属 LrService 的 develop_of，只读）。取不到就空着，不影响确认。"""
+        keys = list(_changes(tool_input).keys()) if name == "lr_set_develop" else []
+        ref = target_ref(tool_input) if name in ("lr_set_develop", "lr_restore_original") else None
+        lr = getattr(self.current_values, "__self__", None)
+        selected = None
+        if ref is not None and lr is not None and hasattr(lr, "selected_photo"):
+            try:
+                selected = lr.selected_photo()
+            except Exception:
+                selected = None
+        target = None
+        if ref == "selected":
+            target = {"id": (selected or {}).get("id"), "name": (selected or {}).get("name"), "is_current": True}
+        elif ref is not None:
+            sid = (selected or {}).get("id")
+            target = {"id": ref, "name": None, "is_current": (ref == sid) if sid else None}
+        cur: dict = {}
+        if target is not None and target["is_current"] is not True and lr is not None and hasattr(lr, "develop_of"):
+            try:
+                develop = lr.develop_of(ref) or {}
+                target["name"] = ((develop.get("photo") or {}).get("name")) or target["name"]
+                cur = _values_from(develop, keys)
+            except Exception:
+                cur = {}
+        elif keys and self.current_values:
+            try:
+                cur = self.current_values(keys) or {}
+            except Exception:
+                cur = {}
+        if target is not None and target["is_current"] and selected:
+            target["name"] = target["name"] or selected.get("name")
+        if target is not None and not (target.get("id") or target.get("name")):
+            target = None                         # 什么都不知道（例如 Lightroom 未连接）：卡片不加照片信息
+        return cur, target
 
     def answer(self, cid: str, allow: bool) -> bool:
         with self._lock:

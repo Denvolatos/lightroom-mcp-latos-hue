@@ -88,3 +88,8 @@ class AIProvider(ABC):
     @abstractmethod
     def close(self) -> None:
         """退出软件时释放进程与连接。"""
+
+    def one_shot(self, fork: bool = False):
+        """AI 挑片、“记成经验”用的独立一次性会话（不写进聊天会话）。fork=True：需要读到当前对话（记成经验）。
+        返回有 send(text, on_event, **options) / stop() 的对象；返回 None 表示这个来源不支持，调用方沿用聊天会话。"""
+        return None

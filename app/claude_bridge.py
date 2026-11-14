@@ -23,7 +23,8 @@ from timing import TurnTimer
 SERVER_NAME = "lightroom_mcp"
 REPO = Path(__file__).resolve().parent.parent
 WORKDIR = Path.home() / "LrMcp" / "app_workdir"   # 空的中性文件夹，避免读到项目 CLAUDE.md
-TIMEOUT_SECONDS = 180
+TIMEOUT_SECONDS = 180          # 空闲超时：这么久没有任何输出才停止（有确认卡片在等用户时暂停计时）
+MAX_TURN_SECONDS = 900         # 一轮的总上限（防止无限挂起）
 
 # 只读工具（以 server/lightroom_mcp/tools.py 里 READ_ONLY 标注为准）
 READONLY_TOOLS = [
@@ -54,6 +55,8 @@ SYSTEM_PROMPT = (
     "仅在用户明确要求修改时才修改照片，且每次只做小幅调整；调整参数时在 reason 中写明依据。"
     "每项调整后，用简短的陈述句说明：已调整的内容、依据、预期的画面变化。"
     "若调整未被执行（被拒绝、被拦截或失败），如实说明，不重复尝试同一项调整。"
+    "可用的修改工具只有 lr_set_develop、lr_restore、lr_restore_original；套用预设、保存版本、导出、星级旗标和批量修改由用户在软件界面中操作，"
+    "用户提出这类需求时说明在软件中的操作位置，不寻找其他工具。"
     "回复保持简短。"
 )
 
@@ -82,17 +85,22 @@ def find_claude() -> str | None:
     return shutil.which("claude")
 
 
+# 让 lightroom_mcp 换用只描述本软件开放工具的说明（见 server/lightroom_mcp/tools.py 的 INSTRUCTIONS_APP）
+APP_MODE_ENV = {"LRMCP_APP_MODE": "1"}
+
+
 def lightroom_server_config(state_file: Path | None = None) -> dict:
     """lightroom_mcp 服务怎么启动：开发时优先用仓库源码（最新、全部工具），没有源码才用打包好的 lrmcp.exe。
     源码方式经 app/lr_launcher.py 启动：端口按“最久未使用”优先，并把“插件是否已连上”写进状态文件（见 lr_launcher.py）。"""
     if is_frozen() or (REPO / "server" / "lightroom_mcp").exists():
         env = {} if is_frozen() else {"PYTHONPATH": str(REPO / "server")}   # 打包后 server 包已在程序里
+        env.update(APP_MODE_ENV)
         if state_file is not None:
             env["LRAPP_BRIDGE_STATE"] = str(state_file)
         command, *args = helper_command("lr-launcher")
         return {"type": "stdio", "command": command, "args": args, "env": env}
     exe = REPO / "build" / "dist" / "lrmcp" / "lrmcp.exe"
-    return {"type": "stdio", "command": str(exe), "args": []}
+    return {"type": "stdio", "command": str(exe), "args": [], "env": dict(APP_MODE_ENV)}
 
 
 def permission_server_config() -> dict:
@@ -159,7 +167,68 @@ def friendly_error(text: str) -> str:
 
 
 MSG_NO_CLAUDE = "未找到 claude 命令行。请安装 Claude Code，并在终端运行 claude 完成 /login 登录。"
-MSG_TIMEOUT = f"等待超过 {TIMEOUT_SECONDS} 秒仍无结果，已停止。请简化请求后重试。"
+MSG_TIMEOUT = (f"超过 {TIMEOUT_SECONDS} 秒没有任何进展（或一轮总计超过 {MAX_TURN_SECONDS // 60} 分钟），已停止。"
+               "请简化请求后重试。")
+
+
+class IdleWatchdog:
+    """一轮对话的超时：每收到一个事件调用 touch() 重新计时；paused() 为真（有确认卡片在等用户）时暂停计时；
+    另有总上限 total。idle / total 不传时在创建时读取 TIMEOUT_SECONDS / MAX_TURN_SECONDS（测试可改）。
+    用法：start() 起后台线程，到时调用 on_timeout()；或 wait(event) 阻塞到 event 被设置（True）或超时（False）。"""
+
+    def __init__(self, on_timeout=None, idle: float | None = None, total: float | None = None, paused=None,
+                 clock=time.monotonic):
+        self.idle = float(TIMEOUT_SECONDS if idle is None else idle)
+        self.total = float(MAX_TURN_SECONDS if total is None else total)
+        self.on_timeout = on_timeout
+        self.paused = paused or _waiting_for_user
+        self.clock = clock
+        self.started = self.last = clock()
+        self.fired = False
+        self._cancel = threading.Event()
+        self.tick = max(0.02, min(1.0, self.idle / 4))
+
+    def touch(self) -> None:
+        self.last = self.clock()
+
+    def expired(self) -> bool:
+        now = self.clock()
+        try:
+            if self.paused():
+                self.last = now
+        except Exception:
+            pass
+        return now - self.last > self.idle or now - self.started > self.total
+
+    def wait(self, event: threading.Event) -> bool:
+        while not event.wait(self.tick):
+            if self.expired():
+                self.fired = True
+                return False
+        return True
+
+    def start(self) -> "IdleWatchdog":
+        def loop():
+            if not self.wait(self._cancel) and self.on_timeout is not None:
+                self.on_timeout()
+        threading.Thread(target=loop, daemon=True).start()
+        return self
+
+    def cancel(self) -> None:
+        self._cancel.set()
+
+
+def _kill_tree(proc) -> None:
+    from persistent_session import kill_tree      # 延迟导入：persistent_session 依赖本模块
+    kill_tree(proc)
+
+
+def _waiting_for_user() -> bool:
+    try:
+        from confirm_hub import waiting_for_user
+    except Exception:
+        return False
+    return waiting_for_user()
 
 
 # ---------------------------------------------------------------- 事件解析
@@ -223,9 +292,13 @@ def parse_line(line: str, state: dict | None = None) -> list[dict]:
 class ClaudeSession:
     """一段多轮对话。send() 会阻塞到本轮结束，界面里应放在后台线程调用。"""
 
-    def __init__(self, workdir: Path = WORKDIR):
+    def __init__(self, workdir: Path = WORKDIR, *, fork: bool = False, mcp_dir: Path | None = None):
+        """fork=True 且有 session_id 时加 --fork-session：读得到原对话，但结果写进新会话，不改原对话。
+        mcp_dir：MCP 配置文件放哪个目录（一次性会话用单独目录，不覆盖常驻会话的配置）。"""
         self.session_id: str | None = None
         self.workdir = workdir
+        self.fork = fork
+        self.mcp_dir = mcp_dir
         self._proc: subprocess.Popen | None = None
         self._stopped = False
         self._lock = threading.Lock()
@@ -249,12 +322,7 @@ class ClaudeSession:
 
     def stop(self) -> None:
         self._stopped = True
-        p = self._proc
-        if p and p.poll() is None:
-            try:
-                p.kill()
-            except OSError:
-                pass
+        _kill_tree(self._proc)                     # claude.cmd → node → MCP 服务整棵结束
 
     def send(self, prompt: str, emit, confirm: bool = True, extra_env: dict | None = None) -> None:
         claude = find_claude()
@@ -264,7 +332,11 @@ class ClaudeSession:
             return
         self.workdir.mkdir(parents=True, exist_ok=True)
         timer = TurnTimer("per_turn")
-        cmd = build_command(prompt, write_mcp_config(confirm=confirm), self.session_id, claude, confirm)
+        if self.mcp_dir is not None:
+            self.mcp_dir.mkdir(parents=True, exist_ok=True)
+        cmd = build_command(prompt, write_mcp_config(self.mcp_dir, confirm=confirm), self.session_id, claude, confirm)
+        if self.fork and self.session_id:
+            cmd.append("--fork-session")
         self._stopped = False
         state: dict = {}
         stderr_text = ""
@@ -280,13 +352,13 @@ class ClaudeSession:
             return
         proc = self._proc
         timer.mark("spawn")
-        watchdog = threading.Timer(TIMEOUT_SECONDS, self._timeout)
         self._timed_out = False
-        watchdog.start()
+        watchdog = IdleWatchdog(self._timeout).start()      # 空闲超时：每行输出重新计时
         err_chunks: list[str] = []
         threading.Thread(target=lambda: err_chunks.append(proc.stderr.read()), daemon=True).start()
         try:
             for line in proc.stdout:
+                watchdog.touch()
                 for ev in parse_line(line, state):
                     if ev["type"] == "session":
                         self.session_id = ev["id"] or self.session_id
@@ -298,6 +370,7 @@ class ClaudeSession:
             proc.wait()
         finally:
             watchdog.cancel()
+            _kill_tree(proc)                       # 读取中途出错时不留下进程
         stderr_text = "".join(err_chunks)
         if self._timed_out:
             emit({"type": "error", "message": MSG_TIMEOUT})
