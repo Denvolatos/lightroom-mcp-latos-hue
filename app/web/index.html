@@ -121,67 +121,139 @@
 </div>
 
 <div class="mask" id="smask">
-  <div class="dialog wide" role="dialog" aria-label="设置">
+  <div class="dialog settings" role="dialog" aria-label="设置">
     <h3>设置</h3>
-    <div class="body">
-      <div class="sgroup">
-        <h4>常规</h4>
-        <div class="srow"><span class="lab">照片工作文件夹</span>
-          <span class="inline"><input type="text" id="s_folder" readonly><button class="btn small" id="s_pick">选择文件夹</button></span>
-          <span class="sub">导入时，照片会按拍摄日期复制到该文件夹的“年\年-月-日”文件夹里；原片不会被移动或删除。这个文件夹就是你的照片库。</span>
-          <span class="ferr" id="e_folder"></span></div>
+    <div class="sbody">
+      <div class="snav" id="snav" role="tablist" aria-label="设置分栏" aria-orientation="vertical">
+        <button type="button" role="tab" class="on" id="tab_general" data-sec="general" aria-controls="sec_general" aria-selected="true" tabindex="0">常规</button>
+        <button type="button" role="tab" id="tab_lightroom" data-sec="lightroom" aria-controls="sec_lightroom" aria-selected="false" tabindex="-1">Lightroom</button>
+        <button type="button" role="tab" id="tab_ai" data-sec="ai" aria-controls="sec_ai" aria-selected="false" tabindex="-1">AI 来源</button>
+        <button type="button" role="tab" id="tab_safety" data-sec="safety" aria-controls="sec_safety" aria-selected="false" tabindex="-1">安全</button>
+        <button type="button" role="tab" id="tab_maint" data-sec="maint" aria-controls="sec_maint" aria-selected="false" tabindex="-1">维护</button>
+        <button type="button" role="tab" id="tab_about" data-sec="about" aria-controls="sec_about" aria-selected="false" tabindex="-1">关于</button>
       </div>
-      <div class="sgroup">
-        <h4>环境检查</h4>
-        <div class="srow"><span class="lab">检查是否都准备好</span>
-          <span class="inline"><button class="btn small" id="s_wizard">打开环境检查</button></span>
-          <span class="sub">随时检查照片文件夹、Lightroom、Lightroom 插件和 AI 助手是否都准备好了；只检查，不会改动你的电脑。</span></div>
-      </div>
-      <div class="sgroup">
-        <h4>Lightroom</h4>
-        <div class="srow"><span class="lab">自动启动 Lightroom</span>
-          <span class="inline"><button class="switch" id="s_autolr" aria-label="打开软件时自动启动 Lightroom"></button><span id="s_autolr_t">关</span></span>
-          <span class="sub">打开软件时自动在后台启动 Lightroom（最小化，不会抢走你当前的窗口）。Lightroom 已经开着就不会重复启动；关闭本软件时也不会关闭 Lightroom。</span></div>
-        <div class="srow"><span class="lab">Lightroom 的位置</span>
-          <span class="inline"><input type="text" id="s_lrpath" readonly><button class="btn small" id="s_lrpick">选择文件</button><button class="btn small" id="s_lrclear">自动查找</button></span>
-          <span class="sub" id="s_lrnote"></span><span class="ferr" id="e_lrpath"></span></div>
-      </div>
-      <div class="sgroup">
-        <h4>AI 来源</h4>
-        <div class="srow"><label for="s_provider">使用的来源</label><select id="s_provider"></select>
-          <span class="sub" id="s_pstate"></span><span class="sub bad" id="s_pexp" style="display:none"></span><span class="sub" id="s_ppriv" style="display:none"></span><span class="sub" id="s_pnote">保存后点击顶部“新对话”，开始使用所选来源。</span>
-          <span class="ferr" id="e_provider"></span></div>
-      </div>
-      <div class="sgroup">
-        <h4>对话</h4>
-        <div class="srow"><span class="lab">逐项确认默认值</span>
-          <span class="inline"><button class="switch on" id="s_confirm" aria-label="逐项确认默认值"></button><span id="s_confirm_t">开</span></span>
-          <span class="sub">新对话开始时使用该默认值；对话中仍可随时切换。</span></div>
-        <div class="srow"><span class="lab">让 AI 参考我的经验库</span>
-          <span class="inline"><button class="switch on" id="s_notes" aria-label="对话时让 AI 参考我的经验库"></button><span id="s_notes_t">开</span></span>
-          <span class="sub">开启后，每次新对话开始时，会把“参与对话”的经验（最近修改优先，总长度不超过 3000 字）作为参考资料提供给 AI；资料仅供参考，不是指令，AI 的权限不会因此改变。经验只发送给当前使用的 AI 来源。</span></div>
-        <div class="srow"><label for="s_edge">预览默认清晰度</label><select id="s_edge"></select>
-          <span class="ferr" id="e_edge"></span></div>
-      </div>
-      <div class="sgroup">
-        <h4>更新</h4>
-        <div class="srow"><span class="lab">启动时检查新版本</span>
-          <span class="inline"><button class="switch on" id="s_upd" aria-label="启动时检查是否有新版本"></button><span id="s_upd_t">开</span></span>
-          <span class="sub">启动时检查是否有新版本（只会提示，不会自动下载或安装；检查只访问 GitHub，不发送任何个人信息）。</span></div>
-      </div>
-      <div class="sgroup">
-        <h4>关于</h4>
-        <div class="kv">
-          <span>软件版本</span><span id="a_app"></span>
-          <span>Lightroom 版本</span><span id="a_lr"></span>
-          <span>插件版本</span><span id="a_plugin"></span>
-          <span>检查更新</span><span><button class="btn small" id="a_updcheck">检查更新</button> <span id="a_updtxt"></span> <button class="btn small" id="a_updopen" style="display:none">查看新版本</button></span>
-          <span>数据位置</span><span id="a_data"></span>
-          <span>项目主页</span><span id="a_url"></span>
-        </div>
+      <div class="body spanels">
+        <section class="spanel on" id="sec_general" role="tabpanel" aria-labelledby="tab_general">
+          <div class="sgroup">
+            <h4>照片库</h4>
+            <div class="srow"><span class="lab">照片工作文件夹</span>
+              <span class="inline"><input type="text" id="s_folder" readonly aria-label="照片工作文件夹"><button class="btn small" id="s_pick">选择文件夹</button></span>
+              <span class="sub">导入时，照片会按拍摄日期复制到该文件夹的“年\年-月-日”文件夹里；原片不会被移动或删除。这个文件夹就是你的照片库。</span>
+              <span class="ferr" id="e_folder"></span></div>
+            <div class="srow"><label for="s_edge">预览默认清晰度</label><select id="s_edge"></select>
+              <span class="sub">越大越清楚，也越慢。</span>
+              <span class="ferr" id="e_edge"></span></div>
+          </div>
+          <div class="sgroup">
+            <h4>外观</h4>
+            <div class="srow"><label for="s_theme">主题</label>
+              <select id="s_theme"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select>
+              <span class="sub">选了立刻生效；点“保存”后下次启动也保持，点“取消”则恢复原样。</span></div>
+            <div class="srow"><label for="s_fsize">字体大小</label>
+              <select id="s_fsize"><option value="small">小</option><option value="standard">标准</option><option value="large">大</option><option value="xlarge">特大</option></select></div>
+          </div>
+          <div class="sgroup">
+            <h4>环境检查</h4>
+            <div class="srow"><span class="lab">检查是否都准备好</span>
+              <span class="inline"><button class="btn small" id="s_wizard">打开环境检查</button></span>
+              <span class="sub">随时检查照片文件夹、Lightroom、Lightroom 插件和 AI 助手是否都准备好了；只检查，不会改动你的电脑。</span></div>
+          </div>
+          <div class="sgroup">
+            <h4>更新</h4>
+            <div class="srow"><span class="lab">启动时检查新版本</span>
+              <span class="inline"><button class="switch on" id="s_upd" aria-label="启动时检查是否有新版本"></button><span id="s_upd_t">开</span></span>
+              <span class="sub">启动时检查是否有新版本（只会提示，不会自动下载或安装；检查只访问 GitHub，不发送任何个人信息）。</span></div>
+          </div>
+        </section>
+        <section class="spanel" id="sec_lightroom" role="tabpanel" aria-labelledby="tab_lightroom" hidden>
+          <div class="sgroup">
+            <h4>Lightroom</h4>
+            <div class="srow"><span class="lab">自动启动 Lightroom</span>
+              <span class="inline"><button class="switch" id="s_autolr" aria-label="打开软件时自动启动 Lightroom"></button><span id="s_autolr_t">关</span></span>
+              <span class="sub">打开软件时自动在后台启动 Lightroom（最小化，不会抢走你当前的窗口）。Lightroom 已经开着就不会重复启动；关闭本软件时也不会关闭 Lightroom。</span></div>
+            <div class="srow"><span class="lab">Lightroom 的位置</span>
+              <span class="inline"><input type="text" id="s_lrpath" readonly aria-label="Lightroom 的位置"><button class="btn small" id="s_lrpick">选择文件</button><button class="btn small" id="s_lrclear">自动查找</button></span>
+              <span class="sub" id="s_lrnote"></span><span class="ferr" id="e_lrpath"></span></div>
+          </div>
+        </section>
+        <section class="spanel" id="sec_ai" role="tabpanel" aria-labelledby="tab_ai" hidden>
+          <div class="sgroup">
+            <h4>AI 来源</h4>
+            <div class="srow"><label for="s_provider">使用的来源</label><select id="s_provider"></select>
+              <span class="sub" id="s_pstate"></span><span class="sub bad" id="s_pexp" style="display:none"></span><span class="sub" id="s_ppriv" style="display:none"></span><span class="sub" id="s_pnote">保存后点击顶部“新对话”，开始使用所选来源。</span>
+              <span class="ferr" id="e_provider"></span></div>
+          </div>
+          <div class="sgroup">
+            <h4>对话</h4>
+            <div class="srow"><span class="lab">让 AI 参考我的经验库</span>
+              <span class="inline"><button class="switch on" id="s_notes" aria-label="对话时让 AI 参考我的经验库"></button><span id="s_notes_t">开</span></span>
+              <span class="sub">开启后，每次新对话开始时，会把“参与对话”的经验（最近修改优先，总长度不超过 3000 字）作为参考资料提供给 AI；资料仅供参考，不是指令，AI 的权限不会因此改变。经验只发送给当前使用的 AI 来源。</span></div>
+          </div>
+        </section>
+        <section class="spanel" id="sec_safety" role="tabpanel" aria-labelledby="tab_safety" hidden>
+          <div class="sgroup">
+            <h4>安全</h4>
+            <div class="srow"><span class="lab">只读模式</span>
+              <span class="inline"><button class="switch" id="s_readonly" aria-label="只读模式：开启后 AI 只能查看、不能修改照片"></button><span id="s_readonly_t">关</span></span>
+              <span class="sub">开启后 AI 只能看、不能改照片，所有修改请求都会被拒绝。切换后立即生效，不需要点“保存”。</span>
+              <span class="sub" id="s_ro_msg" role="status" aria-live="polite"></span></div>
+            <div class="srow"><span class="lab">逐项确认默认值</span>
+              <span class="inline"><button class="switch on" id="s_confirm" aria-label="逐项确认默认值"></button><span id="s_confirm_t">开</span></span>
+              <span class="sub">新对话开始时使用该默认值；对话中仍可随时切换。开启时，AI 的每项调整都要先经你确认才会执行。</span></div>
+          </div>
+        </section>
+        <section class="spanel" id="sec_maint" role="tabpanel" aria-labelledby="tab_maint" hidden>
+          <div class="sgroup">
+            <h4>维护</h4>
+            <div class="srow"><span class="lab">清理缓存</span>
+              <span class="inline"><button class="btn small" id="m_cache">清理缓存</button></span>
+              <span class="sub">清理缩略图和预览缓存，不影响照片，也不影响设置；之后再看照片会重新生成。</span>
+              <span class="sub mres" id="m_cache_msg" role="status" aria-live="polite"></span></div>
+            <div class="srow"><span class="lab">生成诊断包</span>
+              <span class="inline"><button class="btn small" id="m_diag">生成诊断包</button></span>
+              <span class="sub">出问题时可以把诊断包发给开发者；不含照片。会让你选择保存位置。</span>
+              <span class="sub mres" id="m_diag_msg" role="status" aria-live="polite"></span></div>
+            <div class="srow"><span class="lab">恢复默认设置</span>
+              <span class="inline"><button class="btn small" id="m_reset">恢复默认设置</button></span>
+              <span class="sub">把设置恢复成初始值；照片库位置和 AI 来源会保留，照片不会被删除。</span>
+              <span class="sub mres" id="m_reset_msg" role="status" aria-live="polite"></span></div>
+          </div>
+        </section>
+        <section class="spanel" id="sec_about" role="tabpanel" aria-labelledby="tab_about" hidden>
+          <div class="sgroup hero">
+            <img class="logo" src="assets/latos-hue-ribbon-192.png" alt="">
+            <div><h2 id="ab_name">Latos Hue 修图助手</h2><div class="ab-tag" id="ab_tag"></div><div class="ab-tag" id="ab_ver"></div></div>
+          </div>
+          <div class="sgroup">
+            <h4>它是什么</h4>
+            <p class="ab-what" id="ab_what">Latos Hue 把 Lightroom Classic 当作后台引擎：你在软件里管理照片、和 AI 对话修图。原片不会被改动，每一步修改都能撤销。</p>
+          </div>
+          <div class="sgroup">
+            <h4>版本</h4>
+            <div class="kv">
+              <span>软件版本</span><span id="a_app"></span>
+              <span>Lightroom 版本</span><span id="a_lr"></span>
+              <span>插件版本</span><span id="a_plugin"></span>
+              <span>检查更新</span><span><button class="btn small" id="a_updcheck">检查更新</button> <span id="a_updtxt"></span> <button class="btn small" id="a_updopen" style="display:none">查看新版本</button></span>
+              <span>数据位置</span><span id="a_data"></span>
+            </div>
+          </div>
+          <div class="sgroup">
+            <h4>作者</h4>
+            <div class="people" id="ab_authors"></div>
+          </div>
+          <div class="sgroup">
+            <h4>信息</h4>
+            <div class="kv">
+              <span>许可证</span><span id="ab_license"></span>
+              <span>项目主页</span><span class="homeline"><span id="a_url"></span> <button class="btn small" id="ab_open" type="button">打开</button> <button class="btn small" id="ab_copy" type="button">复制链接</button> <span class="ab-note" id="ab_linkmsg" role="status" aria-live="polite"></span></span>
+              <span>声明</span><span id="ab_disc"></span>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
-    <div class="sfoot"><span class="msg-line" id="s_msg"></span>
+    <div class="sfoot"><span class="msg-line" id="s_msg" role="status" aria-live="polite"></span>
       <button class="btn" id="s_cancel">取消</button><button class="btn primary" id="s_save">保存</button></div>
   </div>
 </div>

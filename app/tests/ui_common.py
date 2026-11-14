@@ -26,7 +26,7 @@ FAKE_API = r"""<script>
 (function(){
   const q = new URLSearchParams(location.search);
   const S = {schema:1, base_folder:'D:\\示例\\照片库', provider:'claude', confirm_default:true, ai_use_notes:true, preview_edge:1024,
-    auto_launch_lightroom:false, lightroom_path:'', check_updates:true,
+    auto_launch_lightroom:q.get('autolr')==='1', lightroom_path:q.get('lrpath')?'D:\\Adobe\\Lightroom Classic\\Lightroom.exe':'', check_updates:true,
     theme:q.get('theme')||'system', font_size:q.get('font')||'standard', panel_widths:{left:300, right:320}, preview_zoom:'fit'};
   if (q.get('nofields')) { delete S.theme; delete S.font_size; delete S.panel_widths; delete S.preview_zoom; }
   if (q.get('zoom')) S.preview_zoom = q.get('zoom')==='fit' ? 'fit' : parseInt(q.get('zoom'),10);
@@ -37,8 +37,12 @@ FAKE_API = r"""<script>
   window.matchMedia = m => /prefers-color-scheme:\s*dark/.test(m) ? ({get matches(){ return window.__sysDark; }, media:m, addEventListener(t,f){ window.__mqL.push(f); }, removeEventListener(){}, addListener(f){ window.__mqL.push(f); }, removeListener(){}}) : realMM(m);
   window.__setSysDark = v => { window.__sysDark = v; window.__mqL.forEach(f => f({matches:v})); };
   let readonly = q.get('ro')==='1';
+  const prov = q.get('prov') || 'ok';
+  const claude = {ok:{available:true, state:'ready', reason:'已安装并已登录。', next_step:''},
+    nologin:{available:false, state:'not_logged_in', reason:'已安装，但尚未登录。', next_step:'请在终端运行 claude，输入 /login 完成登录。'},
+    missing:{available:false, state:'not_installed', reason:'未安装 Claude Code 命令行。', next_step:'请安装 Claude Code，并在终端运行 claude，输入 /login 完成登录。'}}[prov] || {};
   const providers = [
-    {id:'claude', name:'Claude Code 命令行', selectable:true, available:true, state:'ready', reason:'已安装并已登录。', next_step:''},
+    Object.assign({id:'claude', name:'Claude Code 命令行', selectable:true}, claude),
     {id:'codex', name:'Codex 命令行', selectable:true, available:true, state:'ready', reason:'已安装并已登录。', next_step:'', experimental:true,
      experimental_notice:'该来源由外部贡献者接入，尚未在真实 Codex 与 Lightroom 上完成验收，请在测试照片上使用。', privacy_notice:'使用 Codex 时，选中照片的预览会发送至所选的 Codex 服务。'},
     {id:'api', name:'API 密钥', selectable:false, available:false, state:'unavailable', reason:'后续提供。', next_step:''}];
@@ -50,12 +54,13 @@ FAKE_API = r"""<script>
     status: ()=>Promise.resolve({state:'connected', text:'Lightroom 已连接', hint:'', photo:{id:'P', name:'DSC08238.ARW'}}),
     preview_state: ()=>Promise.resolve({type:'preview', state:'none', message:'Lightroom 中未选中照片'}), set_preview_edge: ()=>Promise.resolve({ok:true}),
     autolaunch_state: ()=>Promise.resolve({state:'idle', message:''}),
-    get_settings: ()=>(q.get('delay') ? new Promise(r=>setTimeout(r, 1500)) : Promise.resolve()).then(()=>({settings: full(), readonly, lightroom_detected:'C:\\Program Files\\Adobe\\Lightroom.exe', providers, current_provider:'claude', edges:[768,1024,1536,2048],
+    get_settings: ()=>(q.get('delay') ? new Promise(r=>setTimeout(r, 1500)) : Promise.resolve()).then(()=>({settings: full(), readonly, lightroom_detected:q.get('lrnone')?'':'C:\\Program Files\\Adobe\\Lightroom.exe', providers, current_provider:'claude', edges:[768,1024,1536,2048],
       about:{app_version:'1.3.0', lightroom_version:'15.0.0', plugin_version:'1.3.0', data_dir:'~/LrMcp', project_url:'https://github.com/Denvolatos/lightroom-mcp-latos-hue'}})),
     save_settings: (c, create)=>{ rec('save_settings', [c]); window.__SAVED__.push(c);
       if (c.base_folder && c.base_folder.indexOf('Windows')>=0) return Promise.resolve({ok:false, errors:{base_folder:'不能使用系统或程序目录，请选择其他位置。'}, needs_create:false});
+      if (c.base_folder && c.base_folder.indexOf('新建')>=0 && !create) return Promise.resolve({ok:false, errors:{base_folder:'该文件夹尚不存在。'}, needs_create:true});
       Object.assign(S, c); delete S.lightroom_path_choice; return Promise.resolve({ok:true, errors:{}, settings:full()}); },
-    choose_folder: ()=>Promise.resolve({ok:true, path:'D:\\修图素材'}), check_folder: p=>Promise.resolve({ok:true, exists:true}),
+    choose_folder: ()=>Promise.resolve({ok:true, path:'D:\\修图素材'}), check_folder: p=>Promise.resolve(p.indexOf('Windows')>=0 ? {ok:false, message:'不能使用系统或程序目录，请选择其他位置。'} : {ok:true, exists:p.indexOf('新建')<0}),
     choose_lightroom_path: ()=>Promise.resolve({ok:true, path:'D:\\Adobe\\Lightroom Classic\\Lightroom.exe'}),
     set_readonly: on=>{ rec('set_readonly',[on]); if (q.get('rofail')) return Promise.resolve({ok:false, readonly, message:'没能切换只读模式：无法写入标记文件。'});
       readonly = !!on; return Promise.resolve({ok:true, readonly, message: readonly?'只读模式已开启。':'只读模式已关闭。'}); },
@@ -71,7 +76,7 @@ FAKE_API = r"""<script>
       return Promise.resolve({name:'Latos Hue 修图助手', version:'1.3.0', plugin_version:'1.3.0', license:'AGPL-3.0-only', homepage:'https://github.com/Denvolatos/lightroom-mcp-latos-hue',
         authors:[{name:'Denvolatos', role:'发起与主要开发', key:'denvolatos', url:'https://github.com/Denvolatos'},{name:'Galio1991', role:'共同开发', key:'galio1991', url:'https://github.com/Galio1991'}],
         disclaimer:'本软件不含任何 Adobe 软件，也不是 Adobe 官方产品。', tagline:'让 AI 帮你在一个窗口里挑片、修图、导出'}); },
-    open_link: k=>{ rec('open_link',[k]); return Promise.resolve({ok:true, message:''}); },
+    open_link: k=>{ rec('open_link',[k]); if (q.get('linkfail')==='msg') return Promise.resolve({ok:false, message:'无法打开：系统没有默认浏览器。'}); if (q.get('linkfail')) return Promise.resolve({ok:false}); return Promise.resolve({ok:true, message:''}); },
     update_state: ()=>Promise.resolve({state:'idle', latest:'', enabled:true}),
     wizard_state: ()=>Promise.resolve({wizard_done:true, mark_done:false, auto_open:false, ready:true, checking:false, items:[
       {id:'folder', title:'照片工作文件夹', state:'ready', text:'D:\\示例\\照片库', hint:'', action:'', action_label:''},

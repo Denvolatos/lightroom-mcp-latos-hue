@@ -50,10 +50,10 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 (async()=>{
   await wait(400);
   if (q === 'available') { document.body.dataset.shot = 'topbar'; return; }
-  await openSettings(); await wait(300);
+  await openSettings('about'); await wait(300);
   if (q !== 'checking') { document.getElementById('a_updcheck').click(); await wait(1800); }
   else { document.getElementById('a_updcheck').click(); await wait(200); }
-  document.querySelector('#smask .body').scrollTop = 99999;
+  document.querySelector('#smask .spanels').scrollTop = 99999;
 })();
 </script>"""
 
