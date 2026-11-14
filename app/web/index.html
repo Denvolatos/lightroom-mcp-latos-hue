@@ -152,6 +152,7 @@
   .opts { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 10px; font-size: 12px; color: var(--muted);
     border-top: 1px solid var(--line); }
   .switch { position: relative; width: 34px; height: 18px; border-radius: 99px; background: #444a52; border: none; padding: 0; transition: background .2s; }
+  .switch:disabled { opacity: .5; cursor: not-allowed; }
   .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left .2s; }
   .switch.on { background: var(--ok); } .switch.on::after { left: 18px; }
   /* ---------- export dialog ---------- */
@@ -887,11 +888,16 @@ async function loadVersionPicture(){
   versionImage=''; versionDifference=null;
   const name=$('#versionpick').value;
   if (name && versionRows.length){
-    const picture=await window.pywebview.api.version_preview(name);
-    const plan=await window.pywebview.api.version_plan(name);
-    if (name!==$('#versionpick').value) return;
-    if (picture.ok && picture.result.photo_id===versionPhoto) versionImage=picture.result.url;
-    if (plan.ok && plan.result.photo_id===versionPhoto) versionDifference=plan.result;
+    try {
+      const picture=await window.pywebview.api.version_preview(name);
+      const plan=await window.pywebview.api.version_plan(name);
+      if (name!==$('#versionpick').value) return;
+      if (picture.ok && picture.result.photo_id===versionPhoto) versionImage=picture.result.url;
+      if (plan.ok && plan.result.photo_id===versionPhoto) versionDifference=plan.result;
+    } catch(e){
+      if (name!==$('#versionpick').value) return;
+      versionImage=''; versionDifference=null; renderStage(); $('#infobar').textContent='无法读取这个版本，请检查与 Lightroom 的连接后再选一次。'; return;
+    }
   }
   renderStage();
 }
@@ -1109,7 +1115,8 @@ function showStatus(s){ LASTST = s;
   $('#lrstat').textContent = text; $('#lrdot').style.background = dot;
   $('#lrhint').textContent = hint; $('#lrhint').title = hint; }
 function onLrLaunch(ev){ LRL = ev; if (LASTST) showStatus(LASTST); else { $('#lrstat').textContent = ev.state==='starting' ? '正在启动 Lightroom…' : $('#lrstat').textContent; $('#lrhint').textContent = ev.message; } }
-function setBusy(b){ busy=b; $('#send').disabled=b; $('#inp').disabled=b; $('#stop').style.display=b?'':'none'; $('#newchat').disabled=b; }
+function setBusy(b){ busy=b; $('#send').disabled=b; $('#inp').disabled=b; $('#stop').style.display=b?'':'none'; $('#newchat').disabled=b;
+  $('#sw').disabled=b; $('#sw').title = b ? 'AI 正在处理这一轮，结束后才能切换' : '开启后，每项调整需先经确认才会执行'; }   // 这一轮用的是发送时的设置，处理中切换不会生效
 async function newChat(){
   if (!REAL() || busy) return;
   if (!await askDialog('新对话', '将清空当前对话与「本次调整」表格并重置助手会话。照片上已应用的调整不会被撤销，仍可用「还原到原始状态」还原。是否继续？', '新对话')) return;
@@ -1402,7 +1409,7 @@ $('#mask').onclick=e=>{ if(e.target.id==='mask' && (EX.stage==='form'||EX.stage=
 
 
 /* ---- import ---- */
-let IM = {cat:'', stage:null, pstage:null};
+let IM = {cat:'', stage:null, pstage:null, seq:0};
 const fmtSize = n => n>=1073741824 ? (n/1073741824).toFixed(2)+' GB' : n>=1048576 ? (n/1048576).toFixed(1)+' MB' : n>=1024 ? (n/1024).toFixed(1)+' KB' : n+' B';
 const fmtTime = s => { s=Math.round(s||0); return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); };
 function imOpen(title){ $('#im_title').textContent=title; $('#imask').classList.add('show'); }
@@ -1428,8 +1435,12 @@ function imScanning(n){
 }
 async function imConfirm(){
   IM.stage='confirm'; imOpen('导入照片');
-  const cur = $('#im_cat') ? $('#im_cat').value : IM.cat;
+  const cur = $('#im_cat') ? $('#im_cat').value : IM.cat, seq = ++IM.seq;
   let p; try { p = await window.pywebview.api.import_prepare(cur); } catch(e){ p = {errors:{_:'无法读取导入信息，请关闭后重试。'}}; }
+  if (seq!==IM.seq || IM.stage!=='confirm') return;       // 更新的一次已经发出，或弹窗已关
+  /* 等待期间用户可能又打了字：用输入框现在的内容重建，并放回焦点和光标，不吞字 */
+  const live = $('#im_cat'), typed = live ? live.value : cur, hadFocus = !!live && document.activeElement===live;
+  let ss = null; if (hadFocus) try { ss = [live.selectionStart, live.selectionEnd]; } catch(e){}
   if (!p.found){ imSet(`<div class="bad">${esc((p.errors&&p.errors._)||'没有可导入的内容。')}</div>`, [{label:'关闭', onclick:async()=>{ try { await window.pywebview.api.import_close(); } catch(e){} imClose(); }}]); return; }
   const f=p.found, errs=Object.entries(p.errors||{});
   const errHTML = errs.filter(([k])=>k!=='category').map(([,m])=>`<div class="bad">${esc(m)}</div>`).join('');
@@ -1442,13 +1453,15 @@ async function imConfirm(){
   imSet(`<div class="big">找到 ${f.n} 张（RAW ${f.raw}、JPEG ${f.jpeg}、其他 ${f.other}），共 ${esc(f.size_text)}</div>
     <div class="kvl"><span>来源文件夹</span><span>${esc(p.source)}</span>
       <span>软件文件夹</span><span>${esc(p.base)}${p.base_is_default?'（默认位置，可在设置中更换）':''}</span>
-      <span>分类文件夹名</span><span><input type="text" id="im_cat" maxlength="60" placeholder="可选，留空则直接放入软件文件夹" value="${esc(cur)}"></span>
+      <span>分类文件夹名</span><span><input type="text" id="im_cat" maxlength="60" placeholder="可选，留空则直接放入软件文件夹" value="${esc(typed)}"></span>
       <span>保存到</span><span>${esc(p.target)}</span>
       <span>磁盘剩余空间</span><span>${esc(p.free_text)}（本次需要约 ${esc(p.needed_text)}）</span></div>${catErr}${errHTML}${notes.join('')}`,
     [{label:'取消', onclick:async()=>{ try { await window.pywebview.api.import_cancel(); } catch(e){} imClose(); }},
      {label:'开始导入', cls:'primary', id:'im_go', disabled:!p.can_start, onclick:imBegin}]);
   const inp=$('#im_cat'); let t=null;
-  inp.oninput=()=>{ clearTimeout(t); t=setTimeout(()=>{ IM.cat=inp.value; imConfirm().then(()=>{ const i=$('#im_cat'); i.focus(); i.setSelectionRange(i.value.length,i.value.length); }); },350); };
+  if (hadFocus){ inp.focus(); if (ss) try { inp.setSelectionRange(ss[0], ss[1]); } catch(e){} }
+  if (typed!==cur){ IM.cat=typed; t=setTimeout(()=>imConfirm(), 350); }       // 等待期间打的字也要重新计算“保存到”
+  inp.oninput=()=>{ clearTimeout(t); t=setTimeout(()=>{ IM.cat=inp.value; imConfirm(); },350); };
 }
 async function imBegin(){
   const cat=$('#im_cat').value; IM.cat=cat;
