@@ -16,6 +16,7 @@ import webview
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import frozen  # noqa: E402
+import connection as connmod  # noqa: E402
 from adjustments import AdjustmentTracker, fmt_value  # noqa: E402
 from names import param_name  # noqa: E402
 import lr_autostart  # noqa: E402
@@ -97,7 +98,7 @@ class Api:
         # 环境检查向导（0.14.0）：四项只读检查，耗时的在后台线程；页面只能取状态、点按钮，不能传路径
         self._wizard = wizardmod.WizardChecker(lambda: self._settings.data, find_lightroom=lr_autostart.find_lightroom,
                                                is_running=lr_autostart.is_running,
-                                               get_connection=lambda: self._backend.status(),
+                                               get_connection=self._wizard_connection,
                                                get_provider=self._wizard_provider, get_autolaunch=self._autolaunch.state)
         # 检查更新（0.15.0）：只提示，不下载不安装；启动时在后台查一次（设置可关），页面只能取状态、点按钮，不传地址
         self._updates = updatemod.AppUpdateChecker(appsettings.APP_VERSION,
@@ -613,6 +614,17 @@ class Api:
         return {"ok": True, "path": ok, "message": ""}
 
     # ---- 环境检查向导 ----------------------------------------------
+    def _wizard_connection(self) -> dict:
+        """向导用的连接状态：Backend.status() 再加两项，让向导把“插件没连上”和“AI 那一侧没连上”分开说：
+        borrowing：窗口是否借用常驻 claude 的通道；ai_side：常驻 claude 里的 Lightroom 服务是否连上（不用常驻会话时为 None）。"""
+        st = dict(self._backend.status())
+        st["borrowing"] = bool(getattr(self, "_borrowing", False))
+        st["ai_side"] = None
+        if self._persistent and self._state_file is not None:
+            alive = bool(getattr(self._provider, "alive", False))
+            st["ai_side"] = alive and bool(connmod.read_side_state(self._state_file).get("connected"))
+        return st
+
     def _wizard_provider(self) -> dict:
         """设置里选中的 AI 来源的状态（名称 + available/state/reason/next_step）；与 get_settings 用同一套文案。
         还没选择时返回 {"chosen": False, "choices": [...]}：每个可选来源一项，带安装/登录状态和数据去向说明。"""

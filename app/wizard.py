@@ -33,6 +33,8 @@ MSG_FAILED = "这一项暂时没能检查，请点“重新检查”。"
 MSG_ALL_READY = "都准备好了，可以开始修图。"
 HINT_OPEN_LR = ("请先打开 Lightroom。设置里有“自动启动 Lightroom”开关，打开后，以后启动本软件时会自动在后台打开它。"
                 "这里不会替你打开。")
+HINT_AI_SIDE = ("AI 助手正在启动或重新建立与 Lightroom 的连接，一般几秒到半分钟。图库、导出、预设不受影响。"
+                "如果一直没好，请确认已登录（在终端运行 claude 并输入 /login），再点“重新检查”。")
 HINT_PLUGIN = ("请在 Lightroom 的 文件 → 增效工具管理器 里确认 LrMCP 显示“已安装并正在运行”；"
                "如果不是，点“重新载入增效工具”，等几秒再点下面的“重新检查”。")
 
@@ -169,9 +171,14 @@ class WizardChecker:
         except Exception:                                # noqa: BLE001
             return {}
 
+    @staticmethod
+    def _app_connected(conn: dict) -> bool:
+        """插件是否连上了窗口自己的通道（conn["app"]）。“connected”还要求 AI 那一侧也连上，不能用来判断插件。"""
+        return bool(conn.get("app")) if "app" in conn else bool(conn.get("connected"))
+
     def _check_lightroom(self, s: dict) -> dict:
         conn = self._connection()
-        if conn.get("connected") or self._running():     # 插件都连上了，Lightroom 一定在运行（查进程偶尔会失败）
+        if self._app_connected(conn) or self._running():     # 插件都连上了，Lightroom 一定在运行（查进程偶尔会失败）
             return _item(LIGHTROOM, READY, "Lightroom 正在运行。")
         if self._autolaunching():
             return _item(LIGHTROOM, WAIT, "正在自动启动 Lightroom，请稍候…")
@@ -186,11 +193,14 @@ class WizardChecker:
         if lr["state"] != READY:
             return _item(PLUGIN, WAIT, "等待 Lightroom。", "Lightroom 打开之后才能检查插件。")
         conn = self._connection()
-        if conn.get("connected"):
+        if self._app_connected(conn):
             ver = conn.get("plugin_version")
             return _item(PLUGIN, READY, "插件已连接" + (f"（版本 {ver}）。" if ver else "。"))
         if conn.get("state") == "connecting" or self._autolaunching():
             return _item(PLUGIN, WAIT, "正在连接 Lightroom 的插件，请稍候…")
+        if conn.get("borrowing") and conn.get("claude_alive") is False:
+            # 借用 AI 助手通道时，助手进程不在：问题在 AI 那一侧（见 AI 项），不要叫用户去重新载入插件
+            return _item(PLUGIN, WAIT, "等待 AI 助手恢复与 Lightroom 的连接…", "这一项不用处理，请看下面“AI 助手”一项。")
         return _item(PLUGIN, TODO, "Lightroom 已经打开，但插件还没连上。", HINT_PLUGIN)
 
     @staticmethod
@@ -211,6 +221,10 @@ class WizardChecker:
         name = p.get("name") or "AI 来源"
         title_text = f"{name}：" + (p.get("reason") or "状态未知。")
         if p.get("available"):
+            conn = self._connection()
+            if conn.get("ai_side") is False and self._app_connected(conn):
+                # 插件已连上软件，AI 那一侧（常驻助手里的 Lightroom 服务）还没连上：归到这一项提示
+                return _item(AI, WAIT, f"{name}：已安装，正在连接 Lightroom…", HINT_AI_SIDE, ACT_AI)
             return _item(AI, READY, title_text, p.get("next_step") or "", ACT_AI)
         hint = p.get("next_step") or "请到设置里换一个可用的 AI 来源，或按上面的提示处理。"
         return _item(AI, TODO, title_text, hint, ACT_AI)
