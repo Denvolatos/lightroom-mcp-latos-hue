@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+from web_source import inject_stub, serve_static  # noqa: E402
 WEB = Path(__file__).resolve().parent.parent / "web" / "index.html"
 
 STUB = r"""<script>
@@ -185,7 +186,7 @@ def main(out: Path) -> None:
     out = out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     html = WEB.read_text(encoding="utf-8")
-    html = html.replace("<script>", STUB + "\n<script>", 1).replace("</body>", TAIL + "</body>")
+    html = inject_stub(html, STUB).replace("</body>", TAIL + "</body>")
     page = html.encode("utf-8")
 
     class H(BaseHTTPRequestHandler):
@@ -193,6 +194,8 @@ def main(out: Path) -> None:
             pass
 
         def do_GET(self):
+            if serve_static(self):
+                return
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(page)))

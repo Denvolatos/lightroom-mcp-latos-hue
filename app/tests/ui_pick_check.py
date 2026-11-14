@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+from web_source import inject_stub, serve_static  # noqa: E402
 WEB = Path(__file__).resolve().parent.parent / "web" / "index.html"
 
 STUB = r"""<script>
@@ -103,7 +104,7 @@ def main(out: Path, thumbs: Path, result_json: Path) -> None:
     out.mkdir(parents=True, exist_ok=True)
     real = json.loads(result_json.read_text(encoding="utf-8"))["pick"]
     html = WEB.read_text(encoding="utf-8")
-    html = html.replace("<script>", STUB.replace("__REAL__", json.dumps(real, ensure_ascii=False)) + "\n<script>", 1)
+    html = inject_stub(html, STUB.replace("__REAL__", json.dumps(real, ensure_ascii=False)))
     html = html.replace("</body>", TAIL + "</body>")
     page = html.encode("utf-8")
 
@@ -112,6 +113,8 @@ def main(out: Path, thumbs: Path, result_json: Path) -> None:
             pass
 
         def do_GET(self):
+            if serve_static(self):
+                return
             path = self.path.split("?")[0]
             if path.startswith(("/t/", "/b/")):
                 f = thumbs / path.split("/", 2)[2]

@@ -3,7 +3,7 @@
 """Every own source file must start with the SPDX licence header (see DEV_NOTES, "SPDX headers").
 
 Scope (must match DEV_NOTES): app/ server/ plugin/ *.py *.lua; experiments/ *.lua; root and installer/ *.ps1 *.iss;
-server/*.ps1; app/web/index.html; app/latoshue.spec.
+server/*.ps1; app/web/index.html and app/web/css/*.css, app/web/js/*.js; app/latoshue.spec.
 Left out on purpose: .bat (kept short and pure ASCII), LICENSE, *.md, *.txt, images/icons, data files,
 build/ (generated), docs/, hidden folders and caches.
 """
@@ -23,6 +23,8 @@ def _in_scope(rel: str) -> bool:
     parts = rel.split("/")
     ext = os.path.splitext(rel)[1].lower()
     if parts[0] in ("app", "server", "plugin") and ext in (".py", ".lua"):
+        return True
+    if parts[:2] == ["app", "web"] and ext in (".js", ".css"):
         return True
     if parts[0] == "experiments" and ext == ".lua":
         return True

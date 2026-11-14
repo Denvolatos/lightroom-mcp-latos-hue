@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+from web_source import inject_stub, serve_static  # noqa: E402
 WEB = Path(__file__).resolve().parent.parent / "web" / "index.html"
 
 STUB = """<script>
@@ -99,7 +100,7 @@ def main(out: Path, thumbs: Path) -> None:
     jpgs = sorted(thumbs.glob("*.jpg"))
     assert jpgs, "缩略图目录里没有 JPEG"
     html = WEB.read_text(encoding="utf-8")
-    html = html.replace("<script>", STUB + "\n<script>", 1)
+    html = inject_stub(html, STUB)
     html = html.replace("</body>", TAIL + "</body>")
     page = html.encode("utf-8")
 
@@ -108,6 +109,8 @@ def main(out: Path, thumbs: Path) -> None:
             pass
 
         def do_GET(self):
+            if serve_static(self):
+                return
             if self.path.startswith("/t/"):
                 data = jpgs[int(self.path[3:].split(".")[0]) % len(jpgs)].read_bytes()
                 ctype = "image/jpeg"
