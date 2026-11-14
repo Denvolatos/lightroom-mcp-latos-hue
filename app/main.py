@@ -10,6 +10,7 @@ import secrets
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 import webview
@@ -42,6 +43,10 @@ from ports import STATE_DIR  # noqa: E402
 WEB = frozen.web_dir() / "index.html"
 MSG_AI_BUSY = "AI 正在处理（对话、AI 挑片或“记成经验”还没结束）。请等它完成，或先点“停止”，再试一次。"
 MSG_PLAN_STALE = "请先重新预演这批照片。"
+UNKNOWN_STATUS = {"available": False, "state": "unknown", "reason": "状态未知。", "next_step": ""}
+ABOUT_QUERY_TIMEOUT = 3.0        # 打开设置时向 Lightroom 要版本号：请求本身的超时
+ABOUT_WAIT_SECONDS = 1.5         # 设置对话框最多为它等这么久；没等到先显示“未知”，结果到了记进缓存，下次打开就有
+LR_VERSION_TTL = 300.0           # Lightroom 版本号缓存多久
 MSG_VERSION_STALE = "版本内容已经变了，或者这次确认已经用过。请重新点“应用版本”查看差异。"
 
 
@@ -591,23 +596,63 @@ class Api:
     # ---- 设置 ------------------------------------------------------
     def get_settings(self, include_status: bool = True) -> dict:
         """当前设置、AI 来源列表（含状态）、关于信息。include_status=False（启动时）不做登录检测，只取设置值。"""
-        cur = self._provider.status() if include_status else {"available": True, "state": "unknown", "reason": "", "next_step": ""}
+        unknown = {"available": True, "state": "unknown", "reason": "", "next_step": ""}
         self._pending_lr_path = ""
         detected = lr_autostart.find_lightroom(self._settings.data.get("lightroom_path") or "") if include_status else None
+        claude_st = self._provider_status("claude") if include_status else unknown
+        codex_st = self._provider_status("codex") if include_status else unknown
         return {"lightroom_detected": detected or "", "settings": dict(self._settings.data),
-                "providers": available_providers(cur if self._provider.id == "claude" or not include_status else None,
-                                                 cur if self._provider.id == "codex" or not include_status else None),
+                "providers": available_providers(claude_st, codex_st),
                 "current_provider": self._provider.id, "edges": list(appsettings.EDGE_CHOICES),
                 "default_base_folder": appsettings.default_base_folder(),
-                "about": self._about(10 if include_status else None)}
+                "about": self._about(ABOUT_QUERY_TIMEOUT if include_status else None)}
 
-    def _about(self, timeout: float | None = 3) -> dict:
-        """关于信息。timeout：向 Lightroom 问版本号最多等多久；None（启动时，界面等着它才显示）不问 Lightroom。"""
-        lr_ver = None
+    def _status_probe(self):
+        if getattr(self, "_probe", None) is None:
+            self._probe = StatusProbe()
+        return self._probe
+
+    def _provider_status(self, pid: str) -> dict:
+        """某个 AI 来源的状态。当前来源用它自己的 status()；另一个用常驻的探测器 StatusProbe（各自 30 秒缓存），
+        不再每次新建实例、每次都跑一遍 claude/codex 的登录检测子进程。"""
+        if pid == self._provider.id:
+            return self._provider.status()
+        inst = getattr(self._status_probe(), "_" + pid, None)
         try:
-            if timeout is not None and self._lr.connected and getattr(self._lr, "_bridge", None) is not None:
-                lr_ver = str(self._lr._bridge.call("status", timeout=timeout).get("lightroom_version") or "") or None
-        except Exception:
+            return inst.status() if inst is not None else dict(UNKNOWN_STATUS)
+        except Exception:                        # noqa: BLE001
+            return dict(UNKNOWN_STATUS)
+
+    def _lr_version(self, timeout: float | None) -> str | None:
+        """Lightroom 版本号（缓存 LR_VERSION_TTL 秒）。timeout=None 只读缓存；否则在后台线程里问，最多等 ABOUT_WAIT_SECONDS。"""
+        cache = getattr(self, "_lr_ver_cache", None)          # (取到的时间, 版本号)
+        if cache and cache[1] and time.monotonic() - cache[0] < LR_VERSION_TTL:
+            return cache[1]
+        if timeout is None:
+            return None
+        bridge = getattr(self._lr, "_bridge", None)
+        if not self._lr.connected or bridge is None:
+            return None
+        got = {}
+
+        def ask() -> None:
+            try:
+                ver = str(bridge.call("status", timeout=timeout).get("lightroom_version") or "") or None
+            except Exception:                    # noqa: BLE001
+                return
+            got["v"] = ver
+            if ver:
+                self._lr_ver_cache = (time.monotonic(), ver)
+        t = threading.Thread(target=ask, daemon=True)
+        t.start()
+        t.join(min(timeout, ABOUT_WAIT_SECONDS))
+        return got.get("v")
+
+    def _about(self, timeout: float | None = ABOUT_QUERY_TIMEOUT) -> dict:
+        """关于信息。timeout：向 Lightroom 要版本号的请求超时；None（启动时，界面等着它才显示）不问 Lightroom，只用缓存。"""
+        try:
+            lr_ver = self._lr_version(timeout)
+        except Exception:                        # noqa: BLE001
             lr_ver = None
         return {"app_version": appsettings.APP_VERSION, "lightroom_version": lr_ver,
                 "plugin_version": getattr(self._lr, "plugin_version", None), "data_dir": appsettings.DATA_DIR_TEXT,
@@ -688,12 +733,12 @@ class Api:
         """设置里选中的 AI 来源的状态（名称 + available/state/reason/next_step）；与 get_settings 用同一套文案。
         还没选择时返回 {"chosen": False, "choices": [...]}：每个可选来源一项，带安装/登录状态和数据去向说明。"""
         if not self._ai_chosen():
-            if self._probe is None:
-                self._probe = StatusProbe()
-            return {"chosen": False, "choices": [p for p in self._probe.rows() if p.get("selectable")]}
+            return {"chosen": False, "choices": [p for p in self._status_probe().rows() if p.get("selectable")]}
         want = self._settings.data["provider"]
-        cur = self._provider.status()
-        for p in available_providers(cur if self._provider.id == "claude" else None, cur if self._provider.id == "codex" else None):
+        # 只检查选中的那个来源（当前来源或带缓存的探测器）；另一个不检查，向导每 5 秒刷新时不再起登录检测子进程
+        want_st = self._provider_status(want)
+        for p in available_providers(want_st if want == "claude" else dict(UNKNOWN_STATUS),
+                                     want_st if want == "codex" else dict(UNKNOWN_STATUS)):
             if p["id"] == want:
                 return p
         return {"name": "AI 来源", "available": False, "state": "unknown", "reason": "没有找到所选的 AI 来源。", "next_step": ""}
