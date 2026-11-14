@@ -657,7 +657,9 @@ function presetTabHtml(){
   h += `<div class="tools"><input type="text" id="lr_q" placeholder="搜索名称或分组（一个词）" value="${esc(LB.lrDraft!=null?LB.lrDraft:LB.lrq)}"><button class="btn small" id="lr_go">搜索</button></div>`;
   if (!LB.lr) return h + '<div class="empty">正在读取 Lightroom 预设…</div>';
   if (!LB.lr.ok) return h + `<div class="empty bad">${esc(LB.lr.message)}</div>`;
-  h += `<div class="dm pad">${esc(LB.lr.note)}</div>`;
+  const hidden = Number(LB.lr.hidden_masks)||0;      // 后端默认过滤掉含蒙版的预设，并告诉我们过滤了几个；没有这个字段就不显示
+  if (hidden>0) h += `<div class="dm pad">已隐藏 ${hidden} 个含蒙版的预设（本软件用不了）</div>`;
+  if (LB.lr.note) h += `<div class="dm pad">${esc(LB.lr.note)}</div>`;
   LB.lr.groups.forEach(g=>{ h += `<div class="folder">${esc(g.folder)}</div>`;
     g.presets.forEach(x=>{ h += `<div class="list-item${LB.lrSel===x.id?' sel':''}" data-lid="${esc(x.id)}"><span class="name${x.masks?' dim':''}">${esc(x.name)}${x.masks?'（含蒙版）':''}</span>${starHtml(x.fav, `data-fav="lr_preset" data-key="${esc(x.key)}" data-label="${esc(x.name)}"`)}</div>`; }); });
   let sel = null; LB.lr.groups.forEach(g=>g.presets.forEach(x=>{ if (x.id===LB.lrSel) sel = x; }));
