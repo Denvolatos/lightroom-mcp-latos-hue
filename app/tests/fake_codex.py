@@ -19,6 +19,10 @@ emit({"type": "turn.started"})
 if prompt.endswith("boom"):
     emit({"type": "turn.failed", "error": {"message": "failed"}})
     sys.exit(1)
+if prompt.endswith("quota"):
+    emit({"type": "error", "message": "You've hit your usage limit. Try again later."})
+    emit({"type": "turn.failed", "error": {"message": "You've hit your usage limit. Try again later."}})
+    sys.exit(1)
 if prompt.endswith("slow"):
     emit({"type": "item.completed", "item": {"id": "text1", "type": "agent_message", "text": "开始"}})
     time.sleep(30)
