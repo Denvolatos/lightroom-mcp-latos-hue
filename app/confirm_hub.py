@@ -135,6 +135,10 @@ class ConfirmHub:
         """常驻会话：口令在整个会话期间有效（随进程重建而更换），每轮结束只清理未应答的确认。"""
         return self.begin_turn()
 
+    def current_token(self) -> str | None:
+        """当前有效的口令（常驻会话期间给一次性会话用；换口令会让常驻会话的确认服务失效）。"""
+        return self._token
+
     def finish_turn(self) -> None:
         self.cancel_all(MSG_CANCELLED)
 

@@ -64,3 +64,110 @@ def test_pick_apply_refused_while_ai_busy(api, call):
     api._apply.undo.return_value = {"ok": True, "results": []}
     r = api.pick_apply_confirm(["A"]) if call == "confirm" else api.pick_apply_undo()
     assert r["ok"] is True
+
+
+# ---- 挑片 / 记成经验用独立的一次性会话（1.1.1）------------------------
+import sys  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+
+import claude_bridge as cb  # noqa: E402
+import library_service  # noqa: E402
+from providers.claude_provider import ClaudeProvider, OneShot  # noqa: E402
+
+
+class FakeOne:
+    def __init__(self, fork):
+        self.fork, self.sent, self.stopped = fork, [], 0
+
+    def send(self, text, on_event, **options):
+        self.sent.append((text, options))
+
+    def stop(self):
+        self.stopped += 1
+
+
+def test_pick_and_record_use_one_shot_not_chat_session(api, monkeypatch):
+    made = []
+    api._persistent = True
+    api._provider.send = MagicMock()
+    monkeypatch.setattr(api._provider, "one_shot", lambda fork=False: made.append(FakeOne(fork)) or made[-1])
+    token = api._hub.begin_session()
+    api._pick_send("挑片提示", lambda e: None)
+    api._pick_send(library_service.build_record_prompt(), lambda e: None)
+    api._provider.send.assert_not_called()                    # 聊天会话没被用到
+    assert [m.fork for m in made] == [False, True]            # 挑片不带上下文；记成经验从聊天会话分叉
+    for m in made:
+        assert m.sent[0][1]["extra_env"]["LRAPP_TOKEN"] == token and m.stopped >= 1
+    assert api._hub.current_token() == token                  # 常驻会话的口令没被换掉
+
+
+def test_pick_stop_stops_the_one_shot(api, monkeypatch):
+    api._persistent = True
+    started, release = threading.Event(), threading.Event()
+
+    class Slow(FakeOne):
+        def send(self, text, on_event, **options):
+            started.set()
+            release.wait(3)
+
+        def stop(self):
+            self.stopped += 1
+            release.set()
+
+    one = Slow(False)
+    monkeypatch.setattr(api._provider, "one_shot", lambda fork=False: one)
+    api._provider.stop = MagicMock()
+    t = threading.Thread(target=api._pick_send, args=("p", lambda e: None))
+    t.start()
+    assert started.wait(3)
+    api._pick_stop()
+    t.join(3)
+    assert not t.is_alive() and one.stopped >= 1
+    api._provider.stop.assert_not_called()                    # 不去打断聊天会话
+
+
+def test_claude_one_shot_fork_and_fresh(monkeypatch, tmp_path):
+    session = MagicMock()
+    session.session_id = "CHAT-1"
+    p = ClaudeProvider(session=session, persistent=True)
+    fresh, fork = p.one_shot(), p.one_shot(fork=True)
+    assert isinstance(fresh, OneShot) and fresh.session.session_id is None
+    assert fork.session.session_id == "CHAT-1" and fork.session.fork is True
+    seen = {}
+    monkeypatch.setattr(cb, "find_claude", lambda: "claude")
+    monkeypatch.setattr(cb, "write_mcp_config", lambda d=None, **k: seen.setdefault("dir", d) or tmp_path / "x.json")
+
+    def build(*a, **k):
+        seen["resume"] = a[2]
+        return [sys.executable, "-c", "print('')"]
+    monkeypatch.setattr(cb, "build_command", build)
+    monkeypatch.setattr("timing.TIMING_LOG", tmp_path / "t.jsonl")
+    monkeypatch.setattr(cb, "WORKDIR", tmp_path)
+    fork.session.workdir = tmp_path
+    real_popen = cb.subprocess.Popen
+    cmds = []
+    monkeypatch.setattr(cb.subprocess, "Popen", lambda cmd, **k: cmds.append(cmd) or real_popen(cmd, **k))
+    fork.send("x", lambda e: None, extra_env={})
+    assert seen["resume"] == "CHAT-1" and cmds[0][-1] == "--fork-session"
+    assert seen["dir"] != cb.write_mcp_config.__defaults__ and seen["dir"].name == "lrmcp_oneshot"
+    assert session.send.call_count == 0                       # 常驻聊天会话没被写入
+
+
+def test_one_shot_stop_kills_process(monkeypatch, tmp_path):
+    monkeypatch.setattr(cb, "find_claude", lambda: "claude")
+    monkeypatch.setattr(cb, "write_mcp_config", lambda *a, **k: tmp_path / "x.json")
+    monkeypatch.setattr(cb, "build_command", lambda *a, **k: [sys.executable, "-c", "import time; time.sleep(30)"])
+    monkeypatch.setattr("timing.TIMING_LOG", tmp_path / "t.jsonl")
+    s = cb.ClaudeSession(tmp_path, mcp_dir=tmp_path / "one")
+    out = []
+    t = threading.Thread(target=s.send, args=("x", out.append))
+    t0 = time.monotonic()
+    t.start()
+    while s._proc is None and time.monotonic() - t0 < 5:
+        time.sleep(0.05)
+    proc = s._proc
+    s.stop()
+    t.join(10)
+    assert not t.is_alive() and proc.poll() is not None
+    assert any(e["type"] == "stopped" for e in out) and out[-1]["type"] == "done"

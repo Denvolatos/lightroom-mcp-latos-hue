@@ -234,3 +234,11 @@ class CodexProvider(AIProvider):
     def close(self) -> None:
         self.stop()
         self.alive = False
+
+    def one_shot(self, fork: bool = False):
+        """挑片：新的 Codex 线程（不 resume 聊天线程）。记成经验需要读到对话，codex exec 不能分叉线程，沿用聊天线程（返回 None）。"""
+        if fork:
+            return None
+        other = type(self)(workdir=self.workdir, find=self._find, login_check=self._login_check, clock=self._clock)
+        other._env = dict(self._env)
+        return other

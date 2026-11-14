@@ -218,6 +218,11 @@ class IdleWatchdog:
         self._cancel.set()
 
 
+def _kill_tree(proc) -> None:
+    from persistent_session import kill_tree      # 延迟导入：persistent_session 依赖本模块
+    kill_tree(proc)
+
+
 def _waiting_for_user() -> bool:
     try:
         from confirm_hub import waiting_for_user
@@ -287,9 +292,13 @@ def parse_line(line: str, state: dict | None = None) -> list[dict]:
 class ClaudeSession:
     """一段多轮对话。send() 会阻塞到本轮结束，界面里应放在后台线程调用。"""
 
-    def __init__(self, workdir: Path = WORKDIR):
+    def __init__(self, workdir: Path = WORKDIR, *, fork: bool = False, mcp_dir: Path | None = None):
+        """fork=True 且有 session_id 时加 --fork-session：读得到原对话，但结果写进新会话，不改原对话。
+        mcp_dir：MCP 配置文件放哪个目录（一次性会话用单独目录，不覆盖常驻会话的配置）。"""
         self.session_id: str | None = None
         self.workdir = workdir
+        self.fork = fork
+        self.mcp_dir = mcp_dir
         self._proc: subprocess.Popen | None = None
         self._stopped = False
         self._lock = threading.Lock()
@@ -313,12 +322,7 @@ class ClaudeSession:
 
     def stop(self) -> None:
         self._stopped = True
-        p = self._proc
-        if p and p.poll() is None:
-            try:
-                p.kill()
-            except OSError:
-                pass
+        _kill_tree(self._proc)                     # claude.cmd → node → MCP 服务整棵结束
 
     def send(self, prompt: str, emit, confirm: bool = True, extra_env: dict | None = None) -> None:
         claude = find_claude()
@@ -328,7 +332,11 @@ class ClaudeSession:
             return
         self.workdir.mkdir(parents=True, exist_ok=True)
         timer = TurnTimer("per_turn")
-        cmd = build_command(prompt, write_mcp_config(confirm=confirm), self.session_id, claude, confirm)
+        if self.mcp_dir is not None:
+            self.mcp_dir.mkdir(parents=True, exist_ok=True)
+        cmd = build_command(prompt, write_mcp_config(self.mcp_dir, confirm=confirm), self.session_id, claude, confirm)
+        if self.fork and self.session_id:
+            cmd.append("--fork-session")
         self._stopped = False
         state: dict = {}
         stderr_text = ""
@@ -362,6 +370,7 @@ class ClaudeSession:
             proc.wait()
         finally:
             watchdog.cancel()
+            _kill_tree(proc)                       # 读取中途出错时不留下进程
         stderr_text = "".join(err_chunks)
         if self._timed_out:
             emit({"type": "error", "message": MSG_TIMEOUT})

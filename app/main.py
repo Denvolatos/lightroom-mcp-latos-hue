@@ -839,15 +839,39 @@ class Api:
         self._busy = False
 
     def _pick_send(self, prompt: str, on_event) -> None:
+        """AI 挑片 / “记成经验”：用独立的一次性会话，不写进聊天会话（见 AIProvider.one_shot）。
+        挑片不带聊天上下文；记成经验需要读到本次对话，从聊天会话分叉。来源不支持时沿用聊天会话。"""
+        import library_service
+        fork = prompt == library_service.build_record_prompt()
+        one = self._provider.one_shot(fork=fork)
         if self._persistent:
-            self._provider.send(prompt, on_event)
+            token = self._hub.current_token() or self._hub.begin_session()   # 不换口令：常驻会话的确认服务继续有效
         else:
             token = self._hub.begin_turn()
-            self._provider.send(prompt, on_event, confirm=True, extra_env={"LRAPP_PORT": str(self._hub.port), "LRAPP_TOKEN": token})
+        env = {"LRAPP_PORT": str(self._hub.port), "LRAPP_TOKEN": token}
+        if one is None:
+            if self._persistent:
+                self._provider.send(prompt, on_event)
+            else:
+                self._provider.send(prompt, on_event, confirm=True, extra_env=env)
+            return
+        self._pick_one = one
+        try:
+            one.send(prompt, on_event, confirm=True, extra_env=env)
+        finally:
+            self._pick_one = None
+            try:
+                one.stop()                              # 一次性会话结束：确保进程树已清理
+            except Exception:                           # noqa: BLE001
+                pass
 
     def _pick_stop(self) -> None:
         self._hub.cancel_all()
-        self._provider.stop()
+        one = getattr(self, "_pick_one", None)
+        if one is not None:
+            one.stop()
+        else:
+            self._provider.stop()
 
     def pick_prepare(self) -> dict:
         """点"AI 挑片"：读取 Lightroom 当前选中的照片并检查张数。"""
