@@ -98,6 +98,22 @@ function catalog:getTargetPhotos()
 end
 function catalog:findPhotoByUuid(id) if id == FAKE.uuid then return photo end return FAKE.libphotos[id] end
 function catalog:getFolderByPath(p) return FAKE.libfolders[p] end
+function catalog:getFolders()   -- the top-level folders: those that are nobody's child
+  local out = {}
+  for p, f in pairs(FAKE.libfolders) do if not FAKE.childfolders[p] then out[#out + 1] = f end end
+  return out
+end
+function catalog:batchGetRawMetadata(photos, keys)
+  FAKE.batch_calls = FAKE.batch_calls + 1
+  if FAKE.batch_fails then error("batch failed") end
+  local out = {}
+  for _, ph in ipairs(photos) do
+    local v = {}
+    for _, k in ipairs(keys) do v[k] = ph:getRawMetadata(k) end
+    out[ph] = v
+  end
+  return out
+end
 function catalog:getActiveSources() return FAKE.sources or {} end
 function catalog:setActiveSources(sources)
   FAKE.sources_calls = (FAKE.sources_calls or 0) + 1
@@ -262,8 +278,15 @@ function ADD_LIB_FOLDER(path, uuids, children)   -- uuids: photos directly in th
   local f = { own = {}, path = path }
   for _, u in ipairs(uuids) do f.own[#f.own + 1] = FAKE.libphotos[u] end
   function f:getPath() return path end
+  function f:getChildren()
+    local out = {}
+    for _, c in ipairs(children or {}) do out[#out + 1] = FAKE.libfolders[c] end
+    return out
+  end
+  for _, c in ipairs(children or {}) do FAKE.childfolders[c] = true end
   function f:getPhotos(includeChildren)
     FAKE.getphotos_arg = includeChildren
+    FAKE.getphotos_calls = FAKE.getphotos_calls + 1
     local out = {}
     for _, ph in ipairs(self.own) do out[#out + 1] = ph end
     if includeChildren then
@@ -294,7 +317,7 @@ function SET_VIEW(uuids) FAKE.view = {} for _, u in ipairs(uuids) do FAKE.view[u
 function RESET()
   FAKE.clock, FAKE.pending, FAKE.libphotos, FAKE.libfolders = 0, {}, {}, {}
   FAKE.thumb_plan, FAKE.thumb_calls, FAKE.thumb_async, FAKE.selected, FAKE.view = {}, {}, false, nil, nil
-  FAKE.offline = {}
+  FAKE.offline, FAKE.childfolders, FAKE.batch_calls, FAKE.batch_fails, FAKE.getphotos_calls = {}, {}, 0, false, 0
   FAKE.sources, FAKE.sources_fail, FAKE.select_fails, FAKE.select_calls, FAKE.sources_calls = nil, false, false, 0, 0
   FAKE.files, FAKE.folders, FAKE.last_export, FAKE.export_fails = {}, {}, nil, false
   FAKE.in_catalog, FAKE.add_fails, FAKE.in_gate = {}, false, false
@@ -932,6 +955,37 @@ def test_list_folder_photos_trailing_slash(lib):
 def test_list_folder_photos_folder_not_in_catalog_is_not_an_error(lib):
     data = lib.run("list_folder_photos", path=enc("D:\\nowhere"))
     assert data["ok"] and data["data"]["in_catalog"] is False and data["data"]["total"] == 0 and data["data"]["photos"] == []
+
+
+# ---- 1.1.1: a browse root that is not itself a catalog folder; fewer catalog reads per page ----------------------------
+def test_list_a_parent_folder_that_is_not_in_the_catalog_lists_its_catalog_subfolders(lib):
+    """Only D:\\ceshi\\app_library_test was imported, so D:\\ceshi is not a catalog folder; its photos must still be listed."""
+    data = lib.run("list_folder_photos", path=enc("D:\\ceshi"))["data"]
+    assert data["in_catalog"] is True and data["total"] == 3
+    assert [p["name"] for p in data["photos"]] == ["a.ARW", "b.JPG", "c.jpg"]
+    assert [p["subfolder"] for p in data["photos"]] == ["app_library_test", "app_library_test", "app_library_test/sub/deep"]
+    assert "D:\\other\\z.jpg" not in [p["path"] for p in data["photos"]]          # a sibling of D:\ceshi stays out
+    # the same when a whole drive is browsed, and nothing for a folder with no catalog folder under it
+    assert lib.run("list_folder_photos", path=enc("D:\\"))["data"]["total"] == 3
+    assert lib.run("list_folder_photos", path=enc("D:\\ceshi"), recursive=0)["data"]["in_catalog"] is False
+    assert lib.run("list_folder_photos", path=enc("D:\\ceshi\\app"))["data"]["in_catalog"] is False   # a name prefix is not a parent
+
+
+def test_list_later_pages_reuse_the_sorted_list_and_metadata_is_read_in_batches(lib):
+    first = lib.run("list_folder_photos", path=enc(ROOT), limit=2)["data"]
+    calls, batches = lib.fake("getphotos_calls"), lib.fake("batch_calls")
+    assert batches == 2                                     # path+uuid of all photos, then the fields of this page
+    second = lib.run("list_folder_photos", path=enc(ROOT), offset=2, limit=2)["data"]
+    assert lib.fake("getphotos_calls") == calls            # the folder was not enumerated again
+    assert [p["name"] for p in first["photos"] + second["photos"]] == ["a.ARW", "b.JPG", "c.jpg"]
+    lib.run("list_folder_photos", path=enc(ROOT))           # offset 0 always reads the catalog again
+    assert lib.fake("getphotos_calls") > calls
+
+
+def test_list_still_works_when_batch_reading_is_refused(lib):
+    lib.set_flag("batch_fails", True)
+    data = lib.run("list_folder_photos", path=enc(ROOT))["data"]
+    assert data["total"] == 3 and data["photos"][0]["format"] == "RAW" and data["photos"][1]["rating"] == 3
 
 
 BAD_FOLDERS = [

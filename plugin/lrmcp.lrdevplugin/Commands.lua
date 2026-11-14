@@ -1222,6 +1222,108 @@ local function parseIds(raw, maxCount, what)
 	return ids
 end
 
+-- "D:\A\b\" -> "d:/a/b": for comparing folder paths (ASCII case only, see asciiLower)
+local function folderKey(path)
+	return (asciiLower((path:gsub("\\", "/"))):gsub("/+$", ""))
+end
+
+-- The catalog folders at or under root when root itself is not a catalog folder. Lightroom only knows the folders photos were
+-- imported from: if only D:\Photos\2026 was imported, D:\Photos is usually not in the catalog, but its subfolders are.
+-- Walks down from the top-level folders only along root's path, so it does not visit the whole catalog.
+local function catalogFoldersUnder(catalog, root)
+	local rootKey = folderKey(root)
+	local out = {}
+	local function visit(folder, depth)
+		local okPath, p = LrTasks.pcall(function()
+			return folder:getPath()
+		end)
+		if not okPath or type(p) ~= "string" then
+			return
+		end
+		local key = folderKey(p)
+		if key:sub(1, #rootKey + 1) == rootKey .. "/" then
+			out[#out + 1] = folder -- getPhotos(true) also covers its subfolders
+		elseif rootKey:sub(1, #key + 1) == key .. "/" and depth < 64 then
+			local okChildren, children = LrTasks.pcall(function()
+				return folder:getChildren()
+			end)
+			for _, child in ipairs(okChildren and children or {}) do
+				visit(child, depth + 1)
+			end
+		end
+	end
+	local okTop, top = LrTasks.pcall(function()
+		return catalog:getFolders()
+	end)
+	for _, folder in ipairs(okTop and top or {}) do
+		visit(folder, 0)
+	end
+	return out
+end
+
+-- getRawMetadata for many photos in one call (much faster for thousands of photos); nil if Lightroom refuses
+local function batchRaw(catalog, photos, keys)
+	if #photos == 0 then
+		return {}
+	end
+	local ok, res = LrTasks.pcall(function()
+		return catalog:batchGetRawMetadata(photos, keys)
+	end)
+	if ok and type(res) == "table" then
+		return res
+	end
+	return nil
+end
+
+local function rawOf(batch, photo, key)
+	local values = batch and batch[photo]
+	if values ~= nil then
+		return values[key]
+	end
+	return photo:getRawMetadata(key)
+end
+
+-- The app asks for a folder page by page (offset 0, 500, 1000 ...). The sorted list of the first page is kept for a short
+-- time, so the later pages do not enumerate, read and sort the whole folder again.
+local LIST_CACHE_SECONDS = 60
+local listCache = nil
+
+local function sortedEntries(catalog, path, recursive, offset)
+	local cacheKey = folderKey(path) .. (recursive and "|r" or "|f")
+	local now = LrDate.currentTime()
+	if offset > 0 and listCache and listCache.key == cacheKey and now - listCache.at < LIST_CACHE_SECONDS then
+		return listCache.found, listCache.entries
+	end
+	local folders = {}
+	local folder = catalog:getFolderByPath(path)
+	if folder then
+		folders[1] = folder
+	elseif recursive then
+		folders = catalogFoldersUnder(catalog, path)
+	end
+	local photos = {}
+	for _, f in ipairs(folders) do
+		for _, photo in ipairs(f:getPhotos(recursive) or {}) do
+			photos[#photos + 1] = photo
+		end
+	end
+	local batch = batchRaw(catalog, photos, { "path", "uuid" })
+	local entries = {}
+	for _, photo in ipairs(photos) do
+		local p = rawOf(batch, photo, "path") or ""
+		entries[#entries + 1] = { photo = photo, path = p, key = asciiLower((p:gsub("\\", "/"))), uuid = rawOf(batch, photo, "uuid") or "" }
+	end
+	table.sort(entries, function(a, b)
+		if a.key ~= b.key then
+			return a.key < b.key
+		end
+		return a.uuid < b.uuid
+	end)
+	local found = folder ~= nil or #folders > 0
+	listCache = { key = cacheKey, at = now, found = found, entries = entries }
+	return found, entries
+end
+
 function M.list_folder_photos(params)
 	local path = folderPathArg(params.path)
 	local recursive = params.recursive ~= "0"
@@ -1234,28 +1336,26 @@ function M.list_folder_photos(params)
 		fail(string.format("limit 要在 1 到 %d 之间。", LIST_MAX))
 	end
 	local catalog = LrApplication.activeCatalog()
-	local folder = catalog:getFolderByPath(path)
-	if not folder then
+	-- in_catalog: the folder, or (when it is not in the catalog itself) at least one catalog folder under it
+	local found, entries = sortedEntries(catalog, path, recursive, offset)
+	if not found then
 		return { in_catalog = false, total = 0, offset = offset, folder = path, photos = Json.array({}) }
 	end
-	local entries = {}
-	for _, photo in ipairs(folder:getPhotos(recursive) or {}) do
-		local p = photo:getRawMetadata("path") or ""
-		entries[#entries + 1] = { photo = photo, path = p, key = asciiLower((p:gsub("\\", "/"))), uuid = photo:getRawMetadata("uuid") or "" }
-	end
-	table.sort(entries, function(a, b)
-		if a.key ~= b.key then
-			return a.key < b.key
-		end
-		return a.uuid < b.uuid
-	end)
-	local root = asciiLower((path:gsub("\\", "/"))):gsub("/+$", "")
-	local out = {}
+	local root = folderKey(path)
+	local page = {}
 	for i = offset + 1, math.min(#entries, offset + limit) do
-		local e = entries[i]
+		page[#page + 1] = entries[i]
+	end
+	local pagePhotos = {}
+	for i, e in ipairs(page) do
+		pagePhotos[i] = e.photo
+	end
+	local batch = batchRaw(catalog, pagePhotos, { "fileFormat", "rating", "pickStatus", "dateTimeOriginalISO8601", "dimensions", "isVirtualCopy" })
+	local out = {}
+	for _, e in ipairs(page) do
 		local photo = e.photo
-		local dims = photo:getRawMetadata("dimensions") or {}
-		local pick = photo:getRawMetadata("pickStatus")
+		local dims = rawOf(batch, photo, "dimensions") or {}
+		local pick = rawOf(batch, photo, "pickStatus")
 		local dir = (e.path:gsub("\\", "/")):match("^(.*)/[^/]*$") or ""
 		local subfolder = ""
 		if asciiLower(dir):sub(1, #root) == root then
@@ -1266,18 +1366,17 @@ function M.list_folder_photos(params)
 			name = LrPathUtils.leafName(e.path),
 			path = e.path,
 			subfolder = subfolder,
-			format = photo:getRawMetadata("fileFormat"),
-			rating = photo:getRawMetadata("rating"),
+			format = rawOf(batch, photo, "fileFormat"),
+			rating = rawOf(batch, photo, "rating"),
 			flag = (pick == 1 and "pick") or (pick == -1 and "reject") or "none",
-			captured = photo:getRawMetadata("dateTimeOriginalISO8601"),
+			captured = rawOf(batch, photo, "dateTimeOriginalISO8601"),
 			width = dims.width,
 			height = dims.height,
-			is_virtual_copy = photo:getRawMetadata("isVirtualCopy") and true or false,
+			is_virtual_copy = rawOf(batch, photo, "isVirtualCopy") and true or false,
 		}
 	end
 	return { in_catalog = true, total = #entries, offset = offset, folder = path, recursive = recursive, photos = Json.array(out) }
 end
-
 -- width and height from the JPEG's start-of-frame marker (nil when it cannot be read)
 local function jpegSize(data)
 	local pos, n = 3, #data
