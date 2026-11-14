@@ -560,6 +560,16 @@ let sel = 0, fav = new Set([0]), favP = new Set(['电影感']), steps = [], hist
 
 const $ = s => document.querySelector(s);
 function toast(t){ const b=$('#toastbox'); b.textContent=t; clearTimeout(toast.t); toast.t=setTimeout(()=>b.textContent='',6000); }
+/* 调用后端：Python 抛异常时 promise 会失败。这里接住它，提示一句、把按钮恢复可点，返回 null（调用处见到 null 就停下）。
+   btn 可以是按钮元素或选择器；按钮已经不在页面上时不管它。 */
+async function safeCall(fn, btn, msg){
+  try { const r = await fn(); return r==null ? {} : r; }
+  catch(e){
+    const b = typeof btn==='string' ? $(btn) : btn;
+    if (b && b.isConnected) b.disabled = false;
+    toast(msg || '操作没有完成，请重试。'); return null;
+  }
+}
 
 /* ---- left tabs ---- */
 let ltab = 'preset';
@@ -700,7 +710,7 @@ function tabsOn(){ document.querySelectorAll('#ltabs .tab').forEach(x=>x.classLi
 /* 保存为预设 */
 async function openSavePreset(){
   if (!photoReady()) return infoDialog('无法保存', '请先在 Lightroom 中选择一张照片。');
-  const o = await lapi().lib_preset_options();
+  const o = await safeCall(()=>lapi().lib_preset_options()); if (!o || !o.limits) return;
   lbOpen('保存当前照片的调整为预设');
   lbSet(`<div class="prow"><span class="lab">名称</span><div><input type="text" id="sp_name" maxlength="${o.limits.name}" placeholder="不超过 ${o.limits.name} 个字"></div></div>
     <div class="prow"><span class="lab">备注</span><div><textarea id="sp_note" rows="3" maxlength="${o.limits.note}" placeholder="可选，不超过 ${o.limits.note} 个字"></textarea></div></div>
@@ -713,17 +723,18 @@ async function openSavePreset(){
 async function doSavePreset(overwrite){
   const groups = [...document.querySelectorAll('.sp_g:checked')].map(c=>c.value);
   $('#sp_ok').disabled = true;
-  const r = await lapi().lib_preset_save($('#sp_name').value, $('#sp_note').value, groups, overwrite);
+  const r = await safeCall(()=>lapi().lib_preset_save($('#sp_name').value, $('#sp_note').value, groups, overwrite), $('#sp_ok'));
+  if (!r) return;
   if (r.exists){ $('#sp_ok').disabled = false; if (await askDialog('覆盖预设', r.message, '覆盖')) return doSavePreset(true); return; }
   if (!r.ok){ $('#sp_err').textContent = r.message||'无法保存。'; $('#sp_ok').disabled = false; return; }
   lbClose(); toast(r.message); LB.sel = r.id; ltab='preset'; LB.sub='mine'; tabsOn(); loadLib();
 }
 /* 套用：确认清单 */
 async function applyMine(){
-  const r = await lapi().lib_apply_prepare('mine', LB.sel, LB.strength);
-  applyConfirmView(r);
+  const r = await safeCall(()=>lapi().lib_apply_prepare('mine', LB.sel, LB.strength));
+  if (r) applyConfirmView(r);
 }
-async function applyLr(){ applyConfirmView(await lapi().lib_apply_prepare('lr', LB.lrSel, 100)); }
+async function applyLr(){ const r = await safeCall(()=>lapi().lib_apply_prepare('lr', LB.lrSel, 100)); if (r) applyConfirmView(r); }
 function applyConfirmView(r){
   if (!r.ok) return infoDialog(r.nothing ? '无需套用' : '无法套用', r.message||'无法生成确认清单。');
   lbOpen('确认套用');
@@ -734,8 +745,9 @@ function applyConfirmView(r){
     ${r.skipped&&r.skipped.length ? `<div class="mute">这张照片没有以下参数，已跳过：${esc(r.skipped.join('、'))}。</div>` : ''}
     ${r.clipped ? `<div class="warn">有 ${r.clipped} 项超出允许范围，已裁剪到边界。</div>` : ''}
     <div class="mute">写入后可在右侧“本次调整”中撤销。</div><div class="bad" id="ap_err"></div>`,
-    [{label:'取消', onclick:async()=>{ await lapi().lib_apply_cancel(); lbClose(); }},
-     {label:'确认套用', cls:'primary', id:'ap_ok', onclick:async()=>{ $('#ap_ok').disabled = true; const w = await lapi().lib_apply_confirm(r.token);
+    [{label:'取消', onclick:async()=>{ try { await lapi().lib_apply_cancel(); } catch(e){} lbClose(); }},
+     {label:'确认套用', cls:'primary', id:'ap_ok', onclick:async()=>{ $('#ap_ok').disabled = true; const w = await safeCall(()=>lapi().lib_apply_confirm(r.token), $('#ap_ok'));
+        if (!w) return;
         if (!w.ok){ $('#ap_err').textContent = w.message||'无法套用。'; $('#ap_ok').disabled = !!w.readonly; return; }
         lbClose(); toast(w.message); }}]);
 }
@@ -782,7 +794,8 @@ function noteEditor(n, id, banner, back){
 async function saveNote(id){
   const tags = $('#ne_tags').value.split(/[,，、;；]+/).map(s=>s.trim()).filter(Boolean);
   $('#ne_ok').disabled = true;
-  const r = await lapi().lib_note_save(id, {title:$('#ne_title').value, scene:$('#ne_scene').value, tags, body:$('#ne_body').value, use_in_chat:$('#ne_use').checked});
+  const r = await safeCall(()=>lapi().lib_note_save(id, {title:$('#ne_title').value, scene:$('#ne_scene').value, tags, body:$('#ne_body').value, use_in_chat:$('#ne_use').checked}), $('#ne_ok'));
+  if (!r) return;
   if (!r.ok){ $('#ne_err').textContent = r.message||'无法保存。'; $('#ne_ok').disabled = false; return; }
   lbClose(); toast('经验已保存'); ltab='exp'; tabsOn(); loadLib();
 }
@@ -1263,7 +1276,7 @@ function exUpdate(){
   $('#ex_go').disabled = !(st.photo && st.folder && !bad);
 }
 async function exPick(){
-  const r = await window.pywebview.api.choose_export_folder();
+  const r = await safeCall(()=>window.pywebview.api.choose_export_folder()); if (!r) return;
   if (r.ok){ EX.st.folder=r.folder; EX.st.folder_message=''; $('#ex_dir').value=r.folder; }
   exUpdate();
   if (!r.ok && r.message){ $('#ex_dirmsg').textContent=r.message; $('#ex_dirmsg').style.color='var(--bad)'; }
@@ -1282,7 +1295,7 @@ function exRunning(){
 }
 function exResult(ev){
   EX.stage='done'; exOpen();
-  const close = {label:'关闭', cls:'primary', onclick:async()=>{ await window.pywebview.api.export_close(); exClose(); }};
+  const close = {label:'关闭', cls:'primary', onclick:async()=>{ try { await window.pywebview.api.export_close(); } catch(e){} exClose(); }};
   if (ev.status==='exported'){
     const bd = ev.format==='tiff' && ev.bit_depth ? `（${ev.bit_depth} 位）` : '';
     exSet(`<div class="big okmsg">导出完成。</div>
@@ -1294,7 +1307,7 @@ function exResult(ev){
     exSet(`<div class="big">状态不确定</div><div class="warn" style="color:var(--warn)">${esc(ev.message)}</div><div class="kvl"><span>保存位置</span><span>${esc(ev.folder)}</span></div>`, [close]);
   } else {
     exSet(`<div class="big">导出失败</div><div class="bad">${esc(ev.message)}</div>`,
-      [{label:'返回修改', onclick:async()=>{ await window.pywebview.api.export_close(); openExport(); }}, close]);
+      [{label:'返回修改', onclick:async()=>{ try { await window.pywebview.api.export_close(); } catch(e){} openExport(); }}, close]);
   }
 }
 function onExportEvent(ev){
@@ -1319,20 +1332,21 @@ async function startImport(){
   if (!REAL()) return toast('界面演示中，导入不可用');
   if (IM.stage) { $('#imask').classList.add('show'); return; }
   IM.cat=''; IM.stage='scanning';      // 先置状态：扫描很快结束时，完成事件可能先于本函数返回
-  const r = await window.pywebview.api.choose_source_folder();
+  const r = await safeCall(()=>window.pywebview.api.choose_source_folder());
+  if (!r){ IM.stage=null; return; }    // 出错时一定要清掉阶段，否则以后点“导入”都打不开选择文件夹
   if (!r.ok){ IM.stage=null; if (r.message) await infoDialog('无法导入', r.message); return; }
   if (IM.stage==='scanning') imScanning(0);
 }
 function imScanning(n){
   imOpen('导入照片');
   imSet(`<div class="big">正在扫描来源文件夹</div><div class="mute">已找到 ${n} 张照片。扫描只读取文件名，不会改动存储卡上的任何内容。</div>`,
-    [{label:'取消', onclick:async()=>{ await window.pywebview.api.import_cancel(); imClose(); }}]);
+    [{label:'取消', onclick:async()=>{ try { await window.pywebview.api.import_cancel(); } catch(e){} imClose(); }}]);
 }
 async function imConfirm(){
   IM.stage='confirm'; imOpen('导入照片');
   const cur = $('#im_cat') ? $('#im_cat').value : IM.cat;
-  const p = await window.pywebview.api.import_prepare(cur);
-  if (!p.found){ imSet(`<div class="bad">${esc((p.errors&&p.errors._)||'没有可导入的内容。')}</div>`, [{label:'关闭', onclick:async()=>{ await window.pywebview.api.import_close(); imClose(); }}]); return; }
+  let p; try { p = await window.pywebview.api.import_prepare(cur); } catch(e){ p = {errors:{_:'无法读取导入信息，请关闭后重试。'}}; }
+  if (!p.found){ imSet(`<div class="bad">${esc((p.errors&&p.errors._)||'没有可导入的内容。')}</div>`, [{label:'关闭', onclick:async()=>{ try { await window.pywebview.api.import_close(); } catch(e){} imClose(); }}]); return; }
   const f=p.found, errs=Object.entries(p.errors||{});
   const errHTML = errs.filter(([k])=>k!=='category').map(([,m])=>`<div class="bad">${esc(m)}</div>`).join('');
   const catErr = (p.errors&&p.errors.category) ? `<div class="bad">${esc(p.errors.category)}</div>` : '';
@@ -1347,17 +1361,20 @@ async function imConfirm(){
       <span>分类文件夹名</span><span><input type="text" id="im_cat" maxlength="60" placeholder="可选，留空则直接放入软件文件夹" value="${esc(cur)}"></span>
       <span>保存到</span><span>${esc(p.target)}</span>
       <span>磁盘剩余空间</span><span>${esc(p.free_text)}（本次需要约 ${esc(p.needed_text)}）</span></div>${catErr}${errHTML}${notes.join('')}`,
-    [{label:'取消', onclick:async()=>{ await window.pywebview.api.import_cancel(); imClose(); }},
+    [{label:'取消', onclick:async()=>{ try { await window.pywebview.api.import_cancel(); } catch(e){} imClose(); }},
      {label:'开始导入', cls:'primary', id:'im_go', disabled:!p.can_start, onclick:imBegin}]);
   const inp=$('#im_cat'); let t=null;
   inp.oninput=()=>{ clearTimeout(t); t=setTimeout(()=>{ IM.cat=inp.value; imConfirm().then(()=>{ const i=$('#im_cat'); i.focus(); i.setSelectionRange(i.value.length,i.value.length); }); },350); };
 }
 async function imBegin(){
   const cat=$('#im_cat').value; IM.cat=cat;
-  let r = await window.pywebview.api.import_start(cat, false);
+  $('#im_go').disabled = true;
+  let r = await safeCall(()=>window.pywebview.api.import_start(cat, false), $('#im_go'));
+  if (!r) return;
   if (r.needs_create){
-    if (!await askDialog('创建文件夹', '软件文件夹不存在：\n'+r.base+'\n是否创建？', '创建')) return;
-    r = await window.pywebview.api.import_start(cat, true);
+    if (!await askDialog('创建文件夹', '软件文件夹不存在：\n'+r.base+'\n是否创建？', '创建')){ const g=$('#im_go'); if (g) g.disabled=false; return; }
+    r = await safeCall(()=>window.pywebview.api.import_start(cat, true), $('#im_go'));
+    if (!r) return;
   }
   if (!r.ok){ await infoDialog('无法开始导入', r.message||'无法开始导入。'); imConfirm(); return; }
   IM.stage='copying'; IM.pstage=null;
@@ -1386,13 +1403,13 @@ function imResult(ev){
   if (!ev.cancelled && !c.failed && !c.lr_pending && !c.lr_uncertain && !c.lr_failed) lines.push('<div class="okmsg">全部完成。</div>');
   imSet(`<div class="big">${esc(countsLine(c))}</div><div class="mute">共 ${ev.n} 张，用时 ${fmtTime(ev.elapsed)}。</div>${lines.join('')}
     ${rows?`<div class="plist"><table><thead><tr><th>文件</th><th>环节</th><th>原因</th></tr></thead><tbody>${rows}</tbody></table>${ev.problems_more?`<div class="mute">另有 ${ev.problems_more} 项未列出。</div>`:''}</div>`:''}`,
-    [ev.pending_retry?{label:'重新尝试加入 Lightroom', onclick:async()=>{ const r=await window.pywebview.api.import_retry_lr(); if(!r.ok) await infoDialog('无法重新加入', r.message); else { IM.stage='retry'; IM.pstage=null; } }}:null,
-     {label:'关闭', cls:'primary', onclick:async()=>{ await window.pywebview.api.import_close(); imClose(); }}].filter(Boolean));
+    [ev.pending_retry?{label:'重新尝试加入 Lightroom', onclick:async()=>{ const r=await safeCall(()=>window.pywebview.api.import_retry_lr()); if (!r) return; if(!r.ok) await infoDialog('无法重新加入', r.message); else { IM.stage='retry'; IM.pstage=null; } }}:null,
+     {label:'关闭', cls:'primary', onclick:async()=>{ try { await window.pywebview.api.import_close(); } catch(e){} imClose(); }}].filter(Boolean));
 }
 function onImportEvent(ev){
   if (ev.type==='import_scan'){
     if (ev.state==='scanning'){ if(IM.stage==='scanning'){ imScanning(ev.found||0); } }
-    else if (ev.state==='done'){ if (ev.error){ imOpen('导入照片'); imSet(`<div class="bad">${esc(ev.error)}</div>`, [{label:'关闭', onclick:async()=>{ await window.pywebview.api.import_close(); imClose(); }}]); } else imConfirm(); }
+    else if (ev.state==='done'){ if (ev.error){ imOpen('导入照片'); imSet(`<div class="bad">${esc(ev.error)}</div>`, [{label:'关闭', onclick:async()=>{ try { await window.pywebview.api.import_close(); } catch(e){} imClose(); }}]); } else imConfirm(); }
     else if (ev.state==='cancelled'){ imClose(); }
   } else if (ev.type==='import_progress'){ imProgress(ev); }
   else if (ev.type==='import_done'){ imResult(ev); }
@@ -1514,7 +1531,7 @@ async function pkZoom(id){
 }
 /* 写入 Lightroom：确认清单 → 写入 → 结果 → 撤销 */
 async function pkApply(){
-  const r = await window.pywebview.api.pick_apply_prepare();
+  const r = await safeCall(()=>window.pywebview.api.pick_apply_prepare()); if (!r) return;
   if (!r.ok) return infoDialog('无法应用建议', r.message||'无法生成确认清单。');
   PK.ap = r.items; PK.stage='confirm'; pkConfirmView();
 }
@@ -1759,7 +1776,7 @@ async function clearSel(){
   try { const r=await gapi().library_clear_selection(); if (r && r.message) gmsg(r.message); } catch(e){}
 }
 async function addToLr(){
-  const r=await gapi().library_add_missing(); if (!r.ok) gmsg(r.message||'无法加入。', true); else gmsg('');
+  const r=await safeCall(()=>gapi().library_add_missing()); if (!r) return; if (!r.ok) gmsg(r.message||'无法加入。', true); else gmsg('');
 }
 async function openBaseFolder(){ if (!REAL()) return; const r=await gapi().open_library(); if (!r.ok) toast(r.message); }
 async function changeGalleryFolder(){
@@ -1872,7 +1889,10 @@ async function saveSettings(createMissing=false){
                    confirm_default: setConfirm, ai_use_notes: setNotes, preview_edge: parseInt($('#s_edge').value,10),
                    auto_launch_lightroom: setAutoLr, check_updates: setUpd};
   if (lrChoice) changes.lightroom_path_choice = lrChoice;
-  const r = await window.pywebview.api.save_settings(changes, createMissing);
+  $('#s_save').disabled = true;
+  const r = await safeCall(()=>window.pywebview.api.save_settings(changes, createMissing), $('#s_save'), '设置没有保存，请重试。');
+  if (!r) return;
+  $('#s_save').disabled = false;
   if (r.ok){
     SET.settings = r.settings; confirmDefault = r.settings.confirm_default;
     $('#edge').value = String(r.settings.preview_edge);
