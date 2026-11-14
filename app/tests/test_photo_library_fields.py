@@ -83,6 +83,8 @@ def test_disk_only_photos_get_capture_date_from_file_header_and_it_is_cached(tmp
     lib.refresh_sync()
     assert sorted(calls) == ["a.jpg", "bad.jpg"]                       # 没变的文件不重读
     (base / "a.jpg").write_bytes(jpeg_with(tiff_with("2027:01:02 03:04:05")))
+    st0 = (base / "a.jpg").stat()
+    os.utime(base / "a.jpg", (st0.st_atime, st0.st_mtime + 5))        # 大小相同，必须让修改时间明显不同（CI 上文件时间精度粗，曾偶发同一刻）
     lib.refresh_sync()
     assert calls.count("a.jpg") == 2 and {p["name"]: p["captured"] for p in lib.state()["photos"]}["a.jpg"] == "2027-01-02T03:04:05"
     (base / "bad.jpg").unlink()
