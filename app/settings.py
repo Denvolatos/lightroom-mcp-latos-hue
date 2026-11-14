@@ -22,7 +22,7 @@ from lr_autostart import valid_lightroom_path
 
 SCHEMA_VERSION = 1
 SETTINGS_FILE = Path.home() / "LrMcp" / "app_settings.json"
-APP_VERSION = "1.1.0"                   # 桌面软件 Latos Hue 的版本（发布标签 v1.1.0）
+APP_VERSION = "1.1.1"                   # 桌面软件 Latos Hue 的版本（发布标签 v1.1.1）
 PROJECT_URL = "https://github.com/Denvolatos/lightroom-mcp-latos-hue"
 DATA_DIR_TEXT = "~/LrMcp"
 READ_RETRY_SECONDS = 0.3                # 设置文件读失败时，隔这么久再试一次
