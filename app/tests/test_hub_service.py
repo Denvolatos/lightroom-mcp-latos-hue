@@ -159,7 +159,8 @@ def test_lrservice_remote_mode_has_no_own_bridge(tmp_path):
         lr = LrService(state_file=tmp_path / "s.json", rpc_token="tok")
         assert lr.start() and lr.connected and lr.selected_photo() is not None
         hooks = []
-        lr2 = LrService(state_file=tmp_path / "s.json", rpc_token="tok", restart_hook=lambda: hooks.append(1))
+        lr2 = LrService(state_file=tmp_path / "s.json", rpc_token="tok", restart_hook=lambda: hooks.append(1),
+                        lr_running=lambda: True)                            # 1.1.1：Lightroom 在运行才重建
         lr2.start()
         assert lr2.restart() and hooks == [1]                                # 借用模式的“重新登记”=重建助手进程
         lr.stop()                                                            # 不会关掉别人的服务

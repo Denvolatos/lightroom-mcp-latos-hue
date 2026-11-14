@@ -27,7 +27,10 @@ POLL_READ_TIMEOUT = 10          # list_selected（PR #7 之前是 8）
 DEVELOP_READ_TIMEOUT = 20       # get_develop，只有预览线程在用（PR #7 之前是 15）
 USER_READ_TIMEOUT = 40          # 用户主动触发的读取（PR #7 把所有读取都放宽到了 40）
 
-MSG_READ_TIMEOUT = "Lightroom 没有在时限内回应，可能正忙。稍后会自动重试。"
+REBUILD_BACKOFF_START = 60.0    # 借用模式：重建助手进程后，至少这么久才允许下一次；每次翻倍
+REBUILD_BACKOFF_MAX = 600.0
+
+MSG_READ_TIMEOUT ="Lightroom 没有在时限内回应，可能正忙。稍后会自动重试。"
 MSG_READ_OFFLINE = "Lightroom 插件未连接。请确认 Lightroom 已打开且插件已启用。"
 MSG_READ_FAILED = "Lightroom 没能完成这次读取。请稍后再试；一直不行的话，在 Lightroom 里重新选中这张照片。"
 MSG_READONLY_WRITE = "只读模式已开启，不允许修改照片。要修改，请先关闭只读模式。"
@@ -154,8 +157,15 @@ class RemoteBridge:
 
 class LrService:
     def __init__(self, bridge=None, edit_service=None, state_file: Path | None = None, rpc_token: str | None = None,
-                 alive=lambda: True, restart_hook=None, library_service=None):
-        """给了 state_file 与 rpc_token：借用常驻 claude 的服务（RemoteBridge），自己不起 Bridge；否则自己起一个。"""
+                 alive=lambda: True, restart_hook=None, library_service=None, lr_running=None, clock=time.monotonic):
+        """给了 state_file 与 rpc_token：借用常驻 claude 的服务（RemoteBridge），自己不起 Bridge；否则自己起一个。
+        lr_running：() -> bool，Lightroom 进程是否在运行（默认用 lr_autostart.is_running）；借用模式下决定要不要重建助手进程。"""
+        self._lr_running = lr_running
+        self._clock = clock
+        self._inflight = 0                            # 窗口这边正在等回复的命令数（有在途命令时不重建通道）
+        self._inflight_lock = threading.Lock()
+        self._rebuild_delay = REBUILD_BACKOFF_START   # 借用模式重建助手进程的指数退避
+        self._rebuild_next = 0.0
         self._bridge = bridge
         self._edits = edit_service
         self._remote = (state_file, rpc_token, alive) if state_file is not None and rpc_token else None
@@ -178,7 +188,7 @@ class LrService:
                 if self._remote is not None:
                     edits_mod, _ = _import_server()
                     self._bridge = RemoteBridge(*self._remote)
-                    self._edits = edits_mod.EditService(self._bridge.call)
+                    self._edits = edits_mod.EditService(self._call)
                     self.started_at = time.monotonic()
                     return True
                 edits_mod, bridge_mod = _import_server()
@@ -187,7 +197,7 @@ class LrService:
                 b.start()
                 note_port_used(b.port)
                 self._bridge = b
-                self._edits = edits_mod.EditService(b.call)
+                self._edits = edits_mod.EditService(self._call)
                 self.started_at = time.monotonic()
                 self.start_error = None
                 return True
@@ -202,13 +212,48 @@ class LrService:
             except Exception:
                 pass
 
+    def _call(self, command: str, params: dict | None = None, timeout: float = 30.0) -> dict:
+        """所有经窗口发给插件的命令都走这里：记下在途数量（restart 据此判断能不能重建通道）。"""
+        with self._inflight_lock:
+            self._inflight += 1
+        try:
+            return self._bridge.call(command, params, timeout=timeout)
+        finally:
+            with self._inflight_lock:
+                self._inflight -= 1
+
+    @property
+    def inflight(self) -> int:
+        with self._inflight_lock:
+            return self._inflight
+
+    def _lightroom_running(self) -> bool:
+        try:
+            if self._lr_running is not None:
+                return bool(self._lr_running())
+            import lr_autostart
+            return bool(lr_autostart.is_running())
+        except Exception:                              # noqa: BLE001 - 查不到按“没在运行”：不去重建
+            return False
+
     def restart(self) -> bool:
-        """换一个新端口重新登记（插件约 2 秒内重新发现）。用于长时间连不上时的自动恢复，不需要用户重载插件。"""
-        self.restart_count += 1
+        """换一个新端口重新登记（插件约 2 秒内重新发现）。用于长时间连不上时的自动恢复，不需要用户重载插件。
+        1.1.1：有在途命令时不重建（插件执行长命令时不发轮询，会被误判断开，重建会丢掉结果）。
+        借用模式下重建的是助手进程：只有 Lightroom 确实在运行时才重建（没开 Lightroom 时换端口没有用），并按指数退避。
+        返回是否真的重建了。"""
+        if self.inflight > 0:
+            return False
         if self._remote is not None:                   # 借用模式：重建的是助手进程（换新端口）
+            now = self._clock()
+            if now < self._rebuild_next or not self._lightroom_running():
+                return False
+            self._rebuild_next = now + self._rebuild_delay
+            self._rebuild_delay = min(self._rebuild_delay * 2, REBUILD_BACKOFF_MAX)
+            self.restart_count += 1
             if self._restart_hook:
                 self._restart_hook()
             return True
+        self.restart_count += 1
         with self._lock:
             self.stop()
             self._bridge = None
@@ -235,7 +280,7 @@ class LrService:
         if not self.connected:
             return None
         try:
-            r = self._bridge.call("list_selected", {"limit": 1}, timeout=self._read_timeout(POLL_READ_TIMEOUT))
+            r = self._call("list_selected", {"limit": 1}, timeout=self._read_timeout(POLL_READ_TIMEOUT))
         except Exception:
             return None
         pid = r.get("active_id")
@@ -250,7 +295,7 @@ class LrService:
         if not self.connected:
             return None
         try:
-            r = self._bridge.call("list_selected", {"limit": max(1, min(int(limit), 20))},
+            r = self._call("list_selected", {"limit": max(1, min(int(limit), 20))},
                                   timeout=self._read_timeout(POLL_READ_TIMEOUT))
         except Exception:
             return None
@@ -265,7 +310,7 @@ class LrService:
         if not self.connected:
             return None
         try:
-            r = self._bridge.call("list_selected", {"limit": 20}, timeout=self._read_timeout(POLL_READ_TIMEOUT))
+            r = self._call("list_selected", {"limit": 20}, timeout=self._read_timeout(POLL_READ_TIMEOUT))
             self.last_selected_error = None
         except Exception as e:
             log.warning("list_selected failed: %s: %s", type(e).__name__, e)
@@ -279,13 +324,13 @@ class LrService:
 
     def develop_of(self, photo_id: str) -> dict:
         """读取一张照片的调整参数（用来判断“编辑版本”是否变化）。出错直接抛异常，由调用方处理。"""
-        return self._bridge.call("get_develop", {"photo": photo_id}, timeout=self._read_timeout(DEVELOP_READ_TIMEOUT))
+        return self._call("get_develop", {"photo": photo_id}, timeout=self._read_timeout(DEVELOP_READ_TIMEOUT))
 
     def preview_bytes(self, photo_id: str, long_edge: int) -> tuple[bytes, str | None]:
         """让插件渲染一张预览并读回 JPEG 字节；只接受预览目录内的文件，读完删除（文件名每次唯一，只属于本次请求）。"""
         edits_mod, _ = _import_server()
         from lightroom_mcp import config
-        data = self._bridge.call("get_preview", {"photo": photo_id, "long_edge": int(long_edge)}, timeout=60)
+        data = self._call("get_preview", {"photo": photo_id, "long_edge": int(long_edge)}, timeout=60)
         path = Path(str(data.get("path", ""))).resolve()
         if config.PREVIEW_DIR.resolve() not in path.parents or not path.is_file():
             raise RuntimeError("插件返回的预览文件不在预期目录，已拒绝读取。")
@@ -298,14 +343,17 @@ class LrService:
 
     @property
     def connected(self) -> bool:
-        return bool(self._bridge is not None and getattr(self._bridge, "connected", False))
+        ok = bool(self._bridge is not None and getattr(self._bridge, "connected", False))
+        if ok and self._rebuild_delay != REBUILD_BACKOFF_START:       # 连上了：重建退避回到起点
+            self._rebuild_delay, self._rebuild_next = REBUILD_BACKOFF_START, 0.0
+        return ok
 
     # ---- 读取当前值（确认卡片用，尽力而为） -------------------------
     def current_values(self, keys: list[str]) -> dict:
         if not self.connected:
             return {}
         edits_mod, _ = _import_server()
-        develop = self._bridge.call("get_develop", {"photo": "selected"}, timeout=10)
+        develop = self._call("get_develop", {"photo": "selected"}, timeout=10)
         out = {}
         for k in keys:
             try:
@@ -380,7 +428,7 @@ class LrService:
             raise bridge_mod.PluginNotConnected("无法建立与 Lightroom 的连接。")
         _import_server()
         from lightroom_mcp import library as library_mod
-        return library_mod.LibraryService(self._bridge.call)
+        return library_mod.LibraryService(self._call)
 
     def library_list(self, path: str, offset: int = 0, limit: int = 500) -> dict:
         """软件文件夹（含子文件夹）里、目录已有的照片，分页：{"in_catalog","total","offset","photos":[...]}。"""
@@ -406,7 +454,7 @@ class LrService:
         if not sel or not sel.get("id"):
             return None
         try:
-            snap = self._bridge.call("snapshot", {"photo": sel["id"]}, timeout=60)
+            snap = self._call("snapshot", {"photo": sel["id"]}, timeout=60)
         except Exception:
             return None
         return {"id": sel["id"], "name": sel.get("name"), "settings": snap.get("settings") or {},

@@ -99,7 +99,8 @@ class Backend:
         elif st["connected"]:
             self._side_attempts = 0
         # 窗口自己的通道连不上：换端口重新登记
-        if not st["app"] and self._down_since is not None:
+        # 有在途命令时不重建：插件执行长命令（导出、缩略图、大文件夹）时不发轮询，看起来像断开，其实还在干活
+        if not st["app"] and self._down_since is not None and not self._inflight():
             if (now - self._down_since > LR_RESTART_SECONDS and now - self._last_lr_restart > LR_RESTART_SECONDS
                     and not self._holding()):
                 self._last_lr_restart = now
@@ -117,6 +118,12 @@ class Backend:
             self._last_photo_poll = now
             self.refresh_photo()
         return st
+
+    def _inflight(self) -> bool:
+        try:
+            return int(getattr(self.lr, "inflight", 0) or 0) > 0
+        except Exception:                           # noqa: BLE001
+            return False
 
     def _holding(self) -> bool:
         try:
