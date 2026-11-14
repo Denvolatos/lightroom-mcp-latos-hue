@@ -2,10 +2,12 @@
 # Copyright (C) 2026 Denvolatos and contributors
 """软件内的图库：在软件里浏览、选择照片，Lightroom 只是后台引擎（0.11.0）。
 
-数据来源有两路，按小写规范化后的路径合并：
+图库 = 照片库 = 设置里的照片工作文件夹（base_folder，1.2.0 起不能浏览别的文件夹）。数据来源有两路，按小写规范化后的路径合并：
   1. Lightroom 目录里软件文件夹（含子文件夹）的照片（插件命令 list_folder_photos，分页取全）；
   2. 磁盘扫描软件文件夹（复用 importer.scan_folder 的规则：扩展名白名单、深度、隐藏/系统目录、不跟随链接）。
 磁盘上有、目录里没有 -> “尚未加入 Lightroom”；目录里有、磁盘上找不到 -> “文件缺失”。
+每张照片给出排序所需的字段（拍摄时间、加入时间、文件名、大小、星级、旗标、颜色标签、修改时间、是否已调整、类型），排序本身由前端做；
+目录里取不到的字段（旧版插件、SDK 键名不被接受）为 None。磁盘上有、目录里没有的照片，拍摄时间从文件头读（capture_date），按 (路径, 大小, 修改时间) 缓存。
 
 缩略图：页面只请求可见格；后台线程每批最多 THUMB_BATCH（2）张向 Lightroom 取，前台请求（选中、预览）优先（插件一次回传多张受 20 秒上限限制），存进内存缓存
 （最多 500 张且总量 64 MB，最久未用先淘汰），由本机图片服务（preview.PreviewServer，只服务缓存里的图、带随机口令）提供 URL。
@@ -23,10 +25,11 @@ import threading
 import time
 import secrets
 
+import capture_date
 import importer as imp
 from lr_service import foreground, wait_foreground_idle
 from preview import PreviewStore
-from settings import browse_folder
+from settings import DEFAULT_GALLERY_ORDER, DEFAULT_GALLERY_SORT, GALLERY_ORDERS, GALLERY_SORT_KEYS, browse_folder
 
 MAX_PHOTOS = 2000                 # 图库最多显示的照片数
 PAGE = 500                        # 每页向 Lightroom 取的张数（插件上限 500）
@@ -43,7 +46,6 @@ DIRTY_DELAY = 1.0                 # 照片被调整后，等这么久（让 Ligh
 GROUP_ROOT = "（未分类）"
 UID_RE = re.compile(r"^[A-Za-z0-9\-]{1,64}$")
 
-MSG_BROWSE_GONE = "浏览目录暂时无法访问，请检查磁盘，或点“换目录”重新选择。"
 MSG_OFFLINE = "Lightroom 未连接，无法显示照片信息"
 MSG_TIMEOUT = "Lightroom 没有在时限内回复，可能正忙。请稍后再试。"
 MSG_TRUNCATED = f"仅显示前 {MAX_PHOTOS} 张。"
@@ -154,11 +156,14 @@ class PhotoLibrary:
     selected_all()、metadata_of(id)、readonly_error()、import_photo(path)。server 提供图片服务（preview.PreviewServer，store 为 ThumbStore）。"""
 
     def __init__(self, settings, lr, emit, server, *, scan_fn=imp.scan_folder, on_selected=None, busy_fn=lambda: False,
-                 add_fn=imp.add_to_lightroom, sleep=time.sleep, dirty_delay: float = DIRTY_DELAY, run_async=None, clock=time.monotonic):
+                 add_fn=imp.add_to_lightroom, sleep=time.sleep, dirty_delay: float = DIRTY_DELAY, run_async=None, clock=time.monotonic,
+                 date_fn=capture_date.capture_datetime, stat_fn=os.stat):
         self.settings, self.lr, self.emit, self.server = settings, lr, emit, server
         self.store: ThumbStore = server.store
         self._scan_fn, self._on_selected, self._busy_fn, self._add_fn, self._sleep = scan_fn, on_selected, busy_fn, add_fn, sleep
         self._dirty_delay, self._clock = dirty_delay, clock
+        self._date_fn, self._stat_fn = date_fn, stat_fn
+        self._date_cache: dict[str, tuple] = {}   # 路径键 -> (大小, 修改时间, 拍摄时间文本或 None)：避免每次刷新重读文件头
         self._run_async = run_async or (lambda fn: threading.Thread(target=fn, daemon=True).start())
         self._lock = threading.RLock()
         self._select_lock = threading.Lock()
@@ -237,8 +242,6 @@ class PhotoLibrary:
         exists = os.path.isdir(base)
         with self._lock:
             self.base, self.base_exists = base, exists
-        if not exists and self.settings.data.get("gallery_folder"):      # 另选的浏览目录暂时不在（比如移动硬盘没接）：设置保留
-            return self._set_error(MSG_BROWSE_GONE)
         if not self.lr.connected:
             return self._set_error(MSG_OFFLINE)
         cat_photos: list[dict] = []
@@ -276,6 +279,30 @@ class PhotoLibrary:
             offset += len(r.get("photos") or [])
         return in_catalog, out, total > len(out) and len(out) >= MAX_PHOTOS
 
+    @staticmethod
+    def _clean_label(v):
+        return v.strip().lower() if isinstance(v, str) and v.strip().lower() not in ("", "none") else None
+
+    def _file_info(self, path: str, key: str, want_date: bool):
+        """磁盘上的文件：(大小, 修改时间, 拍摄时间文本)。拍摄时间只在 want_date 时读（并缓存）；文件不在返回 (None, None, None)。"""
+        try:
+            st = self._stat_fn(path)
+            size, mtime = st.st_size, round(st.st_mtime, 3)
+        except OSError:
+            return None, None, None
+        if not want_date:
+            return size, mtime, None
+        hit = self._date_cache.get(key)
+        if hit is not None and hit[0] == size and hit[1] == mtime:
+            return size, mtime, hit[2]
+        try:
+            dt = self._date_fn(path)
+            text = dt.strftime("%Y-%m-%dT%H:%M:%S") if dt is not None else None
+        except Exception:                        # noqa: BLE001 - 读不出来就是没有
+            text = None
+        self._date_cache[key] = (size, mtime, text)
+        return size, mtime, text
+
     def _merge(self, base, in_catalog, cat_photos, cat_truncated, disk, disk_truncated) -> None:
         recs: list[dict] = []
         cat_keys = set()
@@ -286,20 +313,27 @@ class PhotoLibrary:
             ext = path.rsplit(".", 1)[-1] if "." in path else ""
             flag = p.get("flag") if p.get("flag") in ("pick", "reject") else "none"
             rating = p.get("rating") if isinstance(p.get("rating"), int) and not isinstance(p.get("rating"), bool) else None
+            size, mtime, _d = self._file_info(path, key, False) if key in disk else (None, None, None)
+            edited = p.get("edited") if isinstance(p.get("edited"), bool) else None
+            added_at = p.get("added_at") if isinstance(p.get("added_at"), str) and p.get("added_at") else None
             recs.append({"uid": p["id"], "name": str(p.get("name") or os.path.basename(path) or p["id"]), "path": path, "key": key,
                          "group": group_of(path, base, str(p.get("subfolder") or "")), "format": str(p.get("format") or ext).upper()[:6],
                          "rating": rating, "flag": flag, "captured": p.get("captured") or None, "w": p.get("width"), "h": p.get("height"),
-                         "vc": bool(p.get("is_virtual_copy")), "in_catalog": True, "on_disk": key in disk})
+                         "vc": bool(p.get("is_virtual_copy")), "in_catalog": True, "on_disk": key in disk,
+                         "size": size, "mtime": mtime, "label": self._clean_label(p.get("label")), "edited": edited, "added_at": added_at})
         if not cat_truncated:                    # 目录没取全时无法判断“尚未加入”，宁可不标
             for key, (path, size) in disk.items():
                 if key in cat_keys:
                     continue
                 ext = path.rsplit(".", 1)[-1] if "." in path else ""
+                size, mtime, captured = self._file_info(path, key, True)
                 recs.append({"uid": "n-" + hashlib.sha1(key.encode("utf-8", "replace")).hexdigest()[:16], "name": os.path.basename(path),
                              "path": path, "key": key, "group": group_of(path, base), "format": ext.upper()[:6], "rating": None,
-                             "flag": "none", "captured": None, "w": None, "h": None, "vc": False, "in_catalog": False, "on_disk": True})
+                             "flag": "none", "captured": captured, "w": None, "h": None, "vc": False, "in_catalog": False, "on_disk": True,
+                             "size": size, "mtime": mtime, "label": None, "edited": None, "added_at": None})
         truncated = cat_truncated or disk_truncated or len(recs) > MAX_PHOTOS
         recs = [p for g in sort_groups(recs, "name") for p in g["photos"]][:MAX_PHOTOS]
+        self._date_cache = {k: v for k, v in self._date_cache.items() if k in disk}      # 只保留还在磁盘上的
         with self._lock:
             self.photos, self._by_uid = recs, {p["uid"]: p for p in recs}
             self.in_catalog, self.truncated = in_catalog, truncated
@@ -324,10 +358,22 @@ class PhotoLibrary:
             self.sel_ids, self.active = [], None
 
     # ================================================================ 状态
+    def sort_key(self) -> str:
+        v = self.settings.data.get("gallery_sort")
+        return v if v in GALLERY_SORT_KEYS else DEFAULT_GALLERY_SORT
+
+    def sort_order(self) -> str:
+        v = self.settings.data.get("gallery_order")
+        return v if v in GALLERY_ORDERS else DEFAULT_GALLERY_ORDER
+
     def public(self, p: dict) -> dict:
+        """页面看到的一张照片。排序字段：captured（拍摄时间）、added_at（加入 Lightroom 目录的时间）、name、size（字节）、rating、flag、
+        label（颜色标签名或 None）、mtime（文件修改时间，epoch 秒）、edited（True/False，目录里没有或取不到为 None）、format（类型）。"""
         return {"id": p["uid"], "name": p["name"], "group": p["group"], "format": p["format"], "rating": p["rating"], "flag": p["flag"],
                 "captured": p["captured"], "w": p["w"], "h": p["h"], "vc": p["vc"], "added": p["in_catalog"],
-                "missing": bool(p["in_catalog"] and not p["on_disk"])}
+                "missing": bool(p["in_catalog"] and not p["on_disk"]),
+                "size": p.get("size"), "mtime": p.get("mtime"), "label": p.get("label"), "edited": p.get("edited"),
+                "added_at": p.get("added_at")}
 
     def state(self) -> dict:
         with self._lock:
@@ -338,7 +384,7 @@ class PhotoLibrary:
                 if e is not None:
                     thumbs[p["uid"]] = self.server.url_for(e)
             return {"ok": True, "state": self.state_name, "message": self.message, "stale": self.stale,
-                    "base": self.base, "base_exists": self.base_exists,
+                    "base": self.base, "base_exists": self.base_exists, "sort": self.sort_key(), "order": self.sort_order(),
                     "in_catalog": self.in_catalog, "lr_connected": bool(self.lr.connected), "total": len(photos), "limit": MAX_PHOTOS,
                     "truncated": self.truncated, "truncated_message": MSG_TRUNCATED if self.truncated else "",
                     "not_added": sum(1 for p in photos if not p["added"]), "missing": sum(1 for p in photos if p["missing"]),

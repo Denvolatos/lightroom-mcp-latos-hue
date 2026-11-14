@@ -990,16 +990,33 @@ def test_api_reconnect_refreshes_library(api):
     assert api.library_state()["total"] == 1
 
 
-def test_api_gallery_picker_changes_browsing_only(api, tmp_path):
-    browse = tmp_path / "existing"
-    browse.mkdir()
-    touch(browse / "B.jpg")
-    api._photolib.lr.catalog = [cat(2, browse / "B.jpg")]
-    api.choose_folder = lambda start="": {"ok": True, "path": str(browse)}
-    assert api.gallery_pick_folder()["ok"]
-    assert api._settings.data["base_folder"] == str(api._base)
-    assert api.library_state()["base"] == str(browse)
-    assert api.library_state()["total"] == 1
+def test_api_has_no_gallery_folder_picker_and_browses_only_the_library(api, tmp_path):
+    assert not hasattr(api, "gallery_pick_folder")
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    touch(other / "B.jpg")
+    api._settings.data["gallery_folder"] = str(other)            # 旧设置残留：必须被忽略
+    api._photolib.lr.catalog = []
+    touch(api._base / "A.jpg")
+    api.library_refresh()
+    end = time.time() + 3
+    while time.time() < end and api.library_state()["state"] != "ready":
+        time.sleep(0.02)
+    s = api.library_state()
+    assert s["base"] == str(api._base) and [p["name"] for p in s["photos"]] == ["A.jpg"]
+
+
+def test_api_gallery_set_sort(api):
+    s = api.library_state()
+    assert (s["sort"], s["order"]) == ("captured", "desc")
+    assert api.gallery_set_sort("size", "asc") == {"ok": True, "sort": "size", "order": "asc"}
+    s = api.library_state()
+    assert (s["sort"], s["order"]) == ("size", "asc")
+    assert api._settings.data["gallery_sort"] == "size"
+    for bad in (("nope", "asc"), ("name", "up"), (1, "asc"), ("name", None), ("", "")):
+        r = api.gallery_set_sort(*bad)
+        assert r == {"ok": False, "sort": "size", "order": "asc"}          # 不合法：不保存，返回当前值
+    assert api.gallery_set_sort("name", "desc")["ok"] and api.library_state()["sort"] == "name"
 
 
 def test_api_lightroom_selection_event_updates_library(api):
