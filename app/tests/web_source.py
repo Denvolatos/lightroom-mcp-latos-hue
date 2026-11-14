@@ -1,4 +1,4 @@
-﻿# SPDX-License-Identifier: AGPL-3.0-only
+# SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2026 Denvolatos and contributors
 """Shared helpers for tests that need the text or the static files of the web UI (app/web).
 
