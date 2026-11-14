@@ -1151,6 +1151,7 @@ local THUMB_MAX_IDS, THUMB_MIN, THUMB_MAX, THUMB_DEFAULT = 24, 64, 512, 256
 local THUMB_MAX_BYTES = 150 * 1024
 local THUMB_TIMEOUT = 8 -- seconds per photo
 local SELECT_MAX_IDS = 50
+local SELECT_RETRY_WAITS = { 0.1, 0.15, 0.25, 0.5 } -- seconds before each new attempt after a folder switch (1.0 s in all)
 
 local function urlDecode(text)
 	return (text:gsub("%%(%x%x)", function(h)
@@ -1409,56 +1410,111 @@ function M.select_photos(params)
 		end
 	end
 
-	local folderShown, folderNote = nil, nil
-	if folderPath then
-		local folder = catalog:getFolderByPath(folderPath)
-		if not folder then
-			folderShown, folderNote = false, "这个文件夹不在目录里，没有切换文件夹。"
-		else
-			local ok, res = LrTasks.pcall(function()
-				return catalog:setActiveSources({ folder })
-			end)
-			folderShown = ok and res == true
-			if not folderShown then
-				folderNote = "Lightroom 没有切换到这个文件夹。"
-			end
-		end
-	end
-
-	-- Right after setActiveSources Lightroom needs a moment to show the folder; until then the photos are not in the current
-	-- view and setSelectedPhotos selects nothing without an error (seen on real Lightroom 15.2): wait, select, read back, and
-	-- try again a few times. Without a folder switch there is one attempt only.
-	local attempts = folderShown and 5 or 1
-	if folderShown then
-		LrTasks.sleep(0.3)
-	end
-	local ok, err, selected, notSelected
-	for attempt = 1, attempts do
-		ok, err = LrTasks.pcall(function()
+	-- select and read back what Lightroom really selected
+	local function trySelect()
+		local okSel, errSel = LrTasks.pcall(function()
 			catalog:setSelectedPhotos(active, others)
 		end)
-		selected = selectedIds(catalog)
+		local now = selectedIds(catalog)
 		local got = {}
-		for _, id in ipairs(selected) do
+		for _, id in ipairs(now) do
 			got[id] = true
 		end
-		notSelected = {}
+		local missed = {}
 		for _, p in ipairs(found) do
 			local id = p:getRawMetadata("uuid")
 			if not got[id] then
-				notSelected[#notSelected + 1] = id
+				missed[#missed + 1] = id
 			end
 		end
-		if not ok or #notSelected == 0 or attempt == attempts then
-			break
+		return okSel, errSel, now, missed
+	end
+
+	-- First select directly: usually the photos are already in the view and Lightroom need not switch anything (switching
+	-- reloads the grid). Only if some photo is not selected and show_folder was given, switch to the folders the photos
+	-- themselves are in (not the browse root: without "include subfolders" its view does not contain them), and only if
+	-- Lightroom is not already showing exactly those folders.
+	local ok, err, selected, notSelected = trySelect()
+	local folderShown, folderNote = nil, nil
+	if ok and #notSelected > 0 and folderPath then
+		local targets, keys, wanted, lost = {}, {}, 0, false
+		for _, p in ipairs(found) do
+			local folder
+			local photoPath = p:getRawMetadata("path")
+			if photoPath then
+				folder = catalog:getFolderByPath(LrPathUtils.parent(photoPath))
+			end
+			if not folder then
+				lost = true
+			else
+				local key = asciiLower(tostring(folder:getPath() or ""))
+				if not keys[key] then
+					keys[key] = true
+					wanted = wanted + 1
+					targets[#targets + 1] = folder
+				end
+			end
 		end
-		LrTasks.sleep(0.4)
+		if lost then -- a photo whose own folder cannot be found: the folder the app shows is the best guess
+			local fallback = catalog:getFolderByPath(folderPath)
+			local key = fallback and asciiLower(tostring(fallback:getPath() or ""))
+			if fallback and not keys[key] then
+				keys[key] = true
+				wanted = wanted + 1
+				targets[#targets + 1] = fallback
+			end
+		end
+		if #targets == 0 then
+			folderShown, folderNote = false, "照片所在的文件夹不在目录里，没有切换文件夹。"
+		else
+			-- the current sources, compared by path (collections have no getPath and never match)
+			local same = false
+			local okSrc, current = LrTasks.pcall(function()
+				return catalog:getActiveSources()
+			end)
+			if okSrc and type(current) == "table" and #current == wanted then
+				same = true
+				for _, source in ipairs(current) do
+					local okPath, sourcePath = LrTasks.pcall(function()
+						return source:getPath()
+					end)
+					if not okPath or type(sourcePath) ~= "string" or not keys[asciiLower(sourcePath)] then
+						same = false
+						break
+					end
+				end
+			end
+			if same then
+				folderShown = true -- already shown; switching again would only reload the grid
+			else
+				local okSet, res = LrTasks.pcall(function()
+					return catalog:setActiveSources(targets)
+				end)
+				folderShown = okSet and res == true
+				if not folderShown then
+					folderNote = "Lightroom 没有切换到照片所在的文件夹。"
+				else
+					-- Right after setActiveSources Lightroom needs a moment to show the folder; until then setSelectedPhotos
+					-- selects nothing without an error (seen on real Lightroom 15.2): short waits, a few attempts (at most ~1 s).
+					for _, wait in ipairs(SELECT_RETRY_WAITS) do
+						LrTasks.sleep(wait)
+						ok, err, selected, notSelected = trySelect()
+						if not ok or #notSelected == 0 then
+							break
+						end
+					end
+				end
+			end
+		end
 	end
 	local reason
 	if not ok then
 		reason = "Lightroom 拒绝了选中操作：" .. tostring(type(err) == "table" and err.lrmcp or err)
 	elseif #notSelected > 0 then
 		reason = "有照片没有被选中：它们可能不在 Lightroom 当前显示的文件夹或集合里。可以带上 show_folder 让 Lightroom 先切到照片所在的文件夹。"
+	end
+	if reason and folderNote then
+		reason = folderNote .. reason -- why the folder was not switched comes first
 	end
 	return {
 		selected = Json.array(selected),

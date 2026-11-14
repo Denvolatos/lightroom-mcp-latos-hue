@@ -98,7 +98,9 @@ function catalog:getTargetPhotos()
 end
 function catalog:findPhotoByUuid(id) if id == FAKE.uuid then return photo end return FAKE.libphotos[id] end
 function catalog:getFolderByPath(p) return FAKE.libfolders[p] end
+function catalog:getActiveSources() return FAKE.sources or {} end
 function catalog:setActiveSources(sources)
+  FAKE.sources_calls = (FAKE.sources_calls or 0) + 1
   FAKE.sources = sources
   if FAKE.sources_fail then return false end
   local function apply()
@@ -175,6 +177,7 @@ local modules = {
                   fileAttributes = function() return { fileSize = 12345 } end },
   LrPathUtils = { child = child, getStandardFilePath = function() return "C:\\Users\\test" end,
                   leafName = function(p) return (p:match("([^\\]+)$")) end,
+                  parent = function(p) return (p:match("^(.*)\\[^\\]+$")) end,
                   removeExtension = function(p) return (p:gsub("%.[^%.\\]+$", "")) end,
                   isAbsolute = function(p) return p:match("^%a:[\\/]") ~= nil or p:sub(1, 1) == "/" end },
 }
@@ -255,8 +258,9 @@ function ADD_LIB_PHOTO(uuid, path, o)
   return ph
 end
 function ADD_LIB_FOLDER(path, uuids, children)   -- uuids: photos directly in the folder; children: other folder paths
-  local f = { own = {} }
+  local f = { own = {}, path = path }
   for _, u in ipairs(uuids) do f.own[#f.own + 1] = FAKE.libphotos[u] end
+  function f:getPath() return path end
   function f:getPhotos(includeChildren)
     FAKE.getphotos_arg = includeChildren
     local out = {}
@@ -289,7 +293,7 @@ function SET_VIEW(uuids) FAKE.view = {} for _, u in ipairs(uuids) do FAKE.view[u
 function RESET()
   FAKE.clock, FAKE.pending, FAKE.libphotos, FAKE.libfolders = 0, {}, {}, {}
   FAKE.thumb_plan, FAKE.thumb_calls, FAKE.thumb_async, FAKE.selected, FAKE.view = {}, {}, false, nil, nil
-  FAKE.sources, FAKE.sources_fail, FAKE.select_fails, FAKE.select_calls = nil, false, false, 0
+  FAKE.sources, FAKE.sources_fail, FAKE.select_fails, FAKE.select_calls, FAKE.sources_calls = nil, false, false, 0, 0
   FAKE.files, FAKE.folders, FAKE.last_export, FAKE.export_fails = {}, {}, nil, false
   FAKE.in_catalog, FAKE.add_fails, FAKE.in_gate = {}, false, false
   FAKE.meta = { rating = nil, pick = 0, label = "", title = "", caption = "", keywords = { newKeyword("Torino") } }
@@ -1057,11 +1061,49 @@ def test_select_photo_outside_the_view_is_reported_honestly(lib):
 
 
 def test_select_show_folder_not_in_catalog_or_refused_by_lightroom(lib):
-    data = lib.run("select_photos", ids=U1, show_folder=enc("D:\\nowhere"))["data"]
-    assert data["folder_shown"] is False and "不在目录" in data["reason"] and data["selected"] == [U1]
+    lib.set_view([U1])     # U4's own folder (D:\other) is not in the catalog, nor is the folder the app shows
+    data = lib.run("select_photos", ids=U4, show_folder=enc("D:\\nowhere"))["data"]
+    assert data["folder_shown"] is False and "不在目录" in data["reason"] and data["selected"] == []
+    assert lib.fake("sources_calls") == 0
+    lib.set_view([U4])
     lib.set_flag("sources_fail", True)
     data = lib.run("select_photos", ids=U1, show_folder=enc(ROOT))["data"]
     assert data["folder_shown"] is False and "没有切换" in data["reason"]
+
+
+# ---- 1.1.1: select first, switch the folder only when needed, and then to the photo's own folder ----------------------
+def test_select_photos_in_the_view_never_switches_the_folder(lib):
+    data = lib.run("select_photos", ids=f"{U1},{U3}", show_folder=enc(ROOT))["data"]
+    assert data["all_selected"] is True and data.get("folder_shown") is None     # nil: no switch was needed
+    assert lib.fake("sources_calls") == 0 and lib.fake("select_calls") == 1 and lib.fake("clock") == 0
+
+
+def test_select_switches_to_the_photos_own_folders_not_the_browse_root(lib):
+    lib.set_view([U4])
+    data = lib.run("select_photos", ids=f"{U1},{U3}", show_folder=enc(ROOT))["data"]
+    assert data["all_selected"] is True and data["folder_shown"] is True
+    shown = sorted(f["path"] for f in lib.fake("sources").values())
+    assert shown == sorted([ROOT, ROOT + "\\sub\\deep"])       # U3 lives in sub\deep, not directly in ROOT
+    assert lib.fake("sources_calls") == 1
+
+
+def test_select_does_not_switch_again_when_the_folder_is_already_shown(lib):
+    lib.set_view([U1])
+    lib.run("select_photos", ids=U3, show_folder=enc(ROOT))       # switches to sub\deep once
+    assert lib.fake("sources_calls") == 1
+    lib.set_view([])                                              # e.g. a filter hides it: switching again would not help
+    data = lib.run("select_photos", ids=U3, show_folder=enc(ROOT))["data"]
+    assert lib.fake("sources_calls") == 1 and data["folder_shown"] is True and data["all_selected"] is False
+    assert lib.fake("select_calls") == 3                           # one attempt only, no waiting
+
+
+def test_select_after_a_switch_waits_only_briefly(lib):
+    lib.set_view([U4])
+    lib.set_flag("view_delay", True)
+    lib.set_flag("select_fails", False)
+    data = lib.run("select_photos", ids=U1, show_folder=enc(ROOT))["data"]
+    assert data["all_selected"] is True and lib.fake("clock") <= 0.15
+    lib.reset()
 
 
 def test_select_reports_lightrooms_refusal(lib):
