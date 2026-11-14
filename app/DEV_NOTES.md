@@ -818,7 +818,7 @@ photo_id 逐字取自第 ③ 项；按从好到坏排列；score 1–10；stars 
 
 - 所有自有源文件开头两行：`SPDX-License-Identifier: AGPL-3.0-only` 和 `Copyright (C) 2026 Denvolatos and contributors`（各语言用自己的注释符：`#`、`--`、`;`、HTML 注释）。
 - **选 "-only" 而非 "-or-later"**：项目对外承诺的是 AGPL-3.0（README、CONTRIBUTING），贡献者同意的也是 3.0，没有人授权"或更新版本"；以后 AGPL 出新版本，是否升级要另行决定。
-- 范围：app/ server/ plugin/ 下的 .py .lua；experiments/ 下的 .lua（都是本项目自己写的 Lightroom 实验脚本）；根目录与 server/ 的 .ps1；installer/ 的 .iss；app/web/index.html（放在 `<!doctype html>` 之后的 HTML 注释里，用无头 Edge 实测 `document.compatMode` 仍是 `CSS1Compat`，没进怪异模式）；app/latoshue.spec；`server/exp2_server.py` 等自有实验脚本。保留 BOM、shebang、编码声明、原有行尾。
+- 范围：app/ server/ plugin/ 下的 .py .lua；experiments/ 下的 .lua（都是本项目自己写的 Lightroom 实验脚本）；根目录与 server/ 的 .ps1；installer/ 的 .iss；app/web/css/*.css、app/web/js/*.js（顶部 `/* */` 注释两行）；app/web/index.html（放在 `<!doctype html>` 之后的 HTML 注释里，用无头 Edge 实测 `document.compatMode` 仍是 `CSS1Compat`，没进怪异模式）；app/latoshue.spec；`server/exp2_server.py` 等自有实验脚本。保留 BOM、shebang、编码声明、原有行尾。
 - 不加：.bat（保持纯 ASCII 且很短）、LICENSE、*.md、*.txt（含 installer/*.txt 数据）、图片/图标、build/ 产物、docs/（目前没有 docs/sdk，仓库里没有 Adobe SDK 文件）。
 - 守卫测试：`app/tests/test_spdx_headers.py`，范围与上面一致；新增文件忘了抬头会测出来。
 - 打包的第三方库清单见 THIRD_PARTY_NOTICES.md B 节；许可证文本副本在 `licenses/`（尚未让安装包带上，待决定）。
@@ -939,3 +939,10 @@ PR 新增的 `version_save / version_apply / batch_plan_from_edit / batch_apply 
 7. **图库换目录：** 真窗口里的文件夹对话框、浏览一个不在 Lightroom 目录里的文件夹、“加入 Lightroom”原地添加、移动硬盘拔掉后的表现。
 8. **CI 在 GitHub 运行器上的结果：** 工作流没有在 GitHub 上跑过（没有 push）；特别是不再排除的 `test_stop_interrupts_but_keeps_process`，以及 Python 3.11 + windows-latest 下 pywebview / lupa 的安装。
 9. 安装包没有重新构建：`docs/release/v1.1.0.md` 的大小与 SHA-256 待构建后填写。
+
+# 网页界面拆分（2026-11-14）
+
+- `app/web/index.html` 只留页面结构；样式在 `css/app.css`，脚本在 `js/*.js`，都是**经典脚本**（不是 ES module），共用全局作用域，按 `index.html` 里 `<script src>` 的顺序加载：core → library → preview → chat → export → import → pick → gallery → settings → update → wizard → boot。
+- 新增脚本必须放进这个顺序里；全局 `const`/`let` 不能在声明的文件之前被顶层代码用到（函数声明不会跨文件提升）。`boot.js` 最后加载，里面的 `renderAll()` 在启动时执行。
+- 打包：spec 把整个 `web/` 目录带上（含 css/、js/），安装包递归复制；`frozen.py` 的自检会核对 `index.html` 引用的每个 css/js 文件都在。
+- 测试：`app/tests/web_source.py` 提供 `web_source()`（index+css+js 拼接文本）、`inject_stub()`、`serve_static()`；`ui_*_check.py` 靠它们在本机静态服务里提供 css/、js/。
