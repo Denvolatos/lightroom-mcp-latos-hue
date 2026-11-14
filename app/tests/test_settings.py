@@ -49,10 +49,13 @@ def test_defaults_when_file_missing(store):
 
 
 @pytest.mark.parametrize("content", ["{坏的", "", "[1,2]", "null", '"x"'])
-def test_corrupt_file_does_not_crash(tmp_path, content):
+def test_corrupt_file_does_not_crash(tmp_path, content, monkeypatch):
+    monkeypatch.setattr(st, "READ_RETRY_SECONDS", 0)
     p = tmp_path / "s.json"
     p.write_text(content, encoding="utf-8")
-    assert st.SettingsStore(p, restrict=lambda x: None).data == st.defaults()
+    # 文件存在但读不出：回退默认值，但不当成全新安装（provider_chosen 不判成 False），坏文件改名留档
+    assert st.SettingsStore(p, restrict=lambda x: None).data == {**st.defaults(), "provider_chosen": True}
+    assert not p.exists() and len(list(tmp_path.glob("s.json.bad-*"))) == 1
 
 
 def test_missing_and_invalid_fields_fall_back(tmp_path):

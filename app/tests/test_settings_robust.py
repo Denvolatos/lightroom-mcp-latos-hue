@@ -106,3 +106,64 @@ def test_save_settings_refreshes_gallery_and_wizard_when_folder_changes(tmp_path
     assert api._photolib.refresh.calls == 2 and api._wizard.invalidate.calls == 2
     assert api.save_settings({"base_folder": str(a), "gallery_folder": str(b)})["ok"]   # 同样的值：不刷新
     assert api._photolib.refresh.calls == 2
+
+
+# ---------------------------------------------------------------- 读失败不当成全新安装；并发保存
+def test_missing_file_is_a_fresh_install(tmp_path):
+    assert _store(tmp_path / "none.json").data["provider_chosen"] is False
+
+
+def test_bom_file_is_read(tmp_path):
+    p = tmp_path / "s.json"
+    p.write_bytes(b"\xef\xbb\xbf" + json.dumps({"provider": "codex", "check_updates": False}).encode("utf-8"))
+    d = _store(p).data
+    assert d["provider"] == "codex" and d["check_updates"] is False and d["provider_chosen"] is True
+    assert not list(tmp_path.glob("*.bad-*"))
+
+
+def test_transient_read_failure_is_retried(tmp_path, monkeypatch):
+    monkeypatch.setattr(st, "READ_RETRY_SECONDS", 0)
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps({"provider": "codex", "provider_chosen": True}), encoding="utf-8")
+    real = type(p).read_text
+    calls = []
+
+    def flaky(self, *a, **k):
+        calls.append(1)
+        if len(calls) == 1:
+            raise PermissionError(13, "被占用")
+        return real(self, *a, **k)
+    monkeypatch.setattr(type(p), "read_text", flaky)
+    d = _store(p).data
+    assert len(calls) == 2 and d["provider"] == "codex" and p.exists()
+
+
+def test_unreadable_file_keeps_choice_and_is_backed_up(tmp_path, monkeypatch):
+    monkeypatch.setattr(st, "READ_RETRY_SECONDS", 0)
+    p = tmp_path / "s.json"
+    p.write_text("{坏了", encoding="utf-8")
+    s = _store(p)
+    assert s.data["provider_chosen"] is True
+    backups = list(tmp_path.glob("s.json.bad-*"))
+    assert len(backups) == 1 and backups[0].read_text(encoding="utf-8") == "{坏了"
+
+
+def test_concurrent_updates_do_not_lose_changes(tmp_path):
+    import threading
+    s = _store(tmp_path / "s.json")
+    keys = ["confirm_default", "ai_use_notes", "auto_launch_lightroom", "wizard_done", "check_updates"]
+    errors = []
+
+    def worker(k):
+        for _ in range(20):
+            r = s.update({k: not st.defaults()[k]})
+            if not r["ok"]:
+                errors.append(r)
+    ts = [threading.Thread(target=worker, args=(k,)) for k in keys]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    saved = json.loads((tmp_path / "s.json").read_text(encoding="utf-8"))
+    assert not errors and all(saved[k] == (not st.defaults()[k]) for k in keys)
+    assert not list(tmp_path.glob("*.tmp"))

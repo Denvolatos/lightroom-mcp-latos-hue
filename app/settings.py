@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import subprocess
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 from lr_autostart import valid_lightroom_path
@@ -22,6 +25,7 @@ SETTINGS_FILE = Path.home() / "LrMcp" / "app_settings.json"
 APP_VERSION = "1.1.0"                   # 桌面软件 Latos Hue 的版本（发布标签 v1.1.0）
 PROJECT_URL = "https://github.com/Denvolatos/lightroom-mcp-latos-hue"
 DATA_DIR_TEXT = "~/LrMcp"
+READ_RETRY_SECONDS = 0.3                # 设置文件读失败时，隔这么久再试一次
 
 EDGE_CHOICES = (768, 1024, 1536, 2048)  # 与界面里"预览清晰度"的可选档位一致
 DEFAULT_PROVIDER = "claude"
@@ -290,27 +294,59 @@ class SettingsStore:
     def __init__(self, path: Path | None = None, restrict=restrict_to_current_user):
         self.path = Path(path) if path is not None else SETTINGS_FILE
         self._restrict = restrict
+        self._lock = threading.RLock()          # js_api 每次调用都在独立线程里，导出服务也会调 update
         self.data = self.load()
 
-    def load(self) -> dict:
+    def _read(self):
+        """读一次文件。返回 (内容, 是否出错)；文件不存在不算出错。utf-8-sig：老版记事本另存会加 BOM。"""
         try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            raw = json.loads(self.path.read_text(encoding="utf-8-sig"))
+        except FileNotFoundError:
+            return None, False
         except (OSError, ValueError):
-            raw = None
+            return None, True
+        return (raw, False) if isinstance(raw, dict) else (None, True)
+
+    def load(self) -> dict:
+        """读设置。读失败（杀毒/同步软件占着文件、内容损坏）先重试一次；仍失败就把坏文件改名为 .bad-时间戳 留档，
+        并按“已有设置文件”处理（provider_chosen 不判成 False，不会被当成全新安装要求重新选 AI）。"""
+        raw, failed = self._read()
+        if failed:
+            time.sleep(READ_RETRY_SECONDS)
+            raw, failed = self._read()
+        if failed:
+            try:
+                bad = self.path.with_name(self.path.name + ".bad-" + time.strftime("%Y%m%d-%H%M%S"))
+                os.replace(self.path, bad)
+            except OSError:
+                pass
+            raw = {}
         return sanitize(raw)
 
     def save(self, data: dict) -> None:
         text = json.dumps(data, ensure_ascii=False, indent=2)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_name(self.path.name + ".tmp")
-        tmp.write_text(text, encoding="utf-8")
-        self._restrict(tmp)
-        os.replace(tmp, self.path)
-        self.data = data
+        with self._lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_name(f"{self.path.name}.{secrets.token_hex(4)}.tmp")
+            try:
+                tmp.write_text(text, encoding="utf-8")
+                self._restrict(tmp)
+                os.replace(tmp, self.path)
+            except OSError:
+                try:
+                    tmp.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                raise
+            self.data = data
 
     def update(self, changes: dict, *, selectable=lambda pid: pid == DEFAULT_PROVIDER, create_missing: bool = False) -> dict:
         """校验并保存。返回 {"ok", "errors": {字段: 中文原因}, "needs_create": bool, "settings": 当前设置}。
-        只处理 changes 里出现的字段；任一字段校验失败则整体不保存。"""
+        只处理 changes 里出现的字段；任一字段校验失败则整体不保存。整个过程持锁：并发保存不会丢失彼此的修改。"""
+        with self._lock:
+            return self._update(changes, selectable, create_missing)
+
+    def _update(self, changes: dict, selectable, create_missing: bool) -> dict:
         new = dict(self.data)
         errors: dict[str, str] = {}
         needs_create = False

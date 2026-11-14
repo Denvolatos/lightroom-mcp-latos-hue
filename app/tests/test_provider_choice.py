@@ -44,10 +44,12 @@ def test_existing_file_with_invalid_value_counts_as_chosen(tmp_path, bad):
 
 
 @pytest.mark.parametrize("content", ["{坏的", "", "[1,2]", "null"])
-def test_unreadable_file_counts_as_not_chosen(tmp_path, content):
+def test_unreadable_file_is_not_treated_as_fresh_install(tmp_path, content, monkeypatch):
+    monkeypatch.setattr(st, "READ_RETRY_SECONDS", 0)
     p = tmp_path / "s.json"
-    p.write_text(content, encoding="utf-8")                         # 读不出原来选的是什么：重新问一次
-    assert store_at(p).data["provider_chosen"] is False
+    p.write_text(content, encoding="utf-8")       # 1.1.1：文件存在但读不出 = 升级用户，不再要求重新选 AI；坏文件留档
+    assert store_at(p).data["provider_chosen"] is True
+    assert list(tmp_path.glob("s.json.bad-*"))
 
 
 def test_sanitize_distinguishes_dict_from_missing():
