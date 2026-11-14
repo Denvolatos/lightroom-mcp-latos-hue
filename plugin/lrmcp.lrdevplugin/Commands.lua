@@ -1149,7 +1149,9 @@ end
 local LIST_DEFAULT, LIST_MAX = 200, 500
 local THUMB_MAX_IDS, THUMB_MIN, THUMB_MAX, THUMB_DEFAULT = 24, 64, 512, 256
 local THUMB_MAX_BYTES = 150 * 1024
-local THUMB_TIMEOUT = 8 -- seconds per photo
+local THUMB_BATCH_TIMEOUT = 8 -- seconds for a whole batch (all thumbnails are requested at the same time)
+local THUMB_RETRY_TIMEOUT = 2 -- seconds for the one smaller retry of thumbnails that were too large
+local THUMB_MISSING_TIMEOUT = 1 -- seconds for a photo whose original is offline or missing
 local SELECT_MAX_IDS = 50
 local SELECT_RETRY_WAITS = { 0.1, 0.15, 0.25, 0.5 } -- seconds before each new attempt after a folder switch (1.0 s in all)
 
@@ -1298,29 +1300,60 @@ local function jpegSize(data)
 	return nil
 end
 
--- ask for one thumbnail and wait (this task sleeps, Lightroom keeps running) at most THUMB_TIMEOUT seconds. Returns data or nil, error.
-local function fetchThumbnail(photo, size)
-	local done, data, err = false, nil, nil
+-- Thumbnails of one batch are all requested at once and share one deadline, so a batch holds the plug-in (which runs one
+-- command at a time) for at most THUMB_BATCH_TIMEOUT seconds, plus THUMB_RETRY_TIMEOUT for the one smaller retry of a
+-- thumbnail that came back too large; before 1.1.1 every photo waited up to 8 s in turn. This task sleeps while waiting,
+-- Lightroom keeps running.
+local function startThumbnail(photo, size, deadline)
+	local job = { done = false, deadline = deadline }
 	local ok, request = LrTasks.pcall(function()
 		return photo:requestJpegThumbnail(size, size, function(d, e)
-			done, data, err = true, d, e
+			job.done, job.data, job.err = true, d, e
 		end)
 	end)
 	if not ok then
-		return nil, tostring(type(request) == "table" and request.lrmcp or request)
+		job.done, job.err = true, tostring(type(request) == "table" and request.lrmcp or request)
 	end
-	local deadline = LrDate.currentTime() + THUMB_TIMEOUT
-	while not done and LrDate.currentTime() < deadline do
+	job.request = request -- the request object must stay referenced until the callback has run
+	return job
+end
+
+local function waitThumbnails(jobs)
+	while true do
+		local now, waiting = LrDate.currentTime(), false
+		for _, job in pairs(jobs) do
+			if not job.done and now < job.deadline then
+				waiting = true
+				break
+			end
+		end
+		if not waiting then
+			return
+		end
 		LrTasks.sleep(0.05)
 	end
-	local keep = request -- the request object must stay referenced until the callback has run
-	if not done then
+end
+
+-- data, or nil and an error code
+local function thumbnailResult(job, missing)
+	if job.done and type(job.data) == "string" and job.data ~= "" then
+		return job.data
+	end
+	if missing then
+		return nil, "missing" -- the original is offline or gone and Lightroom has no preview to give
+	end
+	if not job.done then
 		return nil, "timeout"
 	end
-	if type(data) ~= "string" or data == "" then
-		return nil, tostring(err or "no_data")
-	end
-	return data
+	return nil, tostring(job.err or "no_data")
+end
+
+-- true when Lightroom says the original file is not available (offline drive, moved or deleted file)
+local function originalMissing(photo)
+	local ok, available = LrTasks.pcall(function()
+		return photo:checkPhotoAvailability()
+	end)
+	return ok and available == false
 end
 
 function M.get_thumbnails(params)
@@ -1334,18 +1367,38 @@ function M.get_thumbnails(params)
 		size = math.floor(size)
 	end
 	local catalog = LrApplication.activeCatalog()
-	local out = {}
-	for _, id in ipairs(ids) do
+	local start = LrDate.currentTime()
+	local photos, missing, jobs = {}, {}, {}
+	for i, id in ipairs(ids) do
 		local photo = catalog:findPhotoByUuid(id)
-		if not photo then
+		if photo then
+			photos[i] = photo
+			-- a missing original: Lightroom may still have a preview, so ask, but do not wait the whole batch time for it
+			missing[i] = originalMissing(photo)
+			jobs[i] = startThumbnail(photo, size, start + (missing[i] and THUMB_MISSING_TIMEOUT or THUMB_BATCH_TIMEOUT))
+		end
+	end
+	waitThumbnails(jobs)
+
+	-- too large: one retry at 60 % of the size, for all of them together
+	local retries = {}
+	local retryDeadline = math.min(start + THUMB_BATCH_TIMEOUT, LrDate.currentTime()) + THUMB_RETRY_TIMEOUT
+	for i, job in pairs(jobs) do
+		local data = thumbnailResult(job, false)
+		if data and #data > THUMB_MAX_BYTES then
+			retries[i] = startThumbnail(photos[i], math.max(THUMB_MIN, math.floor(size * 0.6)), retryDeadline)
+		end
+	end
+	waitThumbnails(retries)
+
+	local out = {}
+	for i, id in ipairs(ids) do
+		if not photos[i] then
 			out[#out + 1] = { id = id, ok = false, error = "not_found" }
 		else
-			local data, err = fetchThumbnail(photo, size)
+			local data, err = thumbnailResult(retries[i] or jobs[i], missing[i])
 			if data and #data > THUMB_MAX_BYTES then
-				data, err = fetchThumbnail(photo, math.max(THUMB_MIN, math.floor(size * 0.6)))
-				if data and #data > THUMB_MAX_BYTES then
-					data, err = nil, "too_large"
-				end
+				data, err = nil, "too_large"
 			end
 			if data then
 				local w, h = jpegSize(data)
@@ -1357,7 +1410,6 @@ function M.get_thumbnails(params)
 	end
 	return { size = size, thumbnails = Json.array(out) }
 end
-
 local function selectedIds(catalog)
 	-- getTargetPhotos() returns the whole filmstrip when nothing is selected, so look at getTargetPhoto() first
 	local ids = {}

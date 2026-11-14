@@ -242,6 +242,7 @@ function ADD_LIB_PHOTO(uuid, path, o)
     return nil
   end
   function ph:getFormattedMetadata() return nil end
+  function ph:checkPhotoAvailability() return not FAKE.offline[uuid] end
   function ph:requestJpegThumbnail(w, h, cb)
     FAKE.thumb_calls[#FAKE.thumb_calls + 1] = { uuid = uuid, w = w, h = h }
     local plan = FAKE.thumb_plan[uuid]
@@ -293,6 +294,7 @@ function SET_VIEW(uuids) FAKE.view = {} for _, u in ipairs(uuids) do FAKE.view[u
 function RESET()
   FAKE.clock, FAKE.pending, FAKE.libphotos, FAKE.libfolders = 0, {}, {}, {}
   FAKE.thumb_plan, FAKE.thumb_calls, FAKE.thumb_async, FAKE.selected, FAKE.view = {}, {}, false, nil, nil
+  FAKE.offline = {}
   FAKE.sources, FAKE.sources_fail, FAKE.select_fails, FAKE.select_calls, FAKE.sources_calls = nil, false, false, 0, 0
   FAKE.files, FAKE.folders, FAKE.last_export, FAKE.export_fails = {}, {}, nil, false
   FAKE.in_catalog, FAKE.add_fails, FAKE.in_gate = {}, false, false
@@ -977,6 +979,27 @@ def test_thumbnail_timeout_does_not_hang_and_others_still_come(lib):
     assert data[0] == {"id": U1, "ok": False, "error": "timeout"}
     assert data[1]["ok"] is True
     assert 8 <= lib.fake("clock") < 9    # one 8 second wait, not forever
+
+
+def test_thumbnail_batch_shares_one_deadline(lib):
+    """1.1.1: a batch of thumbnails that never come waits 8 s in all, not 8 s per photo (it held the plug-in for 64 s)."""
+    for u in (U1, U2, U3):
+        lib.thumb_plan(u, "never")
+    data = lib.run("get_thumbnails", ids=f"{U1},{U2},{U3},{U4}")["data"]["thumbnails"]
+    assert [t["ok"] for t in data] == [False, False, False, True] and data[0]["error"] == "timeout"
+    assert 8 <= lib.fake("clock") < 9
+    assert lib.thumb_calls() == 4        # all requested at once
+
+
+def test_thumbnail_of_an_offline_original_returns_missing_quickly(lib):
+    g = lib.fake("offline")
+    g[U1] = True
+    g[U2] = True
+    lib.thumb_plan(U1, "never")          # no preview either
+    data = lib.run("get_thumbnails", ids=f"{U1},{U2}")["data"]["thumbnails"]
+    assert data[0] == {"id": U1, "ok": False, "error": "missing"}
+    assert data[1]["ok"] is True         # Lightroom still had a preview of the other one
+    assert lib.fake("clock") < 1.5
 
 
 def test_thumbnail_unknown_id_and_lightroom_error(lib):

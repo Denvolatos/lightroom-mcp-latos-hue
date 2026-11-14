@@ -22,6 +22,9 @@ MAX_LIST_LIMIT = 500
 MAX_THUMB_IDS = 24
 THUMB_MIN, THUMB_MAX = 64, 512
 THUMB_MAX_BYTES = 150 * 1024
+# The plug-in waits at most 8 s for a whole batch (+2 s for one smaller retry); the rest is for sending the pictures and for
+# a command that is still running in front of this one. Before 1.1.1 it was 30 + 10 s per photo (up to 270 s).
+THUMB_CALL_TIMEOUT = 40
 MAX_SELECT_IDS = 50
 
 
@@ -92,14 +95,14 @@ class LibraryService:
     def get_thumbnails(self, ids, size: int = 256) -> dict:
         """{"size", "thumbnails": [{id, ok, jpeg (bytes), width, height, bytes} | {id, ok: False, error}]}.
 
-        error is "not_found", "timeout", "too_large" (over 150 KB even after one smaller retry), "bad_jpeg" (what came back is
-        not a JPEG or not valid base64) or Lightroom's own message. Only JPEG data is ever returned."""
+        error is "not_found", "timeout", "missing" (the original is offline or gone and Lightroom has no preview), "too_large"
+        (over 150 KB even after one smaller retry), "bad_jpeg" (what came back is not a JPEG or not valid base64) or
+        Lightroom's own message. Only JPEG data is ever returned."""
         id_list = _check_ids(ids, MAX_THUMB_IDS)
         if not _is_int(size) or not THUMB_MIN <= size <= THUMB_MAX:
             raise LibraryError(f"size 要在 {THUMB_MIN} 到 {THUMB_MAX} 之间。")
-        # up to 8 s per photo in Lightroom, plus room for sending the pictures
         data = self._ask("get_thumbnails", {"ids": urllib.parse.quote(",".join(id_list), safe=""), "size": str(size)},
-                         timeout=30 + 10 * len(id_list))
+                         timeout=THUMB_CALL_TIMEOUT)
         raw = data.get("thumbnails")
         if not isinstance(raw, list):
             raise BridgeError("插件返回的缩略图格式不对。")
