@@ -1024,3 +1024,60 @@ PR 新增的 `version_save / version_apply / batch_plan_from_edit / batch_apply 
 - 星级/旗标/颜色标签等在格子上的显示没有改（只用于排序）；颜色标签没有色块显示。
 - `ui_pick_check.py`、`ui_preview_check.py` 需要真机样例输入，本次没跑（没有改它们涉及的界面）。
 - 没有启动 pywebview 窗口，也没有连 Lightroom。
+
+## 1.3.0 界面（分支 feat/v130-ui）
+
+### 改了什么
+- **风格与主题**：`css/app.css` 全面改为设计稿的三套主题，颜色 / 圆角 / 阴影 / 字号全部走 `:root` 变量（规则里没有写死的颜色，`ui_theme_check.py` 会扫）。三套：`paper` 浅色纸感（设计稿 B，默认）、`glass` 夜蓝玻璃（设计稿 C）、`dark` 暗室（设计稿 A）。
+- **设置页**：改为左侧分栏导航 + 右侧卡片（常规 / Lightroom / AI 来源 / 安全 / 维护 / 关于）；≤900px 时导航变成顶部横排。
+- **关于页**：软件图标和名称、一句话介绍、版本、“它是什么”、作者两张卡片（名字是按钮，点了调 `open_link(key)`）、许可证、项目主页（打开 + 复制链接）、声明。没有“致谢”。
+- **可拖动面板**：左/右栏与中间区之间的分隔线（`js/layout.js`）；对话框可拖标题栏移动。
+- **预览无级缩放**：滑杆 + 预设 + 数字显示，Ctrl+滚轮、双击、拖动平移（`js/preview.js` 里的 `zoom*`）。预览图按原始像素放进画面，用 `transform` 缩放 / 平移，两个预览窗共用同一个缩放和平移位置。
+- **启动画面**（`splash.py` 里的 HTML/CSS，只改了样式）：用同一套配色，浅色默认、系统是深色时用深色。启动画面读不到设置，所以只能跟随系统，不跟随用户选的 glass / dark。
+
+### 主题与字号机制
+- `js/theme.js` 在 `<head>` 里最先加载。`<html data-theme="paper|glass|dark">`；偏好 `system` 在 JS 里解析（系统浅色→paper，系统深色→dark，监听 `prefers-color-scheme` 变化），同时写 `data-theme-pref`。
+- 设置读回之前用 `localStorage`（键 `lh_theme`、`lh_font_size`，读写都 try/catch）里缓存的上一次值，避免闪白/闪黑；读回后以设置为准并更新缓存。旧值 `light` 当 `paper`；不认识的值回落 `system`。
+- 字号：`html { font-size: calc(16px × --fscale) }`，`--fscale` = 0.9 / 1 / 1.12 / 1.25（small / standard / large / xlarge）。字号和与文字有关的宽度（对话框、标签列）都用 rem，所以布局随字号缩放。
+- 玻璃主题的 `backdrop-filter: var(--blur)`；其他主题 `--blur: none`。`@supports not (backdrop-filter…)` 时玻璃主题的面板变量换成不透明色。
+- 外观的保存方式：设置页里选主题 / 字号**立刻生效（预览）**，点“保存”才写入 `save_settings({theme, font_size})`，点“取消”或点遮罩恢复到打开设置时的样子（与设置页原有“改完点保存”一致）。只读模式、清理缓存、诊断包、恢复默认是**立即动作**，不经“保存”。
+- 面板宽度（`panel_widths`）和预览缩放（`preview_zoom`）各自防抖保存（500 / 600 ms），不经设置页的“保存”；设置页“保存”也不会带这两项。
+
+### 变量表（`:root` 默认 = paper；`[data-theme="dark"]` / `[data-theme="glass"]` 覆盖）
+| 变量 | 用途 | paper | dark | glass |
+|---|---|---|---|---|
+| `--bg` / `--bg-image` | 页面底 / 底图渐变 | #efece6 | #0f0f10 | #0b1020 + 两层径向渐变 |
+| `--panel` / `--panel2` | 面板 / 次级面板 | #fbfaf7 / #f3f1ec | #18181a / #202023 | 半透明 rgba(26,33,60,.72) / rgba(40,50,88,.6) |
+| `--topbar-bg` / `--dialog-bg` / `--settings-bg` | 顶栏 / 对话框 / 设置框底 | 面板色 / 面板色 / #efece6 | #141416 / #18181a / #0f0f10 | 半透明深蓝 |
+| `--line` / `--line-strong` / `--hover` | 线 / 强调线 / 悬停 | #dedad1 / #c4bfb3 / #ebe8e0 | #2c2c30 / #44444a / #26262a | 半透明蓝紫 |
+| `--text` / `--muted` / `--field` | 正文 / 次要字 / 输入框底 | #26241f / #7c776b / #fff | #ececee / #8e8e96 / #0f0f10 | #eaedff / #8f98c4 / 半透明深蓝 |
+| `--accent` / `--accent-hover` / `--accent-text` | 强调色 / 悬停 / 按钮字 | #1f8a82 / #18736c / #fff | #e8a33d / #f2b556 / #1a1203 | #7b8cff / #96a4ff / #0b1020 |
+| `--accent-soft` / `--accent-ring` / `--sel-bg` | 强调淡底 / 光圈 / 选中底 | 强调色 .12 / .45 / .10 | .15 / .55 / .14 | .18 / .6 / .18 |
+| `--link` / `--link-hover` | 链接字（保证对比度） | #16706a | = accent | #a3afff |
+| `--ok` / `--warn` / `--bad` | 成功 / 警告 / 危险 | #2e9b63 / #a8660a / #cf4a4a | #4cc38a / #f5c451 / #ef6a6a | #5fd6b0 / #f2c46b / #ff7d8c |
+| `--warn-bg` / `--bad-bg` / `--bad-text` / `--badge-bg` | 提示条、徽标底 | 浅暖色 | 深暖色 | 半透明 |
+| `--preview` / `--preview-text` | 预览区、缩略图底（始终深色） | #1b1b1d | #070708 | #05070f |
+| `--switch-off` / `--scroll` | 开关关闭色 / 滚动条 | #cfcabc | #3f3f45 / #3a3a3f | 半透明蓝 |
+| `--overlay` / `--blur` | 对话框遮罩 / 模糊 | rgba(38,36,31,.45) / none | rgba(0,0,0,.65) / none | rgba(5,8,20,.6) / blur(14px) |
+| `--shadow` / `--shadow-lg` | 阴影 | 柔和暖色 | 无 / 深 | 大扩散 |
+| `--radius-xs` / `--radius-sm` / `--radius` / `--radius-lg` | 圆角 | 4 / 7 / 10 / 16 | 3 / 5 / 6 / 10 | 5 / 9 / 12 / 20 |
+| `--fs-2xs … --fs-xxl` | 字号（rem；对应 10 / 11 / 12 / 13 / 14 / 15 / 18 / 22 px @100%） | 同 | 同 | 同 |
+
+所有主题共用（始终叠在图片上的深色小标签）：`--on-img`、`--img-chip`、`--img-shadow`、`--tag-warn-*`、`--tag-bad-*`。唯一保留字面颜色的是 `#demo` 示例画面 `.scene`（示例图，不是界面颜色）。
+
+### 后端约定（界面按此读，缺字段都做了防御）
+- `get_settings()` 的 `settings` 里：`theme`（system/paper/glass/dark）、`font_size`、`panel_widths {left,right}`、`preview_zoom`（"fit" 或 10–400 整数）；返回里另带 `readonly`。
+- `set_readonly(bool)`、`clear_cache()`、`make_diagnostics()`（取消 `{ok:false,cancelled:true}`）、`reset_settings()`、`about_info()`、`open_link(key)`（页面只传 `homepage` / `denvolatos` / `galio1991`，从不传网址）。
+- 面板宽度默认 260 / 300（与后端 `DEFAULT_PANEL_WIDTHS` 一致）；限制 200–480 / 240–520，同时给中间区至少留 320 px。窄屏（≤900px）隐藏分隔线，并忽略保存的宽度。
+
+### 界面检查脚本（PowerShell 里跑；Bash 沙箱里 Edge 无输出）
+`python app/tests/<脚本> <输出目录>`：
+`ui_theme_check.py`（三套主题、跟随系统、字号、对比度、无写死颜色）、`ui_settings_check.py`（设置页各分栏、关于页、维护、只读、外观）、`ui_resize_check.py`（分隔线与对话框拖动）、`ui_zoom_check.py`（缩放与平移）、`ui_layout_check.py` 等。共用工具在 `ui_common.py`（假 `pywebview.api`、静态服务、无头 Edge）。这些脚本都带断言，有问题退出码为 1。
+
+### 没验证的点
+- 没有接真实后端、没有启动 pywebview 窗口、没有连 Lightroom：新接口（`open_link`、`about_info`、维护三项、`set_readonly`）只在假 api 里按约定造过数据。
+- `backdrop-filter` 的“降级”分支（不支持时用不透明面板）只检查了 CSS 写法，没有在不支持的内核上跑过。
+- 玻璃主题的背景渐变没有计入对比度检查（按底色 `#0b1020` 算，最亮处的渐变更浅，次要文字实际对比度会略低）。
+- 无头 Edge 里“跟随系统”靠覆盖 `matchMedia` 模拟（无头 Edge 的 `prefers-color-scheme` 不好控制）；真实 WebView2 下的系统切换待真机看。
+- 触摸 / 笔输入的拖动没测；对话框拖动在多显示器、系统缩放不是 100% 时的表现待真机。
+- 启动画面（`splash.py`）只改了样式并用截图看过，没有走真实启动流程。
