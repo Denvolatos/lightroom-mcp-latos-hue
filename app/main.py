@@ -272,17 +272,24 @@ class Api:
         self._pick.store = self._preview.server.store
 
     def _shutdown(self) -> None:
-        closing = getattr(self, '_closing', None)
+        """关闭软件时依次停掉各项服务。每一步单独兜底：前面哪一步出错，后面的（尤其是关 claude 进程树、确认服务、
+        撤下 Bridge 公告）照样执行。"""
+        closing = getattr(self, "_closing", None)
         if closing is not None:
             closing.set()                        # 让等待切换通道的后台线程结束
-        self._autolaunch.stop()                  # 只停止等待；不会关闭用户的 Lightroom
-        self._backend.stop()
-        self._preview.stop()
-        self._photolib.stop()
-        self._photolib.server.stop()
-        self._provider.close()
-        self._hub.stop()
-        self._lr.stop()
+        steps = (lambda: self._autolaunch.stop(),        # 只停止等待；不会关闭用户的 Lightroom
+                 lambda: self._backend.stop(),
+                 lambda: self._preview.stop(),
+                 lambda: self._photolib.stop(),
+                 lambda: self._photolib.server.stop(),
+                 lambda: self._provider.close(),
+                 lambda: self._hub.stop(),
+                 lambda: self._lr.stop())
+        for step in steps:
+            try:
+                step()
+            except Exception:                    # noqa: BLE001 - 关闭时出错也要继续关后面的
+                pass
 
     def _tap(self, ev: dict) -> None:
         """软件内部事件联动图库：Lightroom 选区变化 -> 高亮；导入完成 -> 刷新图库；AI 挑片写入 -> 刷新星级与旗标。"""

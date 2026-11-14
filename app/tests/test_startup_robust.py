@@ -127,3 +127,26 @@ def test_about_waits_briefly_and_caches_the_lightroom_version(api, monkeypatch):
         time.sleep(0.01)
     assert api._about(None)["lightroom_version"] == "15.0"                         # 结果已经记进缓存
     assert api._about()["lightroom_version"] == "15.0" and bridge.call.call_count == 1
+
+
+def test_shutdown_runs_every_step_even_when_one_fails(api):
+    import main
+    a = main.Api.__new__(main.Api)
+    calls = []
+
+    def part(name, boom=False):
+        def f(*x, **k):
+            calls.append(name)
+            if boom:
+                raise RuntimeError(name)
+        return f
+    a._autolaunch = MagicMock(stop=part("autolaunch", True))
+    a._backend = MagicMock(stop=part("backend", True))
+    a._preview = MagicMock(stop=part("preview", True))
+    a._photolib = MagicMock(stop=part("photolib", True))
+    a._photolib.server.stop = part("photolib_server", True)
+    a._provider = MagicMock(close=part("provider", True))
+    a._hub = MagicMock(stop=part("hub", True))
+    a._lr = MagicMock(stop=part("lr"))
+    a._shutdown()
+    assert calls == ["autolaunch", "backend", "preview", "photolib", "photolib_server", "provider", "hub", "lr"]
