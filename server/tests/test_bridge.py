@@ -250,3 +250,45 @@ def test_new_server_on_the_same_port_right_after_stop_gets_its_own_token(tmp_pat
         assert request(old, "GET", "/poll", headers={"X-Gen": "1"})[0] == 401  # the old token no longer works
     finally:
         new.stop()
+
+
+# ---- 1.1.1: a command the plug-in is still working on counts as connected --------------------------------------------
+def test_plugin_running_a_long_command_stays_connected(bridge, monkeypatch):
+    from lightroom_mcp import config
+
+    monkeypatch.setattr(config, "PLUGIN_SEEN_SECONDS", 0.5)   # 25 s in real life; a long export takes minutes
+    release = threading.Event()
+
+    def slow(cmd, params):
+        release.wait(5)
+        return {"ok": True, "data": {"cmd": cmd}}
+
+    stop = fake_plugin(bridge, slow)
+    try:
+        assert bridge.wait_connected(3)
+        result = []
+        caller = threading.Thread(target=lambda: result.append(bridge.call("export_photo", timeout=10)))
+        caller.start()
+        time.sleep(1.2)                       # no /poll for more than PLUGIN_SEEN_SECONDS: the plug-in is busy
+        assert bridge.executing and bridge.connected
+        release.set()
+        caller.join(5)
+        assert result == [{"cmd": "export_photo"}] and not bridge.executing
+    finally:
+        stop.set()
+
+
+def test_a_taken_command_whose_caller_gave_up_no_longer_counts(bridge, monkeypatch):
+    from lightroom_mcp import config
+
+    monkeypatch.setattr(config, "PLUGIN_SEEN_SECONDS", 0.2)
+    bridge.last_seen = time.time()
+    caller = threading.Thread(target=lambda: pytest.raises(BridgeError, bridge.call, "export_photo", timeout=0.8))
+    caller.start()
+    time.sleep(0.1)
+    assert request(bridge, "GET", "/poll", headers={"X-Gen": "1"})[1].startswith("cmd ")   # taken, never answered
+    time.sleep(0.4)
+    assert bridge.connected                   # still working on it
+    caller.join(3)
+    time.sleep(0.25)
+    assert not bridge.executing and not bridge.connected
