@@ -162,7 +162,7 @@ end
 local modules = {
   LrApplication = { activeCatalog = function() return catalog end, developPresetFolders = function() return { folder } end,
                     versionTable = function() return { major = 15, minor = 2, revision = 0, build_version = "x" } end },
-  LrDate = { currentTime = function() return FAKE.clock end },
+  LrDate = { currentTime = function() return FAKE.clock end, timeToW3CDate = function(t) return "W3C:" .. tostring(t) end },
   LrStringUtils = { encodeBase64 = function(d) return "B64:" .. #d .. ":" .. d:byte(1) .. "," .. d:byte(2) end },
   LrTasks = { pcall = pcall,
               sleep = function(sec)
@@ -255,6 +255,10 @@ function ADD_LIB_PHOTO(uuid, path, o)
     if key == "dateTimeOriginalISO8601" then return o.captured or "2026-11-01T10:00:00" end
     if key == "dimensions" then return { width = o.w or 600, height = o.h or 400 } end
     if key == "isVirtualCopy" then return o.vc or false end
+    if FAKE.bad_keys and FAKE.bad_keys[key] then error("unknown metadata key " .. key) end
+    if key == "colorNameForLabel" then return o.label end
+    if key == "hasAdjustments" then return o.edited end
+    if key == "addedTime" then return o.added end
     return nil
   end
   function ph:getFormattedMetadata() return nil end
@@ -383,6 +387,9 @@ def lr():
 
         def fake(self, key):
             return g.FAKE[key]
+
+        def set_bad_keys(self, keys):
+            g.FAKE["bad_keys"] = runtime.table_from({k: True for k in keys})
 
         def make_file(self, path):
             g.MAKE_FILE(path)
@@ -935,6 +942,29 @@ def test_list_folder_photos_sorted_with_fields_and_subfolders(lib):
     assert b["flag"] == "pick" and b["rating"] == 3 and b["subfolder"] == "" and b["captured"] == "2026-11-01T10:00:00"
     assert (b["width"], b["height"]) == (600, 400) and b["path"] == ROOT + "\\b.JPG"
     assert c["subfolder"] == "sub/deep" and c["flag"] == "none" and c["is_virtual_copy"] is False
+
+
+def test_list_folder_photos_label_edited_added_fields(lr):
+    lr.lib_photo(U1, ROOT + "\b.JPG", label="red", edited=True, added=1234)
+    lr.lib_photo(U2, ROOT + "\a.ARW", edited=False)
+    lr.lib_folder(ROOT, [U1, U2])
+    a, b = lr.run("list_folder_photos", path=enc(ROOT))["data"]["photos"]
+    assert a["edited"] is False and a.get("label") is None and a.get("added_at") is None
+    assert b["label"] == "red" and b["edited"] is True and b["added_at"] == "W3C:1234"
+
+
+@pytest.mark.parametrize("bad", [["colorNameForLabel"], ["hasAdjustments"], ["addedTime"], ["colorNameForLabel", "hasAdjustments", "addedTime"]])
+def test_list_folder_photos_unreadable_optional_keys_only_blank_that_field(lr, bad):
+    lr.lib_photo(U1, ROOT + "\b.JPG", label="red", edited=True, added=77, rating=4)
+    lr.lib_folder(ROOT, [U1])
+    lr.set_bad_keys(bad)
+    r = lr.run("list_folder_photos", path=enc(ROOT))
+    assert r["ok"]
+    p = r["data"]["photos"][0]
+    assert p["rating"] == 4 and p["captured"] == "2026-11-01T10:00:00" and p["format"] == "JPG"     # the core fields still arrive
+    assert (p.get("label") == "red") == ("colorNameForLabel" not in bad)
+    assert (p.get("edited") is True) == ("hasAdjustments" not in bad)
+    assert (p.get("added_at") == "W3C:77") == ("addedTime" not in bad)
 
 
 def test_list_folder_photos_recursive_flag_and_paging(lib):

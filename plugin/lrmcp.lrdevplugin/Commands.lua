@@ -1324,6 +1324,50 @@ local function sortedEntries(catalog, path, recursive, offset)
 	return found, entries
 end
 
+-- Optional raw metadata (label, has-adjustments, date added). These key names are not confirmed on a real Lightroom Classic:
+-- ask for all of them in one batch; if Lightroom refuses that, ask key by key. A key that cannot be read gives nil for that
+-- field only, never an error for the whole command.
+local OPTIONAL_KEYS = { "colorNameForLabel", "hasAdjustments", "addedTime" }
+
+local function optionalRaw(catalog, photos)
+	local all = batchRaw(catalog, photos, OPTIONAL_KEYS)
+	if all ~= nil then
+		return all
+	end
+	local merged = {}
+	for _, key in ipairs(OPTIONAL_KEYS) do
+		local one = batchRaw(catalog, photos, { key })
+		if one ~= nil then
+			for photo, values in pairs(one) do
+				merged[photo] = merged[photo] or {}
+				merged[photo][key] = values[key]
+			end
+		end
+	end
+	return merged
+end
+
+local function optionalOf(extra, photo, key)
+	local values = extra[photo]
+	if values == nil then
+		return nil
+	end
+	return values[key]   -- may legitimately be false (hasAdjustments)
+end
+
+local function addedAtOf(value)
+	if type(value) ~= "number" then
+		return nil
+	end
+	local ok, text = LrTasks.pcall(function()
+		return LrDate.timeToW3CDate(value)
+	end)
+	if ok and type(text) == "string" and text ~= "" then
+		return text
+	end
+	return nil
+end
+
 function M.list_folder_photos(params)
 	local path = folderPathArg(params.path)
 	local recursive = params.recursive ~= "0"
@@ -1351,6 +1395,7 @@ function M.list_folder_photos(params)
 		pagePhotos[i] = e.photo
 	end
 	local batch = batchRaw(catalog, pagePhotos, { "fileFormat", "rating", "pickStatus", "dateTimeOriginalISO8601", "dimensions", "isVirtualCopy" })
+	local extra = optionalRaw(catalog, pagePhotos)
 	local out = {}
 	for _, e in ipairs(page) do
 		local photo = e.photo
@@ -1373,6 +1418,9 @@ function M.list_folder_photos(params)
 			width = dims.width,
 			height = dims.height,
 			is_virtual_copy = rawOf(batch, photo, "isVirtualCopy") and true or false,
+			label = optionalOf(extra, photo, "colorNameForLabel"),
+			edited = optionalOf(extra, photo, "hasAdjustments"),
+			added_at = addedAtOf(optionalOf(extra, photo, "addedTime")),
 		}
 	end
 	return { in_catalog = true, total = #entries, offset = offset, folder = path, recursive = recursive, photos = Json.array(out) }
