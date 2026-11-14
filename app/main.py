@@ -250,13 +250,19 @@ class Api:
     def _on_event(self, ev: dict) -> None:
         """AI 来源的事件：先更新“本次调整”数据，再推给页面。"""
         with self._lock:
+            before = {r.get("rid"): (r.get("status"), r.get("edit_id"), r.get("photo")) for r in self._tracker.rows}
             changed = self._tracker.observe(ev)
             rows = self._backend.rows() if changed else None
+            # 只让这次事件涉及的照片（新增或有变化的行所属的照片）失效，而不是本次会话所有照片
+            touched = {r.get("photo") for r in self._tracker.rows if r.get("photo")
+                       and before.get(r.get("rid")) != (r.get("status"), r.get("edit_id"), r.get("photo"))} if changed else set()
         self._emit(ev)
         if rows is not None:
             self._emit({"type": "adjust", "rows": rows})
             self._preview.request()          # 调整/撤销/还原有变化：短防抖后刷新“当前”预览
-            self._thumbs_stale()
+            touched = touched or {(self._backend.photo or {}).get("id")}      # 看不出是哪张：只算当前照片
+            if any(touched):
+                self._thumbs_stale(*touched)
 
     def _lib_applied(self, edit_id: str, photo_id: str, label: str, changes: list) -> None:
         """软件自己套用预设成功后：把改动加进"本次调整"表，并刷新预览。"""
@@ -267,18 +273,28 @@ class Api:
         self._thumbs_stale(photo_id)
 
     def _thumbs_stale(self, *photo_ids) -> None:
-        """照片被调整/撤销/还原：图库里这些照片的缩略图缓存失效并重新取（涉及本次调整表里的照片和当前照片）。"""
+        """照片被调整/撤销/还原：图库里这些照片的缩略图缓存失效并重新取。
+        给出照片时（调整事件、套用预设、批量复用）只让这几张失效；什么都没给（撤销、还原、整批还原）时
+        沿用原来的范围：本次调整表里的照片和当前照片。"""
         ids = set(i for i in photo_ids if i)
-        ids |= {r.get("photo") for r in self._tracker.rows if r.get("photo")}
-        cur = (self._backend.photo or {}).get("id")
-        if cur:
-            ids.add(cur)
+        if not ids:
+            ids = {r.get("photo") for r in self._tracker.rows if r.get("photo")}
+            cur = (self._backend.photo or {}).get("id")
+            if cur:
+                ids.add(cur)
         self._photolib.invalidate_thumbs(ids)
 
     def _photolib_selected(self) -> None:
-        """在图库里选中照片后立即刷新“当前照片”（中栏预览、右栏本次调整等），不等 3 秒轮询。"""
-        self._backend.refresh_photo()
-        self._preview.request(0)
+        """在图库里选中照片后立即刷新“当前照片”。选中命令已经带回了 Lightroom 的实际选区：
+        直接把当前照片交给预览立即取图、交给右栏“本次调整”，不再读两次 list_selected；
+        完整选区（数量、相机信息等）在后台线程补读一次，不阻塞界面调用。"""
+        cur = self._photolib.active_photo()
+        if cur:
+            self._backend.adopt_photo(cur["id"], cur["name"])
+            self._preview.show({"id": cur["id"], "name": cur["name"]})
+        else:
+            self._preview.request(0)
+        self._backend.refresh_photo_async()
 
     def _push_rows(self) -> None:
         with self._lock:

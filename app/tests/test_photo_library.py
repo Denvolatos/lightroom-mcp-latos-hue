@@ -297,6 +297,43 @@ def test_catalog_errors_translated(env):
     assert env.lib.state()["message"] == "插件拒绝了请求"
 
 
+def test_refresh_failure_keeps_previous_list_and_selection(env):
+    """1.1.1：刷新失败一次不再清空整个列表和选区；保留上一次结果，只提示“暂时无法更新”。"""
+    seed(env)
+    env.lib.refresh_sync()
+    ids = [p["id"] for p in env.lib.state()["photos"]]
+    env.lib.select([ids[0]])
+    for breakit, fixit in (
+            (lambda: setattr(env.lr, "connected", False), lambda: setattr(env.lr, "connected", True)),
+            (lambda: setattr(env.lr, "library_list", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("插件忙"))),
+             lambda: env.lr.__dict__.pop("library_list"))):
+        breakit()
+        env.lib.refresh_sync()
+        s = env.lib.state()
+        assert s["state"] == "ready" and s["stale"] is True and len(s["photos"]) == 5
+        assert s["message"].startswith(pl.MSG_STALE_PREFIX) and s["selection"]["ids"] == [ids[0]]
+        fixit()
+        env.lib.refresh_sync()
+        s = env.lib.state()
+        assert s["state"] == "ready" and s["stale"] is False and s["message"] == "" and len(s["photos"]) == 5
+
+
+def test_refresh_failure_without_previous_result_or_after_folder_change_is_an_error(env, tmp_path):
+    env.lr.connected = False
+    env.lib.refresh_sync()
+    assert env.lib.state()["state"] == "error" and env.lib.state()["stale"] is False
+    env.lr.connected = True
+    seed(env)
+    env.lib.refresh_sync()
+    other = tmp_path / "other"
+    other.mkdir()
+    env.lib.settings.data["base_folder"] = str(other)                         # 换了目录：旧目录的列表不能冒充新目录
+    env.lr.connected = False
+    env.lib.refresh_sync()
+    s = env.lib.state()
+    assert s["state"] == "error" and s["photos"] == []
+
+
 def test_refresh_coalesces_while_running(tmp_path):
     started = threading.Event()
     release = threading.Event()
@@ -355,7 +392,7 @@ def test_thumbstore_defaults_match_spec():
     assert s._max_cache == 500 and s.max_bytes == 64 * 1024 * 1024
 
 
-def test_thumbnails_batches_of_at_most_8_and_cache_hits(env):
+def test_thumbnails_small_batches_and_cache_hits(env):
     env.lr.catalog = [cat(i, touch(env.base / f"p{i:02}.jpg")) for i in range(20)]
     env.lib.refresh_sync()
     ids = [p["id"] for p in env.lib.state()["photos"]]
@@ -364,14 +401,15 @@ def test_thumbnails_batches_of_at_most_8_and_cache_hits(env):
     n = 0
     while env.lib.process_thumbs_once():
         n += 1
-    assert n == 3 and [len(c) for c in env.lr.thumb_calls] == [8, 8, 4] and all(len(c) <= pl.THUMB_BATCH for c in env.lr.thumb_calls)
+    assert pl.THUMB_BATCH == 2                                                # 1.1.1：8 → 2，一批别占住插件队列太久
+    assert n == 10 and [len(c) for c in env.lr.thumb_calls] == [2] * 10
     items = [i for e in env.events if e["type"] == "library_thumbs" for i in e["items"]]
     assert len(items) == 20 and all(i["url"].startswith("http://127.0.0.1:4321/p/") for i in items)
     r2 = env.lib.request_thumbs(ids)                                          # 第二次全部命中缓存，不再向 Lightroom 取
-    assert r2["pending"] == [] and len(r2["thumbs"]) == 20 and len(env.lr.thumb_calls) == 3
+    assert r2["pending"] == [] and len(r2["thumbs"]) == 20 and len(env.lr.thumb_calls) == 10
     assert env.lib.process_thumbs_once() is False
     assert env.lib.stats["hits"] == 20 and env.lib.stats["requested"] == 40 and env.lib.cache_hit_rate() == 0.5
-    assert env.lib.stats["fetched"] == 20 and env.lib.stats["batch_max"] == 8
+    assert env.lib.stats["fetched"] == 20 and env.lib.stats["batch_max"] == 2
     assert len(env.lib.state()["thumbs"]) == 20                               # 页面重新加载时能拿到已缓存的 URL
 
 
@@ -392,8 +430,9 @@ def test_new_request_replaces_unstarted_queue(env):
     ids = [p["id"] for p in env.lib.state()["photos"]]
     env.lib.request_thumbs(ids[:20])
     env.lib.request_thumbs(ids[20:25])                                        # 页面滚动了：前面排队的不再需要
-    env.lib.process_thumbs_once()
-    assert env.lr.thumb_calls == [ids[20:25]]
+    while env.lib.process_thumbs_once():
+        pass
+    assert [i for c in env.lr.thumb_calls for i in c] == ids[20:25]
 
 
 def test_failed_thumbnails_and_retry(env):
@@ -444,18 +483,77 @@ def test_unknown_error_code_is_shown_in_message(env):
     assert env.lib.state()["failed"][pid] == "无法读取缩略图（Lightroom 说：渲染失败）"
 
 
-def test_whole_batch_failure_marks_every_photo(env):
+def test_whole_batch_failure_requeues_once_after_backoff_then_marks(env):
+    """1.1.1：整批失败（超时、通道忙）不立刻把这一批永久标成失败；放回队列，退避后再试一次，仍失败才标。"""
     seed(env, 2, 0)
     env.lib.refresh_sync()
     ids = [p["id"] for p in env.lib.state()["photos"]]
 
     class BridgeTimeout(Exception):
         pass
-    env.lr.library_thumbnails = lambda *a, **k: (_ for _ in ()).throw(BridgeTimeout("x"))
+    calls = []
+    env.lr.library_thumbnails = lambda b, *a, **k: (calls.append(list(b)), (_ for _ in ()).throw(BridgeTimeout("x")))[1]
     env.lib.request_thumbs(ids)
     env.lib.process_thumbs_once()
-    assert set(env.lib.state()["failed"]) == set(ids)
+    assert env.lib.state()["failed"] == {} and len(calls) == 1                 # 第一次：不报失败
+    assert env.lib.process_thumbs_once() is False and len(calls) == 1          # 退避期内不再发
+    env.clock.t += pl.THUMB_BACKOFF
+    env.lib.process_thumbs_once()
+    assert calls[-1] == ids and set(env.lib.state()["failed"]) == set(ids)     # 再试仍失败：才算失败
     assert all("时限" in m for m in env.lib.state()["failed"].values())
+    env.clock.t += pl.THUMB_BACKOFF
+    assert env.lib.process_thumbs_once() is False and len(calls) == 2          # 只重试一次
+
+
+def test_whole_batch_failure_recovers_on_retry(env):
+    seed(env, 2, 0)
+    env.lib.refresh_sync()
+    ids = [p["id"] for p in env.lib.state()["photos"]]
+    orig, n = env.lr.library_thumbnails, []
+
+    def flaky(b, size=256):
+        n.append(1)
+        if len(n) == 1:
+            raise RuntimeError("通道忙")
+        return orig(b, size)
+    env.lr.library_thumbnails = flaky
+    env.lib.request_thumbs(ids)
+    env.lib.process_thumbs_once()
+    env.clock.t += pl.THUMB_BACKOFF
+    env.lib.process_thumbs_once()
+    assert set(env.lib.state()["thumbs"]) == set(ids) and env.lib.state()["failed"] == {}
+
+
+def test_thumbnails_wait_for_foreground_requests():
+    """有选中或预览请求在进行时，缩略图线程不发下一批；前台请求结束（再稍等片刻）后才发。"""
+    from lr_service import LrService, foreground
+    lr = LrService(bridge=object(), edit_service=object())
+    order = []
+    with foreground(lr):
+        t = threading.Thread(target=lambda: (lr._fg_wait(5), order.append("thumb")))
+        t.start()
+        time.sleep(0.2)
+        order.append("fg_done")
+    t.join(5)
+    assert order == ["fg_done", "thumb"]
+    t0 = time.monotonic()
+    assert lr._fg_wait(5)
+    assert time.monotonic() - t0 < 1                                          # 没有前台请求：不会一直等
+    with foreground(lr):
+        assert lr._fg_wait(0.1) is False                                       # 最多等 timeout 秒，防止饿死
+
+
+def test_select_and_preview_are_foreground_requests(env):
+    seed(env, 1, 0)
+    env.lib.refresh_sync()
+    pid = env.lib.state()["photos"][0]["id"]
+    seen = []
+    env.lr._fg_enter = lambda: seen.append("enter")
+    env.lr._fg_exit = lambda: seen.append("exit")
+    orig = env.lr.library_select
+    env.lr.library_select = lambda *a: (seen.append("select"), orig(*a))[1]
+    env.lib.select([pid])
+    assert seen == ["enter", "select", "exit"]
 
 
 def test_thumbnail_request_validation(env):
@@ -579,8 +677,44 @@ def test_select_model_cases_and_limit_50(env):
     r = env.lib.select(ids[:51])
     assert r["ok"] is False and "最多选择 50" in r["message"] and len(env.lr.select_calls) == 4
     assert env.lib.select([ids[1], ids[1]])["selected"] == [ids[1]]           # 重复的合并
-    assert env.lr.select_calls[0] == ([ids[0]], None, str(env.base))          # 带 show_folder=软件文件夹
+    assert env.lr.select_calls[0] == ([ids[0]], None, None)                    # 1.1.1：先直接选，不切换文件夹
     assert env.lr.select_calls[1][1] == ids[2]
+
+
+def test_select_retries_once_with_the_photos_own_folder_only_when_not_selected(env):
+    seed(env, 2, 2, sub="子文件夹")
+    env.lib.refresh_sync()
+    by = {p["name"]: p["id"] for p in env.lib.state()["photos"]}
+    a, s0 = by["R0.jpg"], by["S0.arw"]
+    calls = []
+
+    def sel(ids, active, show_folder):
+        calls.append(show_folder)
+        if show_folder is None and s0 in ids:                                 # 第一次：子文件夹里的照片不在当前来源里，选不中
+            return {"status": "partial", "selected": [i for i in ids if i == a], "not_selected": [i for i in ids if i != a],
+                    "all_selected": False, "reason": "不在当前文件夹"}
+        return {"status": "selected", "selected": list(ids), "not_selected": [], "all_selected": True}
+    env.lr.library_select = sel
+    r = env.lib.select([a, s0], active=s0)
+    assert calls == [None, str(env.base / "子文件夹")]                          # 只重试一次，带的是照片自己的文件夹
+    assert r["ok"] and r["selected"] == [a, s0] and r["active"] == s0
+    calls.clear()
+    assert env.lib.select([a])["ok"] and calls == [None]                       # 直接选中：不切换文件夹
+
+
+def test_select_does_not_retry_when_uncertain_or_folder_gone(env):
+    seed(env, 1, 1, sub="sub")
+    env.lib.refresh_sync()
+    by = {p["name"]: p["id"] for p in env.lib.state()["photos"]}
+    env.lr.select_result = {"status": "uncertain", "selected": [], "not_selected": [], "all_selected": False}
+    env.lib.select([by["S0.arw"]])
+    assert [c[2] for c in env.lr.select_calls] == [None]
+    import shutil
+    shutil.rmtree(env.base / "sub")
+    env.lr.select_calls.clear()
+    env.lr.select_result = {"status": "partial", "selected": [], "not_selected": [by["S0.arw"]], "all_selected": False}
+    env.lib.select([by["S0.arw"]])
+    assert [c[2] for c in env.lr.select_calls] == [None]                       # 文件夹已不在：不重试
 
 
 def test_select_calls_on_selected_and_emits(env):
@@ -928,6 +1062,40 @@ def test_api_tracker_change_invalidates_current_photo(api):
     assert "101" not in api.library_state()["thumbs"]
 
 
+def test_api_adjust_event_invalidates_only_that_photo(api):
+    """1.1.1：一次调整只让涉及的那张照片的缩略图失效，本次会话里调整过的其他照片保留缓存。"""
+    touch(api._base / "A.jpg")
+    touch(api._base / "B.jpg")
+    api._photolib.lr.catalog = [cat(1, api._base / "A.jpg"), cat(2, api._base / "B.jpg")]
+    api.library_refresh()
+    api.library_thumbnails(["101", "102"])
+    while api._photolib.process_thumbs_once():
+        pass
+    api._tracker.rows.append({"rid": "old:Exposure2012", "edit_id": "E0", "key": "Exposure2012", "label": "曝光", "before": "0",
+                              "after": "0.1", "reason": "", "photo": "101", "status": "已应用"})
+    api._backend.photo = {"id": "101", "name": "A.jpg"}
+    api._on_event({"type": "tool", "name": "lr_set_develop", "id": "T2", "input": {"photo": "102", "changes": {"Exposure2012": 0.2}}})
+    thumbs = api.library_state()["thumbs"]
+    assert "102" not in thumbs and "101" in thumbs                             # 以前两张都会失效
+    api._on_event({"type": "text", "text": "随便说说"})                       # 表格没变化：什么都不失效
+    assert "101" in api.library_state()["thumbs"]
+
+
+def test_api_gallery_select_hands_photo_to_preview_without_reading_selection(api):
+    """1.1.1：图库选中后，当前照片直接交给预览（立即到期）和右栏，不在界面调用里同步读 list_selected。"""
+    touch(api._base / "A.jpg")
+    api._photolib.lr.catalog = [cat(1, api._base / "A.jpg")]
+    api.library_refresh()
+    reads = []
+    api._backend.refresh_photo = lambda: reads.append("sync")                 # 不应在界面线程里同步调用
+    woke = []
+    api._backend.refresh_photo_async = lambda: woke.append(1)
+    r = api.library_select(["101"], "101")
+    assert r["ok"] and reads == [] and woke == [1]
+    assert api._backend.photo == {"id": "101", "name": "A.jpg"} and api._tracker.current_photo == "101"
+    assert api._preview._due is not None and api._preview._fresh_hint()["id"] == "101"
+
+
 def test_api_signatures_take_no_paths(api):
     assert list(inspect.signature(api.library_state).parameters) == []
     assert list(inspect.signature(api.library_refresh).parameters) == []
@@ -950,7 +1118,7 @@ def test_api_validates_page_values(api):
     assert api.library_thumbnails(["101"], retry="yes")["ok"] is True          # retry 只认 True
     assert api.library_select(["101"], {"x": 1})["status"] == "refused"
     r = api.library_select(["101"], "101")
-    assert r["ok"] is True and api._photolib.lr.select_calls == [(["101"], "101", str(api._base))]
+    assert r["ok"] is True and api._photolib.lr.select_calls == [(["101"], "101", None)]
 
 
 def test_api_start_refresh_and_thumb_server_lifecycle(api):

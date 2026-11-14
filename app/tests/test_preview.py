@@ -333,12 +333,12 @@ def test_poll_detects_selection_change_and_manual_edit():
     try:
         m.poll()
         m.process_due()
-        clock.t += 3.1
+        clock.t += pv.POLL_SECONDS + 0.1                     # 1.1.1：复查周期变长（换照片由 show() 立即处理）
         lr.exposure["P1"] = 0.5                              # 用户在 Lightroom 里手动改了
         m.poll()
         m.process_due()
         assert events[-1]["same"] is False
-        clock.t += 3.1
+        clock.t += pv.POLL_SECONDS + 0.1
         lr.detail = {"id": "P2", "name": "B.ARW", "info": {"name": "B.ARW"}}
         m.poll()
         m.process_due()
@@ -446,3 +446,20 @@ def test_lrservice_selected_detail():
     assert lr.selected_detail() == {"id": "P1", "name": "A.ARW", "info": info}
     assert LrService(bridge=FakeBridge({"list_selected": {"count": 0, "photos": []}}), edit_service=object()).selected_detail()["id"] is None
     assert LrService(bridge=FakeBridge({"list_selected": RuntimeError("x")}), edit_service=object()).selected_detail() is None
+
+
+def test_preview_fetch_is_a_foreground_request():
+    """1.1.1：取中栏预览时缩略图线程先让路（develop_of 与 preview_bytes 都在前台区段里）。"""
+    lr = FakeLr()
+    seen = []
+    lr._fg_enter = lambda: seen.append("enter")
+    lr._fg_exit = lambda: seen.append("exit")
+    d, p = lr.develop_of, lr.preview_bytes
+    lr.develop_of = lambda pid: (seen.append("develop"), d(pid))[1]
+    lr.preview_bytes = lambda pid, edge: (seen.append("preview"), p(pid, edge))[1]
+    m, lr, events, clock, server = make(lr)
+    try:
+        m.refresh()
+        assert seen == ["enter", "develop", "preview", "exit"]
+    finally:
+        server.stop()

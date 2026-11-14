@@ -20,7 +20,7 @@ import time
 from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from lr_service import friendly_read_error
+from lr_service import foreground, friendly_read_error
 
 log = logging.getLogger("latoshue.preview")
 
@@ -29,7 +29,9 @@ DEBOUNCE_SECONDS = 0.6                                    # 连续调整合并�
 MAX_WAIT_SECONDS = 2.0                                    # 防抖最长推迟时间
 MAX_CACHE = 40                                            # 非"初始"图最多保留的数量
 MAX_INITIAL = 200                                         # "初始"图最多保留的照片数
-POLL_SECONDS = 3.0
+POLL_SECONDS = 8.0                                        # 1.1.1：只用来复查 Lightroom 里手动改的参数（换照片由选区轮询立即告知）
+HINT_MAX_AGE = 2.5                                        # 选区轮询告知的当前照片在这么久内可直接用，不再读 list_selected
+_UNSET = object()
 MSG_ERROR = "无法读取预览：请确认 Lightroom 已打开并选中了照片"
 MSG_NONE = "Lightroom 中未选中照片"
 MSG_LOADING = "正在读取预览"
@@ -198,7 +200,8 @@ def info_of(detail: dict | None) -> dict:
 
 
 class PreviewManager:
-    """取图与刷新调度。lr 需要：connected、selected_detail()、develop_of(id)、preview_bytes(id, edge)。"""
+    """取图与刷新调度。lr 需要：connected、selected_detail()、develop_of(id)、preview_bytes(id, edge)。
+    1.1.1：当前照片主要由 show() 告知（Backend 的选区轮询、图库选中），selected_detail() 只在没有新近告知时才用。"""
 
     def __init__(self, lr, server: PreviewServer, emit, clock=time.monotonic, store: PreviewStore | None = None):
         self.lr, self.server, self.emit, self._clock = lr, server, emit, clock
@@ -212,6 +215,10 @@ class PreviewManager:
         self._loading_shown = False
         self._lock = threading.Lock()
         self._last_poll = -POLL_SECONDS
+        self._hint: dict | None = None           # 最近一次由选区轮询 / 图库选中告知的当前照片（{"id","name","info"?}）
+        self._hint_t = float("-inf")
+        self._want: object = _UNSET              # 预览应当显示的照片 id（换照片时 +1 代次，旧照片的结果不再推送）
+        self._gen = 0
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -232,8 +239,36 @@ class PreviewManager:
                 self._due = max(self._due, due)
         self._wake.set()
 
+    def show(self, detail: dict) -> None:
+        """选区轮询（Backend.refresh_photo，约每秒一次）或图库选中告诉预览“当前照片是这张”。
+        换了照片：立即开始取预览（不再等下一次轮询，也不再自己读一次选区）；没换：不调 get_develop，
+        只在带来了更完整的信息条（相机、ISO 等）时直接更新显示。"""
+        if not isinstance(detail, dict):
+            return
+        pid = detail.get("id")
+        with self._lock:
+            self._hint, self._hint_t = dict(detail), self._clock()
+            changed = pid != self._want
+            if changed:
+                self._want = pid
+                self._gen += 1
+        if changed:
+            self.request(0)
+            return
+        cur = self.last or {}
+        if pid and "info" in detail and cur.get("state") == "ok" and (cur.get("photo") or {}).get("id") == pid:
+            photo = {"id": pid, **info_of(detail)}
+            if photo != cur.get("photo"):
+                self._publish({**cur, "photo": photo})
+
+    def _fresh_hint(self) -> dict | None:
+        with self._lock:
+            if self._hint is not None and self._clock() - self._hint_t <= HINT_MAX_AGE:
+                return dict(self._hint)
+        return None
+
     def poll(self) -> None:
-        """由巡检线程调用：每 POLL_SECONDS 请求一次（检测 Lightroom 里换了照片或手动改了参数）。"""
+        """由巡检线程调用：每 POLL_SECONDS 复查一次（Lightroom 里手动改了参数；换照片由 show() 立即处理）。"""
         now = self._clock()
         if now - self._last_poll >= POLL_SECONDS:
             self._last_poll = now
@@ -258,30 +293,46 @@ class PreviewManager:
         """读选中照片 -> 读调整参数得到编辑版本 -> 命中缓存就直接用，否则取一张新预览 -> 推送给页面。"""
         if not self.lr.connected:
             return self._publish({"state": "error", "message": MSG_ERROR})
-        detail = self.lr.selected_detail()
+        detail = self._fresh_hint()              # 选区轮询刚告诉过当前照片：直接用，不再读一次 list_selected
         if detail is None:
-            reason = getattr(self.lr, "last_selected_error", None)      # 已经是给用户看的一句话（见 lr_service）
-            message = f"无法读取当前照片：{reason}" if reason else MSG_ERROR
-            return self._publish({"state": "error", "message": message})
+            detail = self.lr.selected_detail()
+            if detail is None:
+                reason = getattr(self.lr, "last_selected_error", None)      # 已经是给用户看的一句话（见 lr_service）
+                message = f"无法读取当前照片：{reason}" if reason else MSG_ERROR
+                return self._publish({"state": "error", "message": message})
+            with self._lock:
+                if detail.get("id") != self._want:
+                    self._want = detail.get("id")
+                    self._gen += 1
+        with self._lock:
+            gen = self._gen
         pid = detail.get("id")
         if not pid:
             return self._publish({"state": "none", "message": MSG_NONE})
         edge = self.edge
         try:
-            version = develop_version(self.lr.develop_of(pid))
-            entry = self.store.get(pid, edge, version)
-            if entry is None:
-                self._loading(pid, detail)
-                t0 = time.monotonic()
-                raw, _ = self.lr.preview_bytes(pid, edge)
-                self.last_fetch_seconds = round(time.monotonic() - t0, 3)
-                self.fetch_count += 1
-                entry = self.store.put(pid, edge, version, raw, jpeg_size(raw))
+            with foreground(self.lr):                # 前台请求：缩略图线程先让路
+                version = develop_version(self.lr.develop_of(pid))
+                entry = self.store.get(pid, edge, version)
+                if entry is None:
+                    self._loading(pid, detail)
+                    t0 = time.monotonic()
+                    raw, _ = self.lr.preview_bytes(pid, edge)
+                    self.last_fetch_seconds = round(time.monotonic() - t0, 3)
+                    self.fetch_count += 1
+                    entry = self.store.put(pid, edge, version, raw, jpeg_size(raw))
         except Exception as e:
             # 异常原文（可能带本机路径、端口）只进日志；界面上只给一句分好类的原因
             log.warning("preview refresh failed: %s: %s", type(e).__name__, e)
+            if self._superseded(gen):
+                return {"state": "superseded"}
             return self._publish({"state": "error", "message": "无法读取预览：" + friendly_read_error(e),
                                   "photo": {"id": pid, **info_of(detail)}})
+        if self._superseded(gen):                # 取图期间已经换了照片：这张只进缓存，不推送（避免旧照片盖住新照片）
+            return {"state": "superseded"}
+        with self._lock:                         # 取图期间轮询带来了更完整的信息条：用新的
+            if self._hint is not None and self._hint.get("id") == pid and "info" in self._hint:
+                detail = dict(self._hint)
         initial = self.store.initial(pid)
         if initial is None:                      # 软件第一次看到这张照片：这一张就是"初始（首次打开时）"
             self.store.set_initial(pid, entry)
@@ -289,6 +340,10 @@ class PreviewManager:
         return self._publish({"state": "ok", "photo": {"id": pid, **info_of(detail)},
                               "initial": self._img(initial), "current": self._img(entry),
                               "same": initial["id"] == entry["id"], "edge": edge})
+
+    def _superseded(self, gen: int) -> bool:
+        with self._lock:
+            return self._gen != gen
 
     def _img(self, e: dict) -> dict:
         w, h = e["size"] if e.get("size") else (None, None)

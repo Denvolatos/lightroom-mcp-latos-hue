@@ -265,8 +265,8 @@ def test_write_errors_become_formal_chinese(env):
 def test_lightroom_presets_list_grouped_search_and_apply(env):
     s, lr, _, applied, _ = env
     r = s.lr_presets("")
-    assert r["ok"] and [g["folder"] for g in r["groups"]] == ["Adobe", "用户"] and "共 2 个预设" in r["note"]
-    assert r["groups"][1]["presets"][0]["masks"] is True
+    assert r["ok"] and [g["folder"] for g in r["groups"]] == ["Adobe"] and "共 2 个预设" in r["note"]   # 只有蒙版预设的“用户”组不出现
+    assert r["hidden_masks"] == 1 and "显示 1 个" in r["note"]
     ok = s.apply_prepare("lr", "11111111-aaaa")
     assert ok["ok"] and "改前会保存这张照片的完整快照" in ok["note"] and "Lightroom 预设“清爽”" in ok["title"]
     assert s.apply_confirm(ok["token"])["ok"] and lr.lr_applied[0][0] == "11111111-aaaa" and applied
@@ -278,6 +278,24 @@ def test_lightroom_presets_list_grouped_search_and_apply(env):
     assert "已有蒙版" in s.apply_prepare("lr", "11111111-aaaa")["message"]
     lr.connected = False
     assert not s.lr_presets("x")["ok"]
+
+
+def test_lightroom_presets_hide_masked_and_empty_groups(env):
+    """1.1.1：带蒙版的预设默认不列出（本软件用不了），只给出隐藏数量；混合分组只留下能用的那几个。"""
+    s, lr, *_ = env
+    lr.lr_presets = {"total": 5, "matched": 5, "presets": [
+        {"id": "a1", "name": "甲", "folder": "混合", "has_masks": False},
+        {"id": "a2", "name": "乙", "folder": "混合", "has_masks": True},
+        {"id": "b1", "name": "丙", "folder": "全是蒙版", "masks": True},
+        {"id": "b2", "name": "丁", "folder": "全是蒙版", "has_masks": True},
+        {"id": "c1", "name": "戊", "folder": "普通"}]}
+    r = s.lr_presets("")
+    assert r["ok"] and r["hidden_masks"] == 3
+    assert [(g["folder"], [p["id"] for p in g["presets"]]) for g in r["groups"]] == [("混合", ["a1"]), ("普通", ["c1"])]
+    assert all(g["presets"] for g in r["groups"]) and all(p["masks"] is False for g in r["groups"] for p in g["presets"])
+    assert not s.apply_prepare("lr", "a2")["ok"]                             # 隐藏的仍不能套用
+    lr.lr_presets = {"total": 1, "matched": 1, "presets": [{"id": "c1", "name": "戊", "folder": "普通"}]}
+    assert s.lr_presets("")["hidden_masks"] == 0
 
 
 def test_lightroom_preset_server_rejection_is_shown(env):
