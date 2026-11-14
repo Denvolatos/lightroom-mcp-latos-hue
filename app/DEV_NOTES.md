@@ -946,3 +946,51 @@ PR 新增的 `version_save / version_apply / batch_plan_from_edit / batch_apply 
 - 新增脚本必须放进这个顺序里；全局 `const`/`let` 不能在声明的文件之前被顶层代码用到（函数声明不会跨文件提升）。`boot.js` 最后加载，里面的 `renderAll()` 在启动时执行。
 - 打包：spec 把整个 `web/` 目录带上（含 css/、js/），安装包递归复制；`frozen.py` 的自检会核对 `index.html` 引用的每个 css/js 文件都在。
 - 测试：`app/tests/web_source.py` 提供 `web_source()`（index+css+js 拼接文本）、`inject_stub()`、`serve_static()`；`ui_*_check.py` 靠它们在本机静态服务里提供 css/、js/。
+
+## 1.2.0 照片库（界面）
+
+产品决定：照片库 = 设置里的照片工作文件夹，图库只显示它；Lightroom 对用户是后台引擎。界面只改 `app/web/` 与 `app/tests/ui_*_check.py`，不动 Python 业务代码。
+
+### 改了什么
+- 图库（`js/gallery.js`、`index.html`、`css/app.css`）
+  - 删除“换目录”（`#gal_change`、`changeGalleryFolder`、对应文案）。标题改为“我的照片”，说明行写“照片库：<路径>”。
+  - 排序下拉 `#gal_sort` 改为 10 项（拍摄时间、导入时间、名称、大小、星级、旗标、颜色标签、最后修改、是否修过、类型），旁边新增升/降序按钮 `#gal_dir`（带 title 和 `aria-label`，文字“↓ 降序 / ↑ 升序”）。默认 `captured` + `desc`。
+  - 所有排序在前端做（`galCmp` / `galGroups`）；改选项或点方向按钮后，防抖 400 ms 调 `gallery_set_sort(key, order)`，失败只 `console.warn`。`state()` 带来的 `sort`/`order` 在用户本次还没动过排序时被采用（`G.sortTouched`）。
+  - 空图库：显示“还没有照片。点“导入”，从存储卡或文件夹把照片放进来。”和“导入”按钮（调用 `startImport()`）。
+  - Lightroom 文案：未同步的照片标签改为“未同步”，顶部提示“N 张照片还没同步到 Lightroom，同步后才能选中和修图”，按钮“同步到 Lightroom”（后端接口仍是 `library_add_missing`）；筛选项“未同步”。浏览不再要求先“加入 Lightroom”。
+  - 设置页的标签改为“照片工作文件夹”（原“软件文件夹”），说明里写明按“年\年-月-日”整理。设置页本来就没有 `gallery_folder` 项。
+- 导入（`js/import.js`）
+  - 去掉“分类文件夹名”输入和“保存到”；`import_prepare()` 不再传参，`import_start(create_base)` 只传一个布尔。确认页显示“将按拍摄日期放进 年\年-月-日 文件夹”、日期汇总表（`date_summary`，最多 30 行，`date_more` 显示“另有 N 个日期未列出”）、重复数（`duplicates`）、需要复制数（`to_copy`）。字段缺了就整块不显示，不会出现 undefined / NaN。
+  - 进度与结果分两行：第一行“已复制 / 重复跳过 / 失败”，第二行“Lightroom：已加入 / 需确认 / 尚未加入 / 加入失败”。重复跳过数优先读 `ev.skipped_dup`，其次 `counts.skipped_dup`，再次退回旧的 `counts.skipped`。
+
+### 排序规则（前端 `GAL_KEY`；期望值见 `ui_sort_check.py`）
+| 键 | 排序依据 | 没有数据时 |
+|---|---|---|
+| captured 拍摄时间 | `captured` 字符串 | 排最后（升降序都是） |
+| imported 导入时间 | `added_at` | 排最后 |
+| name 名称 | 文件名小写 | — |
+| size 大小 | `size` 数字 | 排最后 |
+| rating 星级 | `rating` 数字 | 当 0 |
+| flag 旗标 | pick=2 > none=1 > reject=0（desc 时 pick 在前） | 未知值当 none |
+| label 颜色标签 | 标签名小写 | 无标签排最后 |
+| modified 最后修改 | `mtime` 数字 | 排最后 |
+| edited 是否修过 | true=1，其余=0（desc 时 true 在前） | null 当 0 |
+| type 类型 | `format` 小写 | 排最后 |
+
+所有排序同值时再按文件名（不分大小写，始终升序），最后按 id。分组按 `group` 名称，顺序随升/降序一起翻转，“（未分类）”始终在最前；折叠不改变顺序。
+
+### 假数据约定（后端并行实现，界面按此造假）
+- `photos[]` 每项除原有字段外有 `size, mtime, label, edited, added_at`（都可为 null）；`state()` 有 `sort`、`order`。
+- 假 api 里 `gallery_set_sort(key, order)` 返回 `{ok:true, sort, order}`；`import_state()`/`import_prepare()` 的新字段见 `ui_import_check.py`。
+- 排序检查的数据故意放了同值、缺值、大小写不同的名字，期望顺序是手写在脚本里的（不是从页面代码抄的）。
+- `ui_gallery_check.py` 原来的假 api 缺 `autolaunch_state` 等，页面启动流程半路中断、图库一直空白（改动前就是这样）；现在加了“没写到的接口返回空对象”的兜底，并补上断言（`--dump-dom` 读 CHK）。
+
+### 界面自查（PowerShell 里跑；Bash 沙箱里 Edge 无输出）
+`python app/tests/ui_sort_check.py <目录>`（新增，1440 与 800 宽各 4 个场景）、`ui_gallery_check.py <目录> <缩略图目录>`、`ui_import_check.py`、`ui_versions_check.py`、`ui_layout_check.py` 都带断言，有问题退出码为 1。
+
+### 没验证的点
+- 没有接真实后端：`gallery_set_sort`、`date_summary`/`duplicates`/`to_copy`/`skipped_dup`、`photos[]` 新字段都只在假 api 里按约定造过数据，真机联调待做。
+- 后端报错文案里还有“软件文件夹”（`import_service.py`），界面其余地方已改叫“照片工作文件夹”，需要后端同步。
+- 星级/旗标/颜色标签等在格子上的显示没有改（只用于排序）；颜色标签没有色块显示。
+- `ui_pick_check.py`、`ui_preview_check.py` 需要真机样例输入，本次没跑（没有改它们涉及的界面）。
+- 没有启动 pywebview 窗口，也没有连 Lightroom。
