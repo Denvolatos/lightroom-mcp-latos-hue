@@ -39,6 +39,7 @@ from library_service import LibraryService  # noqa: E402
 from preview import PreviewManager, PreviewServer, PreviewStore  # noqa: E402
 from photo_library import PhotoLibrary, ThumbStore  # noqa: E402
 from ports import STATE_DIR  # noqa: E402
+import ports as portsmod  # noqa: E402
 
 WEB = frozen.web_dir() / "index.html"
 MSG_AI_BUSY = "AI 正在处理（对话、AI 挑片或“记成经验”还没结束）。请等它完成，或先点“停止”，再试一次。"
@@ -108,7 +109,8 @@ class Api:
         self._wizard = wizardmod.WizardChecker(lambda: self._settings.data, find_lightroom=lr_autostart.find_lightroom,
                                                is_running=lr_autostart.is_running,
                                                get_connection=self._wizard_connection,
-                                               get_provider=self._wizard_provider, get_autolaunch=self._autolaunch.state)
+                                               get_provider=self._wizard_provider, get_autolaunch=self._autolaunch.state,
+                                               get_old_servers=lambda: portsmod.find_old_servers(appsettings.APP_VERSION))
         # 检查更新（0.15.0）：只提示，不下载不安装；启动时在后台查一次（设置可关），页面只能取状态、点按钮，不传地址
         self._updates = updatemod.AppUpdateChecker(appsettings.APP_VERSION,
                                                    lambda: self._settings.data.get("check_updates") is True)
@@ -782,6 +784,19 @@ class Api:
             return {"ok": True, "message": f"已选择，但 AI 没能启动：{type(e).__name__}。请点“重新检查”。"}
         self._wizard.invalidate()
         return {"ok": True, "message": ""}
+
+    def wizard_stop_old_servers(self) -> dict:
+        """向导“旧版服务”一项的按钮：结束登记文件里版本较旧、进程名核对无误的 lrmcp 服务，并删除它们的登记文件。不收任何参数。"""
+        try:
+            r = portsmod.stop_old_servers(appsettings.APP_VERSION)
+        except Exception as e:                   # noqa: BLE001
+            self._wizard.invalidate()
+            return {"ok": False, "stopped": 0, "message": f"没能关闭旧版服务（{type(e).__name__}）。"}
+        self._wizard.invalidate()
+        if r["failed"]:
+            return {"ok": False, "stopped": len(r["stopped"]),
+                    "message": f"有 {len(r['failed'])} 个旧版服务没能关闭（可能需要管理员权限）。可以重启电脑，或在任务管理器里结束 lrmcp。"}
+        return {"ok": True, "stopped": len(r["stopped"]), "message": ""}
 
     def wizard_pick_folder(self) -> dict:
         """向导第 1 项的按钮：弹出系统文件夹对话框，选中后直接保存为照片工作文件夹。路径只来自这次点击。"""
