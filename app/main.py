@@ -1118,11 +1118,69 @@ class Api:
         return {"ok": True, "edge": self._preview.set_edge(edge)}
 
 
+MAIN_TITLE = "修图助手"                    # 主窗口标题（单实例激活时按它找窗口）
+MUTEX_NAME = "Local\\LatosHue.SingleInstance"   # 安装器 installer/latoshue.iss 的 AppMutex 用同一个名字
+ERROR_ALREADY_EXISTS = 183
+_instance_handle = None                    # 互斥锁句柄：整个进程期间保持打开
+
+
+def acquire_single_instance(name: str = MUTEX_NAME, kernel32=None) -> bool:
+    """占用单实例互斥锁。返回 False 表示已有一个 Latos Hue 在运行。非 Windows 或任何调用失败都返回 True（不阻止启动）。
+    只在图形界面入口（main）里调用；latoshue-helper 的子命令不经过这里，不受影响。"""
+    global _instance_handle
+    if kernel32 is None and os.name != "nt":
+        return True
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k = kernel32
+        if k is None:
+            k = ctypes.WinDLL("kernel32", use_last_error=True)
+            k.CreateMutexW.restype = wintypes.HANDLE
+            k.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+            ctypes.set_last_error(0)
+        handle = k.CreateMutexW(None, False, name)
+        err = k.last_error() if hasattr(k, "last_error") else ctypes.get_last_error()
+        if not handle:
+            return True
+        if err == ERROR_ALREADY_EXISTS:
+            try:
+                k.CloseHandle(handle)
+            except Exception:                    # noqa: BLE001
+                pass
+            return False
+        _instance_handle = handle
+        return True
+    except Exception:                            # noqa: BLE001 - 检查失败不能让软件打不开
+        return True
+
+
+def activate_existing_window(titles=(MAIN_TITLE, splashmod.TITLE), user32=None) -> bool:
+    """把已经在运行的那个实例的窗口拿到前台（最小化的先还原）。主窗口还隐藏着（启动画面阶段）就激活启动画面。"""
+    if user32 is None and os.name != "nt":
+        return False
+    try:
+        if user32 is None:
+            import ctypes
+            user32 = ctypes.windll.user32
+        for title in titles:
+            hwnd = user32.FindWindowW(None, title)
+            if not hwnd or not user32.IsWindowVisible(hwnd):
+                continue
+            if user32.IsIconic(hwnd):
+                user32.ShowWindow(hwnd, 9)       # SW_RESTORE
+            user32.SetForegroundWindow(hwnd)
+            return True
+    except Exception:                            # noqa: BLE001
+        pass
+    return False
+
+
 def setup_windows(api, create_window=None, use_splash: bool = True):
     """创建主窗口（先隐藏）和启动窗口，返回启动界面控制器（没有启动界面时为 None，主窗口直接显示）。
     主窗口先创建，保证它是 pywebview 的主窗口：启动窗口关闭不会让程序退出。创建启动窗口出任何错，都退回"直接显示主窗口"。"""
     create_window = create_window or webview.create_window
-    api._window = create_window("修图助手", WEB.as_uri(), js_api=api, width=1440, height=860, min_size=(960, 620),
+    api._window = create_window(MAIN_TITLE, WEB.as_uri(), js_api=api, width=1440, height=860, min_size=(960, 620),
                                 background_color="#17181b", hidden=use_splash)
     if not use_splash:
         return None
@@ -1144,6 +1202,9 @@ def setup_windows(api, create_window=None, use_splash: bool = True):
 
 
 def main() -> None:
+    if not acquire_single_instance():
+        activate_existing_window()               # 已经开着一个：把它拿到前台，这次直接退出（不再起第二套 claude 和 Bridge）
+        return
     api = Api()
     ctrl = setup_windows(api, use_splash=os.environ.get("LRAPP_NO_SPLASH") != "1")
     icon = str(splashmod.ICON_ICO) if splashmod.ICON_ICO.is_file() else None   # 窗口与任务栏图标（丝带）

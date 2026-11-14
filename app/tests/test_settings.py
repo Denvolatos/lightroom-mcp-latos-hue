@@ -99,6 +99,7 @@ def test_webview_cache_uses_selected_folder_and_is_cleaned(tmp_path, monkeypatch
     api = FakeApi()
     paths = []
     monkeypatch.setattr(main, "Api", lambda: api)
+    monkeypatch.setattr(main, "acquire_single_instance", lambda: True)
     monkeypatch.setattr(main.webview, "create_window", lambda *a, **k: object())
     def start(_callback, *, storage_path, icon):
         cache = Path(storage_path)
