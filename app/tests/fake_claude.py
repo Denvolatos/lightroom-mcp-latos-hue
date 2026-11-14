@@ -6,6 +6,10 @@ silent 不回应；die 直接退出。"""
 import json
 import os
 import sys
+
+sys.stdin.reconfigure(encoding="utf-8")      # CI 上控制台编码不是 UTF-8，中文会写不出去
+sys.stdout.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")
 import time
 
 
