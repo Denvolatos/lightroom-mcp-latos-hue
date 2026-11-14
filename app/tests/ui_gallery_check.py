@@ -3,8 +3,10 @@
 """软件内图库界面自查（无窗口、无 Lightroom、不调用模型，不属于 pytest）。
 临时本机静态服务加载 index.html（注入假的 pywebview.api 与假数据），用无头 Edge 截图各状态。
 缩略图用测试照片的缩略图 JPEG（--thumbs 指定目录，默认取脚本参数 2），照片名是测试照片的文件名，不含个人信息。数据只存在于本脚本里。
+并用 --dump-dom 读出断言结果（CHK）：空图库的引导文案与“导入”按钮、日期分组顺序、默认排序（拍摄时间 + 降序）、不再有“换目录”、“未同步”标签等；有断言失败时退出码为 1。
 用法：python app/tests/ui_gallery_check.py <截图输出目录> <缩略图 JPEG 目录> [场景名 ...]      截图命名 gallery_<场景>.png
 """
+import re
 import subprocess
 import sys
 import threading
@@ -23,23 +25,25 @@ STUB = """<script>
   const rating = [3, null, 1, 0, 5, null, 2], flag = ['pick','none','none','reject','pick','none','none'];
   const fmtOf = n => n.endsWith('ARW') ? 'ARW' : 'JPG';
   let photos = [];
-  names.forEach((n,i)=>photos.push({id:String(101+i), name:n, group:'（未分类）', format:fmtOf(n), rating:rating[i], flag:flag[i], captured:caps[i], w:6000, h:4000, vc:false, added:true, missing:false}));
-  names.forEach((n,i)=>photos.push({id:String(201+i), name:n, group:'test_batch', format:fmtOf(n), rating:rating[(i+3)%7], flag:flag[(i+2)%7], captured:caps[(i+2)%7], w:6000, h:4000, vc:false, added:true, missing:false}));
-  if (S === 'notadded') { ['IMG_0001.JPG','IMG_0002.ARW','IMG_0003.JPG'].forEach((n,i)=>photos.push({id:'n-0000000000000'+i, name:n, group:'new_test', format:fmtOf(n), rating:null, flag:'none', captured:null, w:null, h:null, vc:false, added:false, missing:false})); }
+  const extra = i => ({size:5000000+i*1234567, mtime:1790000000+i*3600, label:[null,'red',null,'blue',null,null,'green'][i%7], edited:[true,false,null,true,false,false,true][i%7], added_at:'2026-11-14T10:0'+(i%10)+':00'});
+  names.forEach((n,i)=>photos.push(Object.assign({id:String(101+i), name:n, group:'（未分类）', format:fmtOf(n), rating:rating[i], flag:flag[i], captured:caps[i], w:6000, h:4000, vc:false, added:true, missing:false}, extra(i))));
+  names.forEach((n,i)=>photos.push(Object.assign({id:String(201+i), name:n, group:'2026/2026-11-14', format:fmtOf(n), rating:rating[(i+3)%7], flag:flag[(i+2)%7], captured:caps[(i+2)%7], w:6000, h:4000, vc:false, added:true, missing:false}, extra(i+3))));
+  if (S === 'notadded') { ['IMG_0001.JPG','IMG_0002.ARW','IMG_0003.JPG'].forEach((n,i)=>photos.push({id:'n-0000000000000'+i, name:n, group:'2026/2026-11-15', format:fmtOf(n), rating:null, flag:'none', captured:null, w:null, h:null, vc:false, added:false, missing:false, size:null, mtime:null, label:null, edited:null, added_at:null})); }
   if (S === 'missing') { photos[2].missing = true; photos[9].missing = true; }
   if (S === 'truncated') { }
   const thumbsOf = ids => { const o = {}; ids.forEach(i => { o[i] = {url: '/t/' + (parseInt(i.replace(/\\D/g,'')) % 5) + '.jpg'}; }); return o; };
   let state = {ok:true, state:'ready', message:'', base:'D:\\\\ceshi\\\\app_library_test', base_exists:true, in_catalog:true, lr_connected:true, total:photos.length, limit:2000,
     truncated: S==='truncated', truncated_message:'仅显示前 2000 张。', not_added: photos.filter(p=>!p.added).length, missing: photos.filter(p=>p.missing).length,
-    photos, thumbs:{}, failed:{}, selection:{ids:[], active:null}, add:null, max_select:50};
-  if (S === 'empty') state = Object.assign(state, {photos:[], total:0, not_added:0, missing:0});
+    photos, thumbs:{}, failed:{}, selection:{ids:[], active:null}, add:null, max_select:50, sort:'captured', order:'desc'};
+  if (S === 'empty' || S === 'empty_import') state = Object.assign(state, {photos:[], total:0, not_added:0, missing:0});
   if (S === 'empty_nofolder') state = Object.assign(state, {photos:[], total:0, not_added:0, missing:0, base_exists:false});
   if (S === 'offline') state = Object.assign(state, {state:'error', message:'Lightroom 未连接，无法显示照片信息', photos:[], total:0, lr_connected:false});
   if (S === 'loading_state') state = Object.assign(state, {state:'loading', photos:[], total:0});
   if (S === 'add_running') state.add = {state:'running', i:1, n:3, name:'IMG_0002.ARW', counts:{added:1, uncertain:0, failed:0, pending:0}, problems:[], cancelled:false};
   if (S === 'add_done') state.add = {state:'done', i:3, n:3, name:'', counts:{added:2, uncertain:1, failed:0, pending:0}, problems:[{name:'IMG_0003.JPG', lr:'uncertain', reason:'Lightroom 未在规定时间内响应，请在 Lightroom 中确认该照片是否已加入。'}], cancelled:false};
-  if (S === 'add_running' || S === 'add_done') { ['IMG_0001.JPG','IMG_0002.ARW','IMG_0003.JPG'].forEach((n,i)=>photos.push({id:'n-0000000000000'+i, name:n, group:'new_test', format:fmtOf(n), rating:null, flag:'none', captured:null, w:null, h:null, vc:false, added:i>0, missing:false})); state.total = photos.length; state.not_added = 1; }
+  if (S === 'add_running' || S === 'add_done') { ['IMG_0001.JPG','IMG_0002.ARW','IMG_0003.JPG'].forEach((n,i)=>photos.push({id:'n-0000000000000'+i, name:n, group:'2026/2026-11-15', format:fmtOf(n), rating:null, flag:'none', captured:null, w:null, h:null, vc:false, added:i>0, missing:false, size:null, mtime:null, label:null, edited:null, added_at:null})); state.total = photos.length; state.not_added = 1; }
   const A = {ok:true};
+  window.__SORTS__ = []; window.__CALLS__ = [];
   window.pywebview = {api: {
     send: ()=>Promise.resolve(A), stop(){}, reset(){}, answer(){}, undo(){}, restore_original(){},
     status: ()=>Promise.resolve({state:'connected', text:'Lightroom 已连接', hint:'', photo:{id:'101', name:'DSC08151.ARW'}}),
@@ -48,7 +52,9 @@ STUB = """<script>
     get_settings: ()=>Promise.resolve({settings:{schema:1, base_folder:'D:\\\\ceshi\\\\app_library_test', provider:'claude', confirm_default:true, preview_edge:1024, ai_use_notes:true}, providers:[], current_provider:'claude', edges:[768,1024,1536,2048], about:{}}),
     lib_presets: ()=>Promise.resolve({ok:true, presets:[], max:200}), lib_notes: ()=>Promise.resolve({ok:true, notes:[], tags:[], max:300, context:{used:0, eligible:0, truncated:false}}),
     lib_favs: ()=>Promise.resolve({ok:true, groups:{preset:[],lr_preset:[],note:[],photo:[]}, total:0, photo_fav:false}), lib_lr_presets: ()=>Promise.resolve({ok:true, groups:[]}),
-    open_library: ()=>Promise.resolve(A),
+    open_library: ()=>Promise.resolve(A), autolaunch_state: ()=>Promise.resolve({state:'idle', message:''}),
+    wizard_state: ()=>Promise.resolve({items:[], ready:true, checking:false, auto_open:false, wizard_done:true, mark_done:false, message:''}),
+    choose_source_folder: ()=>{ window.__CALLS__.push('choose_source_folder'); return Promise.resolve({ok:false, message:''}); }, gallery_set_sort: (k,o)=>{ window.__SORTS__.push([k,o]); return Promise.resolve({ok:true, sort:k, order:o}); },
     library_state: ()=>Promise.resolve(JSON.parse(JSON.stringify(state))),
     library_refresh: ()=>Promise.resolve(A),
     library_thumbnails: (ids, retry)=>{
@@ -62,6 +68,8 @@ STUB = """<script>
     library_clear_selection: ()=>Promise.resolve({ok:true, message:'已清除图库中的选择标记。Lightroom 里的选区不变，AI 挑片、导出仍按 Lightroom 当前选区进行。'}),
     library_add_missing: ()=>Promise.resolve(A), library_cancel_add: ()=>Promise.resolve(A), library_close_add: ()=>Promise.resolve(A)
   }};
+  const P = window.pywebview.api;      /* 没写到的接口一律返回空结果，避免启动流程半路中断 */
+  window.pywebview.api = new Proxy(P, {get: (t, k) => (k in t) ? t[k] : (() => Promise.resolve({}))});
 })();
 </script>"""
 
@@ -82,16 +90,45 @@ const clickCell = (id, o) => cell(id).dispatchEvent(new MouseEvent('click', Obje
   if (S === 'search') { const q = document.getElementById('gal_q'); q.value = '0823'; q.oninput(); await wait(1200); }
   if (S === 'filter_rated') { const f = document.getElementById('gal_filter'); f.value = 'rated'; f.onchange(); await wait(1200); }
   if (S === 'filter_pick') { const f = document.getElementById('gal_filter'); f.value = 'pick'; f.onchange(); await wait(1200); }
-  if (S === 'sort_time') { const f = document.getElementById('gal_sort'); f.value = 'time'; f.onchange(); await wait(1200); }
-  if (S === 'collapsed') { document.querySelector('.ghead[data-g="test_batch"]').click(); await wait(1200); }
+  if (S === 'sort_name') { const f = document.getElementById('gal_sort'); f.value = 'name'; f.onchange(); await wait(1200); }
+  if (S === 'sort_asc') { document.getElementById('gal_dir').click(); await wait(1200); }
+  if (S === 'collapsed') { document.querySelector('.ghead[data-g="2026/2026-11-14"]').click(); await wait(1200); }
   if (S === 'meta_update') { window.onClaudeEvent({type:'library_meta', items:[{id:'102', rating:4, flag:'pick'}, {id:'104', rating:0, flag:'none'}]}); await wait(1200); }
   if (S === 'lr_select') { window.onClaudeEvent({type:'library_selection', ids:['101','103','205'], active:'103'}); await wait(1200); }
+  if (S === 'empty_import') { document.getElementById('gal_import').click(); await wait(500); }
+})();
+/* 断言 */
+(async()=>{
+  await wait(7500);
+  const bad = [], gal = document.getElementById('gal'), txt = gal.innerText;
+  const ids = g => Array.from(document.querySelectorAll('.ggrid')[g].querySelectorAll('.cell')).map(c => c.dataset.id).join(' ');
+  const heads = () => Array.from(document.querySelectorAll('.ghead .gn')).map(e => e.textContent).join(' | ');
+  ['换目录', 'undefined', 'NaN', '加入 Lightroom'].forEach(t => { if (txt.indexOf(t) >= 0) bad.push('不该出现「' + t + '」'); });
+  if (document.getElementById('gal_change')) bad.push('还有 gal_change');
+  const dir = document.getElementById('gal_dir'); if (!dir || !(dir.getAttribute('aria-label') || '').startsWith('排序方向：')) bad.push('缺少方向按钮');
+  if (['empty', 'empty_nofolder', 'empty_import'].includes(S)) {
+    if (txt.indexOf('还没有照片。点“导入”，从存储卡或文件夹把照片放进来。') < 0) bad.push('空图库引导文案不对');
+    const b = document.getElementById('gal_import'); if (!b || b.textContent.trim() !== '导入') bad.push('缺少“导入”按钮');
+  }
+  if (S === 'empty_import' && window.__CALLS__.indexOf('choose_source_folder') < 0) bad.push('点“导入”没有进入导入流程');
+  if (S === 'groups') {
+    if (heads() !== '（未分类） | 2026/2026-11-14') bad.push('分组顺序 ' + heads());
+    if (ids(0) !== '107 106 105 104 103 102 101') bad.push('默认（拍摄时间降序）顺序 ' + ids(0));
+    if (document.getElementById('gal_sort').value !== 'captured') bad.push('默认排序应是拍摄时间');
+  }
+  if (S === 'sort_name' && ids(0) !== '107 106 105 104 103 102 101') bad.push('名称降序顺序 ' + ids(0));
+  if (S === 'sort_asc') { if (ids(0) !== '101 102 103 104 105 106 107') bad.push('拍摄时间升序顺序 ' + ids(0)); if (heads() !== '（未分类） | 2026/2026-11-14') bad.push('升序分组 ' + heads()); }
+  if (S === 'notadded') { if (!Array.from(document.querySelectorAll('.cell .tag')).some(t => t.textContent === '未同步')) bad.push('缺少“未同步”标签'); }
+  if (S === 'select_partial' || S === 'lr_select' || S === 'select_one') { if (!document.querySelector('.cell.sel')) bad.push('没有选中格子'); }
+  const W = document.documentElement.clientWidth; if (document.documentElement.scrollWidth > W + 1) bad.push('页面横向溢出');
+  const pre = document.createElement('pre'); pre.id = 'chk'; pre.style.cssText = 'position:fixed;left:-9999px;top:0';
+  pre.textContent = 'CHK[' + S + ']:' + (bad.length ? bad.join(' | ') : 'OK'); document.body.appendChild(pre);
 })();
 </script>"""
 
 SCENES = ["groups", "select_one", "select_ctrl", "select_range", "select_all", "select_partial", "lr_select", "loading", "mixed", "fail",
           "notadded", "missing", "empty", "empty_nofolder", "offline", "loading_state", "add_running", "add_done", "search", "filter_rated",
-          "filter_pick", "sort_time", "collapsed", "meta_update", "truncated"]
+          "filter_pick", "sort_name", "sort_asc", "collapsed", "meta_update", "truncated", "empty_import"]
 
 
 def main(out: Path, thumbs: Path) -> None:
@@ -124,6 +161,7 @@ def main(out: Path, thumbs: Path) -> None:
 
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    failed = False
     try:
         for name in (sys.argv[3:] or SCENES):
             target = out / f"gallery_{name}.png"
@@ -131,8 +169,15 @@ def main(out: Path, thumbs: Path) -> None:
                             "--virtual-time-budget=9000", f"--screenshot={target}",
                             f"http://127.0.0.1:{httpd.server_address[1]}/?s={name}"], check=True, timeout=60, capture_output=True)
             print("截图", target)
+            dom = subprocess.run([EDGE, "--headless=new", "--disable-gpu", "--window-size=1464,924", "--virtual-time-budget=9000", "--dump-dom",
+                                  f"http://127.0.0.1:{httpd.server_address[1]}/?s={name}"], check=True, timeout=60, capture_output=True).stdout.decode("utf-8", "replace")
+            m = re.search(r'<pre id="chk"[^>]*>(CHK[^<]*)', dom)
+            res = m.group(1) if m else "没有检查结果"
+            failed |= not res.endswith(":OK")
+            print("  ", res)
     finally:
         httpd.shutdown()
+    sys.exit(1 if failed else 0)
 
 
 if __name__ == "__main__":

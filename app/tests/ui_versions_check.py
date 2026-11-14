@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2026 Denvolatos and contributors
 """1.1.0 新界面自查（无窗口、无 Lightroom、不调用模型，不属于 pytest）：多版本页、版本应用确认、命名输入、
-批量复用预演、图库换目录后的提示条、环境检查里“请选择 AI”的各种状态，以及它们在 1100 宽窗口下是否溢出。
+批量复用预演、图库（照片库）的日期分组、环境检查里“请选择 AI”的各种状态，以及它们在 1100 宽窗口下是否溢出。
 临时本机静态服务加载 index.html（注入假的 pywebview.api，只含示例数据），用无头 Edge 截图，并用 --dump-dom 检查
 页面不横向溢出、按钮文字没被挤成多行、对话框没超出窗口。
 用法：python app/tests/ui_versions_check.py <截图输出目录>    （有问题时退出码为 1）
@@ -66,14 +66,14 @@ STUB = r"""<script>
     {id:'claude', name:C, selectable:true, available:true, state:'ready', reason:'已安装并已登录。', next_step:'', privacy_notice:''},
     {id:'codex', name:X, selectable:true, available:false, state:'not_installed', reason:'未安装 Codex 命令行。', next_step:'请安装 Codex CLI 后重试。', privacy_notice:PRIV},
     {id:'api', name:'API 密钥', selectable:false, available:false, state:'unavailable', reason:'API 密钥（兼容 OpenAI 接口的各家，含 DeepSeek 等）——后续提供。', next_step:'', privacy_notice:''}];
-  const settings = {schema:1, base_folder:'D:\\示例\\修图助手', gallery_folder: S.startsWith('gallery') ? 'E:\\示例\\2026 旅行\\原片（很长的文件夹名字用来检查换行）' : '',
+  const settings = {schema:1, base_folder: S.startsWith('gallery') ? 'E:\\示例\\2026 旅行\\照片库（很长的文件夹名字用来检查换行）' : 'D:\\示例\\修图助手',
     provider:'claude', provider_chosen: !unchosen, confirm_default:true, preview_edge:1024, ai_use_notes:true};
-  /* 图库（换目录后）：示例照片 */
+  /* 图库：示例照片，分组是拍摄日期文件夹 */
   const names = ['DSC08151.ARW','DSC08152.ARW','DSC08205.JPG','DSC08206.ARW','DSC08238.ARW','DSC08244.JPG'];
-  const gphotos = names.map((n,i)=>({id:String(101+i), name:n, group: i<3 ? '第一天' : '第二天', format:n.endsWith('ARW')?'ARW':'JPG', rating:[3,null,1,0,5,null][i], flag:'none',
-    captured:'2026-10-0'+(i+1)+' 10:02', w:6000, h:4000, vc:false, added: i!==1, missing:false}));
-  const gallery = {ok:true, state:'ready', message:'', base: settings.gallery_folder || settings.base_folder, base_exists:true, in_catalog:true, lr_connected:true,
-    total:gphotos.length, limit:2000, truncated:false, truncated_message:'', not_added:1, missing:0, photos:gphotos, thumbs:{}, failed:{}, selection:{ids:[], active:null}, add:null, max_select:50};
+  const gphotos = names.map((n,i)=>({id:String(101+i), name:n, group: i<3 ? '2026/2026-10-01' : '2026/2026-10-02', format:n.endsWith('ARW')?'ARW':'JPG', rating:[3,null,1,0,5,null][i], flag:'none',
+    captured:'2026-10-0'+(i+1)+' 10:02', w:6000, h:4000, vc:false, added: i!==1, missing:false, size:6000000+i*100000, mtime:1790000000+i, label:i===2?'red':null, edited:i%2===0, added_at:'2026-11-14T10:0'+i+':00'}));
+  const gallery = {ok:true, state:'ready', message:'', base: settings.base_folder, base_exists:true, in_catalog:true, lr_connected:true,
+    total:gphotos.length, limit:2000, truncated:false, truncated_message:'', not_added:1, missing:0, photos:gphotos, thumbs:{}, failed:{}, selection:{ids:[], active:null}, add:null, max_select:50, sort:'captured', order:'desc'};
   const thumbs = ids => { const o = {}; ids.forEach((i,k)=>{ o[i] = {url: svg(['#5d7fa3','#a37d5d','#6b9a78','#8d6aa8'][k%4], '#22262c', '')}; }); return o; };
   window.__CALLS__ = [];
   const log = (n, a) => { window.__CALLS__.push([n].concat(a||[])); };
@@ -102,7 +102,7 @@ STUB = r"""<script>
     lib_favs: ()=>Promise.resolve({ok:true, groups:{preset:[],lr_preset:[],note:[],photo:[]}, total:0, photo_fav:false}), lib_lr_presets: ()=>Promise.resolve({ok:true, groups:[]}),
     library_state: ()=>Promise.resolve(JSON.parse(JSON.stringify(gallery))), library_refresh: ()=>Promise.resolve({ok:true}),
     library_thumbnails: ids=>Promise.resolve({ok:true, thumbs:thumbs(ids), pending:[]}),
-    gallery_pick_folder: ()=>{ log('gallery_pick_folder'); return Promise.resolve({ok:true}); },
+    gallery_set_sort: (k, o)=>{ log('gallery_set_sort', [k, o]); return Promise.resolve({ok:true, sort:k, order:o}); },
   }};
   const A = window.pywebview.api;      /* 没写到的接口一律返回空结果，避免启动流程半路中断 */
   window.pywebview.api = new Proxy(A, {get: (t, k) => (k in t) ? t[k] : (() => Promise.resolve({}))});
@@ -144,6 +144,7 @@ const ROWS = [
   const errNote = window.__ERR__ ? ' 脚本错误:' + window.__ERR__ : '';
   await wait(400);
   const bad = [];
+  if (document.getElementById('gal_change') || document.body.innerText.indexOf('换目录') >= 0) bad.push('还有“换目录”');
   const W = document.documentElement.clientWidth, H = document.documentElement.clientHeight;
   if (document.documentElement.scrollWidth > W + 1) bad.push('页面横向溢出 ' + document.documentElement.scrollWidth + '>' + W);
   document.querySelectorAll('button, .tab, .badge, .status, label, select, h3').forEach(e => {
@@ -169,7 +170,7 @@ SCENES = (
     ("versions_apply", WIDE, "versions_apply_confirm.png"), ("versions_applied", WIDE, "versions_applied.png"),
     ("versions_name", WIDE, "versions_name_input.png"), ("versions_nameerr", WIDE, "versions_name_error.png"),
     ("batch", WIDE, "batch_plan.png"), ("batch_done", WIDE, "batch_done.png"),
-    ("gallery", WIDE, "gallery_browse_folder.png"),
+    ("gallery", WIDE, "gallery_date_groups.png"),
     ("choose_a", WIDE, "wizard_choose_ai_claude_ready.png"), ("choose_b", WIDE, "wizard_choose_ai_codex_ready.png"),
     ("choose_c", WIDE, "wizard_choose_ai_none_installed.png"), ("choose_d", WIDE, "wizard_choose_ai_unknown_login.png"),
     ("choose_a_click", WIDE, "wizard_choose_ai_clicked.png"),
@@ -177,7 +178,7 @@ SCENES = (
     ("settings_unchosen", WIDE, "settings_ai_not_chosen.png"), ("send_unchosen", WIDE, "send_ai_not_chosen.png"),
     ("versions", NARROW, "layout_1100_versions.png"), ("versions_empty", NARROW, "layout_1100_versions_empty.png"),
     ("versions_apply", NARROW, "layout_1100_versions_apply.png"), ("versions_name", NARROW, "layout_1100_versions_name.png"),
-    ("batch", NARROW, "layout_1100_batch_plan.png"), ("gallery", NARROW, "layout_1100_gallery_browse.png"),
+    ("batch", NARROW, "layout_1100_batch_plan.png"), ("gallery", NARROW, "layout_1100_gallery_dates.png"),
     ("choose_a", NARROW, "layout_1100_wizard_choose_ai.png"), ("choose_c", NARROW, "layout_1100_wizard_choose_ai_none.png"),
 )
 
