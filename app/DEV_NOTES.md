@@ -946,3 +946,33 @@ PR 新增的 `version_save / version_apply / batch_plan_from_edit / batch_apply 
 - 新增脚本必须放进这个顺序里；全局 `const`/`let` 不能在声明的文件之前被顶层代码用到（函数声明不会跨文件提升）。`boot.js` 最后加载，里面的 `renderAll()` 在启动时执行。
 - 打包：spec 把整个 `web/` 目录带上（含 css/、js/），安装包递归复制；`frozen.py` 的自检会核对 `index.html` 引用的每个 css/js 文件都在。
 - 测试：`app/tests/web_source.py` 提供 `web_source()`（index+css+js 拼接文本）、`inject_stub()`、`serve_static()`；`ui_*_check.py` 靠它们在本机静态服务里提供 css/、js/。
+
+
+# 1.2.0 照片库（后端）
+
+> 说明：1.1.0 的“七、图库可浏览任意本机照片文件夹（`gallery_folder`）”在 1.2.0 起**作废**：图库 = 照片库 = 设置里的照片工作文件夹（`base_folder`）。
+
+## 设计
+- **照片库只有一个：** 所有想修的照片都导入到 `base_folder`，图库只显示它。`settings.browse_folder(data)` 保留函数名，直接返回 `base_folder`；`gallery_folder` 设置、`Api.gallery_pick_folder`、`validate_gallery_folder`、“浏览目录暂时无法访问”提示全部删除。旧设置文件里残留的 `gallery_folder`：`sanitize()` 丢弃，`update()` 收到也忽略（不报错、不保存），下一次保存就从文件里清掉。
+- **按拍摄日期落位：** 照片放进 `<库>\<yyyy>\<yyyy-mm-dd>\`，不再有“分类文件夹名”。日期来自 `app/capture_date.py`：EXIF `DateTimeOriginal`（回退 `DateTimeDigitized`、IFD0 `DateTime`），纯 Python、只读文件头；按**文件内容**识别格式（JPEG / TIFF 系 RAW / RAF / HEIC·HEIF·CR3），任何异常返回 `None`。取不到、或日期非法（年份不在 1900–2200、全零、月日越界）用文件修改时间（本地时间）。日期按相机本地时间，不做时区换算。已有的旧分类文件夹和平铺文件**不移动**。
+- **全库去重（无持久索引）：** 来源文件与库里**任何位置**的照片文件“大小相同且 SHA-256 相同”就算已导入，跳过（不管文件名、不管在哪个日期文件夹）。惰性：先 `os.scandir` 递归建 `{大小: [路径]}`（`importer.library_sizes`，深度上限 12、不跟随链接、跳过隐藏/系统目录、只认照片扩展名），只有“大小与库里某文件相同”或“与本批另一个来源文件大小相同”的才计算哈希（库里文件的哈希在一次分析内按路径缓存）。同一批里内容相同的只复制第一份。同名不同内容仍由原来的 `_unique_dest` 自动改名（`_2`、`_3`…）。
+- **分析在扫描阶段、后台线程做：** `ImportService._do_scan` 扫描完文件后调用 `importer.plan_import`（可取消：`cancel` 同时打断目录遍历和每个哈希的分块读取；进度事件 `import_scan` 带 `phase: scanning|library|checking` 与 `done/total`）。结果存进 `scan["plan"]`，同时记下分析时的库路径（`plan_base`）；如果用户在扫描后更换了库，`prepare()` 报“请重新选择来源文件夹”，不在旧计划上继续。
+- **`prepare()` 返回：** 去掉 `category`/`target`；新增 `date_summary`（要复制的照片按日期，升序、最多 30 项）、`date_more`（超出 30 天的合并成 `{"days","count"}`，没有则 `null`）、`duplicates`（`count/size/size_text/in_library/in_batch`）、`to_copy`（`count/size/size_text`）。空间检查用 `to_copy` 的大小；全部是重复时给 `errors.all_duplicate` 且不能开始。`prepare(category)`、`start(category, create_base)`、`Api.import_prepare(category)`、`Api.import_start(category, create_base)` 保留 `category` 形参但**忽略**（前端并行改造期间可能还在传）；`validate_category` 保留不用。
+- **`ImportJob`：** 参数 `files` 的元素是 `(源路径, 大小, 日期文件夹)`（`""` = 直接放库根；只给 `(源路径, 大小)` 时由任务自己按拍摄日期算）。每个文件单独 `makedirs(exist_ok=True)`，日期文件夹必须匹配 `^\d{4}/\d{4}-\d{2}-\d{2}$`；**先**确认目标的真实路径仍在库内、**建完再**确认一次（库里已有的 `2026` 若是指向别处的联接点就拒绝，且不会在外面建出文件夹）。结果里重复单独计数：`counts.duplicate`（扫描阶段发现的库内/同批重复，不在 `files` 里，不加入 Lightroom）与 `counts.skipped`（复制时才发现目标位置已有同名同内容）、`copied`/`failed`/`lr_*` 分开；快照多一个 `duplicates: {count, in_library, in_batch, size}`；`n` 只计要复制的。原片只读、`.part` 临时文件、独占创建、复制后 SHA-256 校验、不覆盖等保护原样保留。
+- **图库字段（`photo_library.public`）：** 新增 `size`（字节）、`mtime`（epoch 秒）、`label`（小写颜色名或 `None`，`"none"`/空串归 `None`）、`edited`（`True/False/None`）、`added_at`（加入 Lightroom 目录的 ISO 文本或 `None`）；`captured` 格式不变。磁盘上有、目录里没有的照片，`captured` 用 `capture_date.capture_datetime` 补（读不到为 `None`），结果按 `(路径, 大小, 修改时间)` 缓存在 `_date_cache` 里，刷新时不重读没变的文件，已不在磁盘上的条目被清掉；目录里的照片不读文件头。每次刷新对磁盘文件 `os.stat` 一次（≤2001 个）取大小和修改时间。
+- **插件 `list_folder_photos`：** 把 `colorNameForLabel`、`hasAdjustments`、`addedTime` 加进原来的那一次 `batchGetRawMetadata`（每页仍是 2 次批量读取）。整批被 Lightroom 拒绝（例如不认识其中某个键名）时，核心字段重新单独取一批，三个新键再先一起取、仍失败就逐个键取（都用 `LrTasks.pcall`）；取不到的字段为 `nil`（JSON 里没有这个字段），不会让命令失败，也不会连累核心字段。`added_at` 用 `LrDate.timeToW3CDate` 转换（同样 pcall）。Lua 里没有用到 `%c/%s/%d` 等字符类。
+- **排序设置：** `settings.gallery_sort`（默认 `captured`，合法 `captured imported name size rating flag label modified edited type`）、`gallery_order`（`asc|desc`，默认 `desc`），`sanitize` 对非法值回落默认；旧设置文件没有这两项照常加载（不升 schema 版本，与以往新增字段的做法一致）。`Api.gallery_set_sort(key, order)` 两项都合法才保存，返回 `{"ok", "sort", "order"}`（不合法时 `ok=False`，`sort/order` 为当前保存值）；图库 `state()` 带 `sort`、`order`。排序本身由前端做。
+- **`library_tree`**（`Api.library_list`）：改成递归（最多 3 层），分组名是相对库的路径（如 `2026/2026-11-14`），否则按日期放的照片不会出现在列表里。
+
+## 取舍
+- 去重只认“内容完全相同”，不做相似图/改名后重新编码的识别；不建持久索引，库很大时每次导入要重新扫一遍库的文件名与大小（只读元数据，不读内容，除非大小撞上）。
+- 复制阶段仍保留 `_unique_dest` 的同名同内容检查（防止分析之后库里又出现了文件），所以 `skipped` 这个计数还在，但正常情况下是 0。
+- 一次导入上限仍是 `MAX_FILES = 5000`，超过照旧提示“分批导入”；库里有多少文件不设上限（只影响扫描时间）。
+- 日期读取只看文件头：JPEG 的段表最多走 4 MB（只读段头，跳过段内容），TIFF 系 RAW 按偏移跳读，RAF 读前 256 KB，HEIC/CR3 读前 1 MB。
+
+## 没在真机验证的点（待验证）
+1. **SDK 元数据键名：** `colorNameForLabel`、`hasAdjustments`、`addedTime` 是按 Lightroom Classic SDK 文档印象写的，没有在真实 Lightroom 里确认；`addedTime` 的单位/纪元（SDK 的 Cocoa 时间）与 `LrDate.timeToW3CDate` 转出的文本格式也没确认。只有假 Lightroom 的 Lua 测试（取不到时仅该字段为空）。
+2. **HEIC/HEIF/CR3 日期读取：** 手工拼的小样本测试通过（`iinf`+`iloc` 的 Exif 项、CR3 的 `CMT1/CMT2`、`Exif\0\0` 兜底），没有拿真实的 iPhone HEIC / Canon CR3 文件验证；真实文件的 Exif 项若在前 1 MB 之外会返回 `None`（落到修改时间）。ORF/RW2 只按 TIFF 魔数（`0x4F52`/`0x5352`/`0x55`）放行，没用真实文件试过；NEF/ARW/CR2/DNG/RAF/JPEG 同样只有合成样本。
+3. **大库性能：** 没在上千张的真实库上量过：库扫描（`scandir` 递归）、`plan_import` 的哈希（大 RAW 同大小撞上时要读两遍整文件）、图库每次刷新对磁盘文件的 `os.stat` 与首次读文件头（`MAX_PHOTOS = 2000` 以内预期可接受）。取消的响应粒度是 1 MB 一块。
+4. **网络盘/移动硬盘、中文与超长路径、只读文件夹：** 只在 tmp_path 里用 Windows 联接点测了“日期文件夹不能逃出库”。
+5. **前端：** 本次没改 `app/web/`；它仍在调用 `gallery_pick_folder`、使用 `target/category`，由并行的 UI 子任务改。
