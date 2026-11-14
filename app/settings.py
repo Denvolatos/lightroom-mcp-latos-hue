@@ -45,6 +45,50 @@ DEFAULT_GALLERY_SORT = "captured"
 DEFAULT_GALLERY_ORDER = "desc"
 
 
+# 1.3.0 外观与界面布局（只保存用户的选择，应用由界面做）
+THEMES = ("system", "light", "dark")
+FONT_SIZES = ("small", "standard", "large", "xlarge")
+PANEL_LIMITS = {"left": (200, 480), "right": (240, 520)}     # 像素
+DEFAULT_PANEL_WIDTHS = {"left": 260, "right": 300}
+ZOOM_RANGE = (10, 400)                                       # 预览缩放百分比；"fit" 表示适应窗口
+DEFAULT_ZOOM = "fit"
+
+
+def clean_theme(v):
+    return v if isinstance(v, str) and v in THEMES else None
+
+
+def clean_font_size(v):
+    return v if isinstance(v, str) and v in FONT_SIZES else None
+
+
+def clean_panel_widths(v, strict: bool = False):
+    """{"left","right"}：每项必须是范围内的整数（布尔、小数、字符串都不算）。
+    strict=False（读文件）：非法/缺失的项各自回落默认，总是返回完整字典；
+    strict=True（保存）：不是字典、有多余键、或任一项非法返回 None；缺的项返回 None 以外的占位 -1，由调用方补当前值。"""
+    if not isinstance(v, dict):
+        return None if strict else dict(DEFAULT_PANEL_WIDTHS)
+    if strict and (set(v) - set(PANEL_LIMITS)):
+        return None
+    out = {}
+    for k, (lo, hi) in PANEL_LIMITS.items():
+        c = _clean_int(v.get(k), lo, hi) if k in v else None
+        if c is None:
+            if strict and k in v:
+                return None
+            out[k] = -1 if strict else DEFAULT_PANEL_WIDTHS[k]
+        else:
+            out[k] = c
+    return out
+
+
+def clean_preview_zoom(v):
+    """"fit" 或 10–400 的整数；不合法返回 None。"""
+    if isinstance(v, str):
+        return DEFAULT_ZOOM if v == "fit" else None
+    return _clean_int(v, *ZOOM_RANGE)
+
+
 def clean_gallery_sort(v):
     """合法的排序键返回它自己，否则 None。"""
     return v if isinstance(v, str) and v in GALLERY_SORT_KEYS else None
@@ -68,7 +112,9 @@ def defaults() -> dict:
             "export_last_folder": "", "export_format": "jpeg", "export_size": 0, "export_quality": 92,
             "export_bit_depth": 16, "export_metadata": "minimal", "ai_use_notes": True,
             "auto_launch_lightroom": False, "lightroom_path": "", "wizard_done": False,
-            "check_updates": True, "gallery_sort": DEFAULT_GALLERY_SORT, "gallery_order": DEFAULT_GALLERY_ORDER}
+            "check_updates": True, "gallery_sort": DEFAULT_GALLERY_SORT, "gallery_order": DEFAULT_GALLERY_ORDER,
+            "theme": "system", "font_size": "standard", "panel_widths": dict(DEFAULT_PANEL_WIDTHS),
+            "preview_zoom": DEFAULT_ZOOM}
 
 
 # ---------------------------------------------------------------- 文件夹校验
@@ -243,6 +289,11 @@ def sanitize(data) -> dict:
     out.pop("gallery_folder", None)                  # 1.2.0 起没有“浏览任意文件夹”：旧版留下的这一项丢弃
     out["gallery_sort"] = clean_gallery_sort(out.get("gallery_sort")) or d["gallery_sort"]
     out["gallery_order"] = clean_gallery_order(out.get("gallery_order")) or d["gallery_order"]
+    out["theme"] = clean_theme(out.get("theme")) or d["theme"]
+    out["font_size"] = clean_font_size(out.get("font_size")) or d["font_size"]
+    out["panel_widths"] = clean_panel_widths(out.get("panel_widths"))
+    z = clean_preview_zoom(out.get("preview_zoom"))
+    out["preview_zoom"] = d["preview_zoom"] if z is None else z
     pv = out.get("provider")
     out["provider"] = pv if isinstance(pv, str) and pv else d["provider"]
     pc = out.get("provider_chosen")
@@ -381,6 +432,31 @@ class SettingsStore:
                 errors["gallery_order"] = "排序方向只能是升序或降序。"
             else:
                 new["gallery_order"] = o
+        if "theme" in changes:
+            t = clean_theme(changes["theme"])
+            if t is None:
+                errors["theme"] = "外观只能选择跟随系统、浅色或深色。"
+            else:
+                new["theme"] = t
+        if "font_size" in changes:
+            f = clean_font_size(changes["font_size"])
+            if f is None:
+                errors["font_size"] = "字号只能选择小、标准、大或特大。"
+            else:
+                new["font_size"] = f
+        if "panel_widths" in changes:
+            w = clean_panel_widths(changes["panel_widths"], strict=True)
+            if w is None:
+                errors["panel_widths"] = "面板宽度无效（左栏 200–480，右栏 240–520 像素）。"
+            else:
+                cur = clean_panel_widths(self.data.get("panel_widths"))
+                new["panel_widths"] = {k: (cur[k] if w[k] == -1 else w[k]) for k in PANEL_LIMITS}
+        if "preview_zoom" in changes:
+            z = clean_preview_zoom(changes["preview_zoom"])
+            if z is None:
+                errors["preview_zoom"] = "预览缩放只能是“适应窗口”或 10–400 的整数百分比。"
+            else:
+                new["preview_zoom"] = z
         if "provider" in changes:
             pid = changes["provider"]
             if not isinstance(pid, str) or not selectable(pid):
