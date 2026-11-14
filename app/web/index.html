@@ -812,14 +812,23 @@ function offerRecord(){
   const d = document.createElement('div'); d.className = 'note recbtn'; d.innerHTML = '<button class="btn small">把这次做法记成经验</button>';
   $('#msgs').appendChild(d); d.scrollIntoView(); d.querySelector('button').onclick = startRecord;
 }
+let REC = null;     // 正在起草的经验：'starting' 请求还没返回 / 'run' 已开始；完成事件到了就清掉
+function recCloseNow(){ REC = null; try { lapi().lib_record_close(); } catch(e){} lbClose(); }
 async function startRecord(){
-  const r = await lapi().lib_record_start(); if (!r.ok) return infoDialog('无法生成草稿', r.message);
+  REC = 'starting';            // 先打开转圈页再请求：完成事件比接口返回先到时也能正常显示结果
   lbOpen('把这次做法记成经验');
   lbSet(`<div class="big"><span class="spin"></span>正在请 AI 起草经验…</div><div class="mute">只总结已确认并已应用的调整。AI 不会直接写入经验库；生成后你可以编辑，点击“保存”才会写入。</div>`,
-        [{label:'停止', onclick:async(e)=>{ e.target.disabled = true; await lapi().lib_record_stop(); }}]);
+        [{label:'停止', onclick:async(e)=>{ e.target.disabled = true; try { await lapi().lib_record_stop(); } catch(e2){ return recCloseNow(); }
+            setTimeout(()=>{ if (REC) lbSet('<div class="big">已停止</div><div class="mute">没有收到 AI 的结果，可以关闭后重试。</div>', [{label:'关闭', onclick:recCloseNow}]); }, 4000); }}]);
+  const r = await safeCall(()=>lapi().lib_record_start());
+  if (REC!=='starting') return;                    // 结果已经显示了
+  if (!r){ REC = null; lbClose(); return; }
+  if (!r.ok){ REC = null; lbClose(); return infoDialog('无法生成草稿', r.message); }
+  REC = 'run';
 }
 function onRecordDone(ev){
-  if (!$('#lmask').classList.contains('show')) return;
+  if (!REC || !$('#lmask').classList.contains('show')) return;
+  REC = null;
   const usage = `<div class="mute">用时 ${ev.elapsed} 秒${ev.tokens?'，约 '+Number(ev.tokens).toLocaleString()+' token':''}${ev.cost!=null?'，估算费用 $'+Number(ev.cost).toFixed(3):''}（估算值，非实际账单）。</div>`;
   lapi().lib_record_close();
   if (ev.ok){
@@ -1195,7 +1204,7 @@ function undo(){
   if(!steps.length) return toast('没有可撤销的调整'); const s=steps.pop(); renderParams(); renderStage(); toast('已撤销「'+s.k+'」'); }
 
 /* ---- export dialog ---- */
-let EX = {st:null, o:null, stage:null};
+let EX = {st:null, o:null, stage:null, tok:0};
 const EX_SIZES = [0, 4096, 2048, 1024];
 function exOpen(){ $('#mask').classList.add('show'); }
 function exClose(){ $('#mask').classList.remove('show'); EX.stage=null; }
@@ -1205,15 +1214,20 @@ function exSet(body, buttons){
 }
 async function openExport(){
   if (!REAL()) return toast('界面演示中，导出不可用');
+  const tok = ++EX.tok;
   exOpen(); EX.stage='load';
   exSet('<div class="mute"><span class="spin"></span>正在读取 Lightroom 中选中的照片…</div>', [{label:'取消', onclick:exClose}]);
+  const stale = ()=> tok!==EX.tok || EX.stage!=='load';      // 读取期间点了取消、又重新打开，或结果已经显示
   let cur = null;
   try { cur = await window.pywebview.api.export_state(); } catch(e){}
+  if (stale()) return;
   if (cur && cur.stage==='running'){ EX.stage='run'; exRunning(); return; }
   if (cur && cur.stage==='done' && cur.result){ exResult(cur.result); return; }
-  try { EX.st = await window.pywebview.api.export_dialog_state(); }
-  catch(e){ exSet('<div class="bad">无法读取导出信息，请重试。</div>', [{label:'关闭', onclick:exClose}]); return; }
-  EX.o = Object.assign({}, EX.st.options); EX.stage='form'; exForm();
+  let st;
+  try { st = await window.pywebview.api.export_dialog_state(); }
+  catch(e){ if (!stale()) exSet('<div class="bad">无法读取导出信息，请重试。</div>', [{label:'关闭', onclick:exClose}]); return; }
+  if (stale()) return;
+  EX.st = st; EX.o = Object.assign({}, EX.st.options); EX.stage='form'; exForm();
 }
 function exInfoLine(p){ return [p.camera, p.format, p.size].filter(Boolean).join(' · ') || '—'; }
 function exForm(){
@@ -1285,13 +1299,16 @@ async function exStart(){
   const o=EX.o;
   const payload = {format:o.format, size:o.size, quality:o.quality, bit_depth:o.bit_depth, metadata:o.metadata};
   $('#ex_go').disabled=true;
-  const r = await window.pywebview.api.export_current_photo(payload);
-  if (!r.ok){ exUpdate(); $('#ex_err').textContent=r.message||'无法导出。'; if (r.changed) $('#ex_go').disabled=true; return; }
+  EX.stage='starting';           // 先记下阶段：导出很快失败时，完成事件可能比接口返回先到
+  const r = await safeCall(()=>window.pywebview.api.export_current_photo(payload), $('#ex_go'));
+  if (EX.stage!=='starting') return;               // 结果已经显示，或弹窗已关
+  if (!r){ EX.stage='form'; return; }
+  if (!r.ok){ EX.stage='form'; exUpdate(); $('#ex_err').textContent=r.message||'无法导出。'; if (r.changed) $('#ex_go').disabled=true; return; }
   EX.stage='run'; exRunning();
 }
 function exRunning(){
-  exOpen(); exSet('<div class="big"><span class="spin"></span>正在导出…</div><div class="mute">Lightroom 导出通常需要数秒到数十秒，请稍候。导出期间请勿关闭软件。</div>',
-    [{label:'取消', disabled:true}, {label:'导出', cls:'primary', disabled:true}]);
+  exOpen(); exSet('<div class="big"><span class="spin"></span>正在导出…</div><div class="mute">Lightroom 导出通常需要数秒到数十秒，请稍候。导出期间请勿关闭软件。点“隐藏”后导出会继续，结束后再点“导出”可查看结果。</div>',
+    [{label:'隐藏', onclick:exClose}, {label:'导出', cls:'primary', disabled:true}]);
 }
 function exResult(ev){
   EX.stage='done'; exOpen();
@@ -1312,7 +1329,7 @@ function exResult(ev){
 }
 function onExportEvent(ev){
   if (ev.type==='export_done'){ if ($('#mask').classList.contains('show')) exResult(ev); else toast('导出已结束，请点击“导出”查看结果。'); }
-  else if (ev.type==='export_progress' && $('#mask').classList.contains('show')) exRunning();
+  else if (ev.type==='export_progress' && $('#mask').classList.contains('show') && (EX.stage==='run' || EX.stage==='starting')){ EX.stage='run'; exRunning(); }
 }
 $('#mask').onclick=e=>{ if(e.target.id==='mask' && (EX.stage==='form'||EX.stage==='load')) exClose(); };
 
@@ -1416,7 +1433,7 @@ function onImportEvent(ev){
 }
 
 /* ---- AI 挑片 ---- */
-let PK = {stage:null, photos:[], thumbs:{}, o:{criterion:'overall', custom:'', count:'top3'}, res:null, ap:null, timer:null, t0:0, n:0};
+let PK = {tok:0, stage:null, photos:[], thumbs:{}, o:{criterion:'overall', custom:'', count:'top3'}, res:null, ap:null, timer:null, t0:0, n:0};
 const PK_CRIT = [['overall','综合观感'],['technical','技术质量（对焦、曝光、噪点）'],['composition','构图'],['custom','自定义']];
 const PK_CNT = [['top1','挑出最好的 1 张'],['top3','前 3 张'],['all','全部排序']];
 const PK_MAX = 10;
@@ -1430,7 +1447,7 @@ function pkClear(){ if (PK.timer){ clearInterval(PK.timer); PK.timer=null; } }
 function pkClose(){ pkClear(); $('#pmask').classList.remove('show'); PK.stage=null; }
 function pkSet(body, buttons){
   $('#pk_body').innerHTML=body; const f=$('#pk_foot'); f.innerHTML='';
-  (buttons||[]).forEach(b=>{ const e=document.createElement('button'); e.className='btn '+(b.cls||''); e.textContent=b.label; e.disabled=!!b.disabled; if(b.id) e.id=b.id; e.onclick=b.onclick; f.appendChild(e); });
+  (buttons||[]).forEach(b=>{ const e=document.createElement('button'); e.className='btn '+(b.cls||''); e.textContent=b.label; e.disabled=!!b.disabled; if(b.id) e.id=b.id; if(b.title) e.title=b.title; e.onclick=b.onclick; f.appendChild(e); });
 }
 const pkStars = n => '★'.repeat(n)+'☆'.repeat(5-n);
 const pkFlag = f => ({pick:'留用', none:'无旗标', reject:'排除'}[f] || '—');
@@ -1439,17 +1456,20 @@ function pkThumb(id){ const u=PK.thumbs[id]; return u ? `<img class="pt" src="${
 async function pkFinishClose(){ try{ await window.pywebview.api.pick_apply_close(); await window.pywebview.api.pick_close(); }catch(e){} pkClose(); }
 async function openPick(){
   if (!REAL()) return toast('界面演示中，AI 挑片不可用');
-  const api = window.pywebview.api;
+  const api = window.pywebview.api, tok = ++PK.tok;
   pkOpen(); PK.stage='load';
   pkSet('<div class="mute"><span class="spin"></span>正在读取 Lightroom 中选中的照片…</div>', [{label:'取消', onclick:pkClose}]);
+  const stale = ()=> tok!==PK.tok || PK.stage!=='load';      // 读取期间点了取消（或已显示结果）：回来后不再把弹窗打开
   let st=null, ap=null;
   try { st = await api.pick_state(); ap = await api.pick_apply_state(); } catch(e){}
+  if (stale()) return;
   if (st && st.thumbs) Object.assign(PK.thumbs, st.thumbs);
   if (ap && ap.stage==='writing'){ PK.stage='applying'; pkApplying({i:0,n:0,name:''}); return; }
   if (ap && ap.stage==='done' && ap.results.length){ pkApplied(ap); return; }
   if (st && st.stage==='running'){ PK.n=st.n||0; PK.stage='run'; pkRunning(); return; }
   if (st && st.stage==='done' && st.result){ PK.res=st.result; pkResult(); return; }
   let r; try { r = await api.pick_prepare(); } catch(e){ r = {ok:false, message:'无法读取选中的照片，请重试。'}; }
+  if (stale()) return;
   if (!r.ok){ PK.stage='error'; pkSet(`<div class="bad" style="font-size:13px">${esc(r.message||'无法开始。')}</div>`, [{label:'关闭', cls:'primary', onclick:pkClose}]); return; }
   if (r.stage==='running'){ PK.stage='run'; pkRunning(); return; }
   PK.photos = r.photos; Object.assign(PK.thumbs, r.thumbs||{}); PK.stage='form'; pkForm();
@@ -1481,8 +1501,11 @@ function pkFormUpdate(){
 }
 async function pkStart(){
   const o=PK.o; $('#pk_go').disabled=true; $('#pk_err').textContent='';
-  const r = await window.pywebview.api.pick_start({criterion:o.criterion, custom:o.criterion==='custom'?o.custom:'', count:o.count});
-  if (!r.ok){ $('#pk_err').textContent = r.message||'无法开始。'; if (!r.changed) pkFormUpdate(); return; }
+  PK.stage='starting';           // 先记下阶段：AI 很快失败时，完成事件可能比接口返回先到
+  const r = await safeCall(()=>window.pywebview.api.pick_start({criterion:o.criterion, custom:o.criterion==='custom'?o.custom:'', count:o.count}), $('#pk_go'));
+  if (PK.stage!=='starting') return;               // 结果已经显示，或弹窗已关
+  if (!r){ PK.stage='form'; return; }
+  if (!r.ok){ PK.stage='form'; $('#pk_err').textContent = r.message||'无法开始。'; if (!r.changed) pkFormUpdate(); return; }
   PK.n = PK.photos.length; PK.stage='run'; pkRunning();
 }
 function pkRunning(label){
@@ -1490,7 +1513,8 @@ function pkRunning(label){
   pkSet(`<div class="big"><span class="spin"></span>正在比较 ${PK.n||PK.photos.length} 张照片…</div>
     <div class="mute" id="pk_lab">${esc(label||'已发送请求，等待 AI 回复。')}</div><div class="mute" id="pk_time">已用时 00:00</div>
     <div class="mute">通常需要数十秒；最长等待 180 秒。可随时停止。</div>`,
-    [{label:'停止', id:'pk_stop', onclick:async(e)=>{ e.target.disabled=true; e.target.textContent='正在停止'; await window.pywebview.api.pick_stop(); }}]);
+    [{label:'隐藏', title:'AI 继续在后台比较，结束后再点“AI 挑片”查看结果', onclick:pkClose},
+     {label:'停止', id:'pk_stop', onclick:async(e)=>{ e.target.disabled=true; e.target.textContent='正在停止'; try { await window.pywebview.api.pick_stop(); } catch(e2){ toast('没能停止，请稍后再试。'); e.target.disabled=false; e.target.textContent='停止'; } }}]);
   PK.timer = setInterval(()=>{ const t=$('#pk_time'); if(t) t.textContent='已用时 '+fmtTime((Date.now()-PK.t0)/1000); }, 1000);
 }
 function pkUsage(ev){
@@ -1499,7 +1523,7 @@ function pkUsage(ev){
 }
 function pkResult(){
   pkClear(); const ev=PK.res; PK.stage='result'; pkOpen('AI 挑片');
-  const again = {label:'重新比较', onclick:async()=>{ await window.pywebview.api.pick_close(); PK.res=null; pkClose(); openPick(); }};
+  const again = {label:'重新比较', onclick:async()=>{ try { await window.pywebview.api.pick_close(); } catch(e){} PK.res=null; pkClose(); openPick(); }};
   const close = {label:'关闭', cls:'primary', onclick:pkFinishClose};
   const head = `<div class="mute">${esc(ev.n)} 张照片 · 评判标准：${esc(ev.criterion_label)} · 结果：${esc(ev.count_label)}</div>`;
   if (['failed','timeout','stopped'].includes(ev.status)){
@@ -1545,20 +1569,22 @@ function pkConfirmView(){
     <table><thead><tr><th></th><th>照片</th><th>现有（星级 / 旗标）</th><th>写入后</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="mute">只修改星级和旗标，不会改动关键词或其他信息。可取消勾选不想改的照片；写入后可撤销这次写入。</div>
     <div class="bad" id="pk_err"></div>`,
-    [{label:'返回', onclick:async()=>{ await window.pywebview.api.pick_apply_cancel(); pkResult(); }},
+    [{label:'返回', onclick:async()=>{ try { await window.pywebview.api.pick_apply_cancel(); } catch(e){} pkResult(); }},
      {label:'确认写入', cls:'primary', id:'pk_ok', onclick:pkApplyGo}]);
   const upd=()=>{ const n=document.querySelectorAll('#pk_body input[type=checkbox]:checked').length; $('#pk_ok').disabled = n===0; $('#pk_ok').textContent = n ? '确认写入（'+n+' 张）' : '确认写入'; };
   document.querySelectorAll('#pk_body input[type=checkbox]').forEach(c=>c.onchange=upd); upd();
 }
 async function pkApplyGo(){
   const ids=[...document.querySelectorAll('#pk_body input[type=checkbox]:checked')].map(c=>c.dataset.id);
-  $('#pk_ok').disabled=true;
-  const r = await window.pywebview.api.pick_apply_confirm(ids);
-  if (!r.ok){ $('#pk_err').textContent = r.message||'无法写入。'; $('#pk_ok').disabled = !!r.readonly; return; }
+  const btns = [...document.querySelectorAll('#pk_foot button')]; btns.forEach(b=>b.disabled=true);
+  PK.stage='apply_start';        // 先记下阶段：写入很快结束（或失败）时，完成事件可能比接口返回先到
+  const r = await safeCall(()=>window.pywebview.api.pick_apply_confirm(ids));
+  if (PK.stage!=='apply_start') return;            // 已收到进度或结果，或弹窗已关
+  if (!r || !r.ok){ PK.stage='confirm'; btns.forEach(b=>b.disabled=false); if (r){ $('#pk_err').textContent = r.message||'无法写入。'; $('#pk_ok').disabled = !!r.readonly; } return; }
   PK.stage='applying'; pkApplying({i:0,n:ids.length,name:''});
 }
 function pkApplying(ev){
-  pkOpen('正在写入'); pkSet(`<div class="big"><span class="spin"></span>正在写入${ev.n?'（'+Math.min(ev.i+1,ev.n)+' / '+ev.n+'）':''}…</div><div class="mute">${esc(ev.name||'')}</div>`, [{label:'关闭', disabled:true}]);
+  pkOpen('正在写入'); pkSet(`<div class="big"><span class="spin"></span>正在写入${ev.n?'（'+Math.min(ev.i+1,ev.n)+' / '+ev.n+'）':''}…</div><div class="mute">${esc(ev.name||'')}</div>`, [{label:'隐藏', onclick:pkClose}]);
 }
 const AP_ST = {ok:['成功','st-ok'], failed:['失败','st-bad'], uncertain:['不确定','st-wait'], undone:['已还原','st-mute'], conflict:['未还原（又被改过）','st-bad']};
 function pkApplied(ev, undoRes){
@@ -1589,9 +1615,9 @@ function onPickEvent(ev){
   if (ev.type==='pick_thumb'){ PK.thumbs[ev.id]=ev.url;
     if (open && PK.stage==='form'){ const c=document.querySelector(`#pk_grid .pcell[data-id="${CSS.escape(ev.id)}"]`); if(c){ const t=c.querySelector('.pt'); const im=document.createElement('img'); im.className='pt'; im.alt=''; im.src=ev.url; t.replaceWith(im); } } }
   else if (ev.type==='pick_progress'){ if (open && PK.stage==='run'){ const l=$('#pk_lab'); if(l) l.textContent=ev.label||''; } }
-  else if (ev.type==='pick_done'){ PK.res=ev; if (open && ['run','form','load'].includes(PK.stage)) pkResult(); else if (!open) toast('AI 挑片已结束，请点击“AI 挑片”查看结果。'); }
-  else if (ev.type==='pick_apply_progress'){ if (open && PK.stage==='applying') pkApplying(ev); }
-  else if (ev.type==='pick_apply_done'){ if (open && PK.stage==='applying') pkApplied(ev); else if (!open) toast('写入已结束，请点击“AI 挑片”查看结果。'); }
+  else if (ev.type==='pick_done'){ PK.res=ev; if (open && ['run','starting','form','load'].includes(PK.stage)) pkResult(); else if (!open) toast('AI 挑片已结束，请点击“AI 挑片”查看结果。'); }
+  else if (ev.type==='pick_apply_progress'){ if (open && (PK.stage==='applying' || PK.stage==='apply_start')){ PK.stage='applying'; pkApplying(ev); } }
+  else if (ev.type==='pick_apply_done'){ if (open && (PK.stage==='applying' || PK.stage==='apply_start')) pkApplied(ev); else if (!open) toast('写入已结束，请点击“AI 挑片”查看结果。'); }
 }
 $('#pmask').onclick=e=>{ if(e.target.id==='pmask' && (PK.stage==='form'||PK.stage==='load'||PK.stage==='error')) pkFinishClose(); };
 
