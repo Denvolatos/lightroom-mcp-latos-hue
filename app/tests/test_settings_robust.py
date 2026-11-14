@@ -102,10 +102,13 @@ def test_save_settings_refreshes_gallery_and_wizard_when_folder_changes(tmp_path
     assert api._photolib.refresh.calls == 0 and api._wizard.invalidate.calls == 0     # 没换文件夹：不刷新
     assert api.save_settings({"base_folder": str(a)})["ok"]
     assert api._photolib.refresh.calls == 1 and api._wizard.invalidate.calls == 1
-    assert api.save_settings({"gallery_folder": str(b)})["ok"]
+    assert api.save_settings({"gallery_folder": str(b)})["ok"]                          # 旧页面可能还传：忽略，不刷新
+    assert api._photolib.refresh.calls == 1 and api._wizard.invalidate.calls == 1
+    assert "gallery_folder" not in s.data
+    assert api.save_settings({"base_folder": str(a)})["ok"]                              # 同样的值：不刷新
+    assert api._photolib.refresh.calls == 1
+    assert api.save_settings({"base_folder": str(b)})["ok"]
     assert api._photolib.refresh.calls == 2 and api._wizard.invalidate.calls == 2
-    assert api.save_settings({"base_folder": str(a), "gallery_folder": str(b)})["ok"]   # 同样的值：不刷新
-    assert api._photolib.refresh.calls == 2
 
 
 # ---------------------------------------------------------------- 读失败不当成全新安装；并发保存

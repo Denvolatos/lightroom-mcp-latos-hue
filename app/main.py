@@ -715,14 +715,14 @@ class Api:
             changes["lightroom_path"] = ""
         elif choice == "pending" and self._pending_lr_path:
             changes["lightroom_path"] = self._pending_lr_path
-        before = {k: self._settings.data.get(k) for k in ("base_folder", "gallery_folder")}
+        before = {k: self._settings.data.get(k) for k in ("base_folder",)}
         r = self._settings.update(changes, selectable=is_selectable, create_missing=bool(create_missing))
         if r["ok"]:
             self._pending_lr_path = ""
             if "preview_edge" in changes:
                 self._preview.set_edge(r["settings"]["preview_edge"])
             if any(r["settings"].get(k) != v for k, v in before.items()):
-                # 换了工作文件夹或浏览目录：图库按新文件夹重新读取，向导下一次重新检查（与 wizard_pick_folder 一致）
+                # 换了照片工作文件夹（= 照片库）：图库按新文件夹重新读取，向导下一次重新检查（与 wizard_pick_folder 一致）
                 self._wizard.invalidate()
                 self._photolib.refresh()
         return r
@@ -829,17 +829,6 @@ class Api:
         self._photolib.refresh()                 # 工作文件夹变了：图库按新文件夹重新读取
         return {"ok": True, "cancelled": False, "message": ""}
 
-    def gallery_pick_folder(self) -> dict:
-        """选择要浏览的照片文件夹，不改变导入副本的保存位置。"""
-        r = self.choose_folder(appsettings.browse_folder(self._settings.data))
-        if not r.get("ok"):
-            return {"ok": False, "cancelled": True, "message": ""}
-        saved = self._settings.update({"gallery_folder": r["path"]}, selectable=is_selectable)
-        if not saved["ok"]:
-            return {"ok": False, "cancelled": False, "message": next(iter(saved["errors"].values()), "目录未保存。")}
-        self._photolib.refresh()
-        return {"ok": True, "cancelled": False, "message": ""}
-
     def wizard_pick_lightroom(self) -> dict:
         """向导第 2 项的按钮：弹出系统文件选择窗口，选中 Lightroom.exe 后直接保存。路径只来自这次点击。"""
         r = self.choose_lightroom_path()
@@ -891,10 +880,12 @@ class Api:
         return {**r, "path": str(res[0])} if r["ok"] else r
 
     def import_prepare(self, category: str = "") -> dict:
-        return self._import.prepare(category)
+        """category 是旧版前端还会传的分类文件夹名，1.2.0 起忽略（照片按拍摄日期放进 <库>/<年>/<年-月-日>/）。"""
+        return self._import.prepare()
 
     def import_start(self, category: str = "", create_base: bool = False) -> dict:
-        return self._import.start(category, bool(create_base))
+        """category 同上被忽略（形参保留，旧前端传了也不会报错）。"""
+        return self._import.start(create_base=bool(create_base))
 
     def import_cancel(self) -> dict:
         return self._import.cancel()
@@ -914,6 +905,20 @@ class Api:
 
     def library_refresh(self) -> dict:
         return self._photolib.refresh()
+
+    def gallery_set_sort(self, key: str, order: str) -> dict:
+        """保存图库排序（排序本身由页面做）。key：captured/imported/name/size/rating/flag/label/modified/edited/type；order：asc/desc。
+        两项都合法才保存；返回 {"ok", "sort", "order"}（不合法时 ok=False，sort/order 是当前保存的值）。"""
+        if not isinstance(key, str) or not isinstance(order, str):
+            ok = False
+        else:
+            ok = appsettings.clean_gallery_sort(key) is not None and appsettings.clean_gallery_order(order) is not None
+        if ok:
+            r = self._settings.update({"gallery_sort": key, "gallery_order": order}, selectable=is_selectable)
+            ok = bool(r["ok"])
+        d = self._settings.data
+        return {"ok": ok, "sort": d.get("gallery_sort", appsettings.DEFAULT_GALLERY_SORT),
+                "order": d.get("gallery_order", appsettings.DEFAULT_GALLERY_ORDER)}
 
     def library_thumbnails(self, ids, retry: bool = False) -> dict:
         return self._photolib.request_thumbs(ids, retry)
@@ -937,7 +942,7 @@ class Api:
         return self._import.library(limit)
 
     def open_library(self) -> dict:
-        """在资源管理器中打开当前浏览文件夹，不接受页面传入的路径。"""
+        """在资源管理器中打开照片库（照片工作文件夹），不接受页面传入的路径。"""
         base = appsettings.browse_folder(self._settings.data)
         if not os.path.isdir(base):
             return {"ok": False, "message": "软件文件夹尚不存在。完成一次导入后会自动创建，或在设置中更换。"}

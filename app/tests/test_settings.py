@@ -29,15 +29,19 @@ def test_defaults_do_not_probe_installed_tools(monkeypatch):
     assert not hasattr(st, "default_provider")
 
 
-def test_gallery_folder_is_separate_from_import_folder(store, tmp_path):
-    import_folder = tmp_path / "import"
-    browse_folder = tmp_path / "browse"
-    import_folder.mkdir()
-    browse_folder.mkdir()
-    assert store.update({"base_folder": str(import_folder)})["ok"]
-    assert store.update({"gallery_folder": str(browse_folder)})["ok"]
-    assert store.data["base_folder"] == str(import_folder)
-    assert store.data["gallery_folder"] == str(browse_folder)
+def test_gallery_folder_setting_is_gone_and_ignored(store, tmp_path):
+    """1.2.0：图库只显示照片库（base_folder）；旧的 gallery_folder 被忽略，不保存、不报错。"""
+    lib = tmp_path / "lib"
+    other = tmp_path / "other"
+    lib.mkdir()
+    other.mkdir()
+    assert "gallery_folder" not in st.defaults()
+    assert store.update({"base_folder": str(lib)})["ok"]
+    r = store.update({"gallery_folder": str(other)})
+    assert r["ok"] and r["errors"] == {} and "gallery_folder" not in store.data
+    assert st.browse_folder({"base_folder": str(lib), "gallery_folder": str(other)}) == str(lib)
+    assert st.browse_folder({"base_folder": ""}) == "" and st.browse_folder({}) == ""
+    assert not hasattr(st, "validate_gallery_folder")
 
 
 # ---------------------------------------------------------------- 读写
@@ -331,38 +335,49 @@ def test_switch_to_codex_updates_import_and_export_services(api, monkeypatch):
     assert api._import.lr is new_lr and api._export.lr is new_lr and api._borrowing is False
 
 
-# ---------------------------------------------------------------- 浏览目录暂时不在：设置保留，只在运行时当作不可用
-def test_sanitize_keeps_a_valid_looking_gallery_folder_that_does_not_exist_now(tmp_path):
-    gone = tmp_path / "usb-drive-not-plugged"                       # 格式合法、目录现在不存在
-    assert st.sanitize({"gallery_folder": str(gone)})["gallery_folder"] == str(gone.resolve())
-    for bad in ("", "relative/x", r"\\server\share\x", r"C:\Windows", 5, None):
-        assert st.sanitize({"gallery_folder": bad})["gallery_folder"] == ""      # 格式不合法的仍然丢弃
-
-
-def test_saving_other_settings_does_not_clear_a_missing_gallery_folder(tmp_path):
+# ---------------------------------------------------------------- 升级兼容：旧设置里的 gallery_folder、没有排序项
+def test_old_settings_file_with_gallery_folder_loads_and_drops_it(tmp_path):
     p = tmp_path / "s.json"
     gone = tmp_path / "usb-drive-not-plugged"
-    p.write_text(json.dumps({"gallery_folder": str(gone)}), encoding="utf-8")
+    p.write_text(json.dumps({"schema": 1, "base_folder": str(tmp_path / "lib"), "gallery_folder": str(gone)}), encoding="utf-8")
     s = st.SettingsStore(p, restrict=lambda x: None)
-    assert s.update({"preview_edge": 1536})["ok"]
-    assert json.loads(p.read_text(encoding="utf-8"))["gallery_folder"] == str(gone.resolve())
+    assert "gallery_folder" not in s.data and s.data["base_folder"] == str(tmp_path / "lib")
+    assert s.update({"preview_edge": 1536})["ok"]                       # 下一次保存把旧项清出文件
+    assert "gallery_folder" not in json.loads(p.read_text(encoding="utf-8"))
+    for bad in ("", "relative/x", 5, None, ["x"]):
+        assert "gallery_folder" not in st.sanitize({"gallery_folder": bad})
 
 
-def test_new_gallery_choice_is_still_strict(tmp_path):
-    s = st.SettingsStore(tmp_path / "s.json", restrict=lambda x: None)
-    r = s.update({"gallery_folder": str(tmp_path / "nope")})
-    assert not r["ok"] and "gallery_folder" in r["errors"] and s.data["gallery_folder"] == ""
+def test_old_settings_file_without_sort_fields_gets_defaults(tmp_path):
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps({"schema": 1, "provider": "claude", "wizard_done": True}), encoding="utf-8")
+    s = st.SettingsStore(p, restrict=lambda x: None)
+    assert (s.data["gallery_sort"], s.data["gallery_order"]) == ("captured", "desc")
+    assert s.data["wizard_done"] is True
 
 
-def test_gallery_shows_unavailable_message_for_a_missing_browse_folder(tmp_path):
-    from photo_library import MSG_BROWSE_GONE, PhotoLibrary
+def test_gallery_sort_defaults_and_sanitize_fallbacks():
+    d = st.defaults()
+    assert (d["gallery_sort"], d["gallery_order"]) == ("captured", "desc")
+    assert st.GALLERY_SORT_KEYS == ("captured", "imported", "name", "size", "rating", "flag", "label", "modified", "edited", "type")
+    for k in st.GALLERY_SORT_KEYS:
+        assert st.sanitize({"gallery_sort": k})["gallery_sort"] == k
+    for bad in ("", "Name", "date", 3, None, True, ["name"]):
+        assert st.sanitize({"gallery_sort": bad})["gallery_sort"] == "captured"
+    for o in ("asc", "desc"):
+        assert st.sanitize({"gallery_order": o})["gallery_order"] == o
+    for bad in ("up", "ASC", "", 1, None, False):
+        assert st.sanitize({"gallery_order": bad})["gallery_order"] == "desc"
 
-    class S:
-        data = {"base_folder": str(tmp_path), "gallery_folder": str(tmp_path / "gone")}
-    lib = PhotoLibrary.__new__(PhotoLibrary)
-    import threading
-    lib.settings, lib._lock, lib.lr = S(), threading.Lock(), type("L", (), {"connected": True})()
-    got = []
-    lib._set_error = got.append
-    lib.refresh_sync()
-    assert got == [MSG_BROWSE_GONE] and "暂时无法访问" in MSG_BROWSE_GONE
+
+def test_gallery_sort_update_validates_and_persists(tmp_path):
+    p = tmp_path / "s.json"
+    s = st.SettingsStore(p, restrict=lambda x: None)
+    assert s.update({"gallery_sort": "name", "gallery_order": "asc"})["ok"]
+    assert (s.data["gallery_sort"], s.data["gallery_order"]) == ("name", "asc")
+    again = st.SettingsStore(p, restrict=lambda x: None)
+    assert (again.data["gallery_sort"], again.data["gallery_order"]) == ("name", "asc")
+    r = s.update({"gallery_sort": "bogus", "gallery_order": "desc"})
+    assert not r["ok"] and "gallery_sort" in r["errors"] and s.data["gallery_sort"] == "name" and s.data["gallery_order"] == "asc"
+    r = s.update({"gallery_order": "sideways"})
+    assert not r["ok"] and "gallery_order" in r["errors"] and s.data["gallery_order"] == "asc"

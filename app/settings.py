@@ -38,6 +38,21 @@ EXPORT_BIT_DEPTHS = (8, 16)
 EXPORT_QUALITY_RANGE = (40, 100)
 EXPORT_EDGE_RANGE = (256, 20000)         # 长边像素；0 表示原始尺寸
 
+# 图库排序（1.2.0，排序由前端做，这里只保存用户的选择）
+GALLERY_SORT_KEYS = ("captured", "imported", "name", "size", "rating", "flag", "label", "modified", "edited", "type")
+GALLERY_ORDERS = ("asc", "desc")
+DEFAULT_GALLERY_SORT = "captured"
+DEFAULT_GALLERY_ORDER = "desc"
+
+
+def clean_gallery_sort(v):
+    """合法的排序键返回它自己，否则 None。"""
+    return v if isinstance(v, str) and v in GALLERY_SORT_KEYS else None
+
+
+def clean_gallery_order(v):
+    return v if isinstance(v, str) and v in GALLERY_ORDERS else None
+
 
 def default_base_folder() -> str:
     # A new user chooses the location; do not silently put photo copies on C:.
@@ -47,13 +62,13 @@ def default_base_folder() -> str:
 def defaults() -> dict:
     """全新安装的默认值。这里不能做任何文件系统 / PATH 查找（sanitize 等处会频繁调用）。
     provider_chosen=False：AI 来源由用户第一次打开时在“环境检查”里自己选，软件不替用户决定。"""
-    return {"schema": SCHEMA_VERSION, "base_folder": default_base_folder(), "gallery_folder": "", "provider": DEFAULT_PROVIDER,
+    return {"schema": SCHEMA_VERSION, "base_folder": default_base_folder(), "provider": DEFAULT_PROVIDER,
             "provider_chosen": False,
             "confirm_default": True, "preview_edge": 1024,
             "export_last_folder": "", "export_format": "jpeg", "export_size": 0, "export_quality": 92,
             "export_bit_depth": 16, "export_metadata": "minimal", "ai_use_notes": True,
             "auto_launch_lightroom": False, "lightroom_path": "", "wizard_done": False,
-            "check_updates": True}
+            "check_updates": True, "gallery_sort": DEFAULT_GALLERY_SORT, "gallery_order": DEFAULT_GALLERY_ORDER}
 
 
 # ---------------------------------------------------------------- 文件夹校验
@@ -132,28 +147,9 @@ def validate_folder(path: str) -> dict:
 
 
 def browse_folder(data: dict) -> str:
-    """图库当前浏览的文件夹：用户另选了浏览目录（gallery_folder）就用它，否则是照片工作文件夹（base_folder）。
-    所有“当前浏览目录”都从这里取（图库扫描、在 Lightroom 里显示文件夹、打开文件夹），不要各处自己拼。
-    导入副本只写到 base_folder，与这里无关。"""
-    return str(data.get("gallery_folder") or data.get("base_folder") or "")
-
-
-def validate_gallery_folder(path: str, must_exist: bool = True) -> dict:
-    """浏览目录：必须是本机文件夹（不要求可写，软件只读取它）；拒绝网络路径、磁盘根目录、系统与程序目录。
-    must_exist=True（用户新选择时）还要求它现在存在；读取已保存的设置时用 False：移动硬盘暂时没接上也要保留这个值，
-    图库运行时把它当作“暂时无法访问”（见 photo_library.refresh_sync），不改设置。"""
-    raw = (path or "").strip()
-    p = Path(raw)
-    if not raw or raw.startswith(("\\\\", "//")) or not p.is_absolute() or not p.drive or p.parent == p:
-        return {"ok": False, "message": "请选择已存在的本机照片文件夹。", "path": raw}
-    try:
-        p = p.resolve()
-        valid = (p.is_dir() or not must_exist) and not any(_is_within(p, root) for root in _protected_roots())
-    except (OSError, RuntimeError, ValueError):
-        valid = False
-    if not valid:
-        return {"ok": False, "message": "请选择已存在的本机照片文件夹。", "path": raw}
-    return {"ok": True, "message": "", "path": str(p)}
+    """图库浏览的文件夹 = 照片库 = 照片工作文件夹（base_folder）。1.2.0 起不再能浏览别的文件夹（旧的 gallery_folder 设置被忽略）。
+    所有“当前浏览目录”都从这里取（图库扫描、在 Lightroom 里显示文件夹、打开文件夹），不要各处自己拼。"""
+    return str(data.get("base_folder") or "")
 
 
 def _writable(directory: Path) -> bool:
@@ -242,11 +238,11 @@ def sanitize(data) -> dict:
     d = defaults()
     out["schema"] = SCHEMA_VERSION
     bf = out.get("base_folder")
-    # 只校验格式并保留原值（与 gallery_folder 一样）：磁盘暂时不在时不能清空，否则下一次任何保存都会把空值写回文件
+    # 只校验格式并保留原值：磁盘暂时不在时不能清空，否则下一次任何保存都会把空值写回文件
     out["base_folder"] = bf.strip() if isinstance(bf, str) and folder_format_ok(bf) else d["base_folder"]
-    gf = out.get("gallery_folder")
-    gallery = validate_gallery_folder(gf, must_exist=False) if isinstance(gf, str) else {"ok": False}
-    out["gallery_folder"] = gallery["path"] if gallery["ok"] else ""
+    out.pop("gallery_folder", None)                  # 1.2.0 起没有“浏览任意文件夹”：旧版留下的这一项丢弃
+    out["gallery_sort"] = clean_gallery_sort(out.get("gallery_sort")) or d["gallery_sort"]
+    out["gallery_order"] = clean_gallery_order(out.get("gallery_order")) or d["gallery_order"]
     pv = out.get("provider")
     out["provider"] = pv if isinstance(pv, str) and pv else d["provider"]
     pc = out.get("provider_chosen")
@@ -348,6 +344,7 @@ class SettingsStore:
 
     def _update(self, changes: dict, selectable, create_missing: bool) -> dict:
         new = dict(self.data)
+        new.pop("gallery_folder", None)
         errors: dict[str, str] = {}
         needs_create = False
         raw_base = str(changes.get("base_folder") or "").strip().strip('"') if "base_folder" in changes else None
@@ -371,16 +368,19 @@ class SettingsStore:
                     errors["base_folder"] = "该文件夹尚不存在。"
             else:
                 new["base_folder"] = v["path"]
-        if "gallery_folder" in changes:
-            folder = changes["gallery_folder"]
-            if folder == "":
-                new["gallery_folder"] = ""
+        # 旧版页面可能还带着 gallery_folder：1.2.0 起忽略（不保存、不报错）
+        if "gallery_sort" in changes:
+            k = clean_gallery_sort(changes["gallery_sort"])
+            if k is None:
+                errors["gallery_sort"] = "排序方式无效。"
             else:
-                gallery = validate_gallery_folder(folder) if isinstance(folder, str) else {"ok": False}
-                if gallery["ok"]:
-                    new["gallery_folder"] = gallery["path"]
-                else:
-                    errors["gallery_folder"] = "请选择已存在的本机照片文件夹。"
+                new["gallery_sort"] = k
+        if "gallery_order" in changes:
+            o = clean_gallery_order(changes["gallery_order"])
+            if o is None:
+                errors["gallery_order"] = "排序方向只能是升序或降序。"
+            else:
+                new["gallery_order"] = o
         if "provider" in changes:
             pid = changes["provider"]
             if not isinstance(pid, str) or not selectable(pid):
