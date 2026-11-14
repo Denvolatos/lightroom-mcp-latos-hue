@@ -3,7 +3,22 @@
 Versions: a new feature raises the middle number, a small fix the last one. The server version lives in
 `server/lightroom_mcp/__init__.py`, the plug-in version in `plugin/lrmcp.lrdevplugin/Version.lua` (and `Info.lua`).
 
-## 1.1.0 (unreleased) — shorter polls, expired commands are dropped; released together with Latos Hue 1.1.0
+## 1.1.1 — fixes for slow photo switching and fragile connections; released together with Latos Hue 1.1.1
+
+No new tools; the tools and how to use them are unchanged.
+
+- **Plug-in:** `%c`/`%s`/`%d` Lua character classes replaced by explicit ASCII ranges (they corrupted UTF-8 under non-UTF-8 C locales,
+  e.g. cp1252); `select_photos` no longer forces a source switch and only changes folder if the selection fails; thumbnail batches share
+  one deadline; stopping the bridge wakes waiters and queued-but-not-run commands raise `BridgeNotRun`; dead servers back off 30–60 s;
+  `list_folder_photos` also lists catalog subfolders when the root itself is not in the catalog.
+- **Server:** commands still running count as "online" (no false disconnect after 25 s); in app mode the instructions only cover the
+  tools that are actually enabled (`LRMCP_APP_MODE`).
+- **Measured on a real machine (15-photo test catalog):** select a photo 1.0–1.8 s → 0.03–0.19 s; first preview 4.1 s → 1.3 s;
+  list gallery 1.0 s → 0.04 s; connect 3.8–4.9 s → 1.0–1.8 s.
+- **Still unverified:** whether LrHttp is serial inside Lightroom; stability of concurrent `requestJpegThumbnail`.
+- **Upgrading:** close Latos Hue and Lightroom, install, then restart Lightroom (or reload the plug-in once).
+
+## 1.1.0 — shorter polls, expired commands are dropped; released together with Latos Hue 1.1.0
 
 1.0.3 was never released; its number is not used. What it contained is part of this release.
 
