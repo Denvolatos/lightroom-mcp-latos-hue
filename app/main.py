@@ -72,10 +72,13 @@ class Api:
         self._probe = None                       # 未选择时用来显示各来源“已安装 / 已登录”的探测器（用到才建）
         self._state_file = state_file
         self._session = self._provider           # 兼容旧名：Backend / LrService 只用 alive、busy、restart 等
-        # 常驻模式：窗口不单独起 Bridge，借用助手里那个服务的通道（Lightroom 插件同时轮询 3 个以上服务会变慢，见 DEV_NOTES）
-        self._lr = (LrService(state_file=state_file, rpc_token=self._rpc_token, alive=lambda: self._session.alive,
-                              restart_hook=lambda: not self._session.busy and self._session.restart())
-                    if self._persistent else LrService())
+        # 常驻模式最终会借用助手里那个服务的通道，窗口不再单独起 Bridge（Lightroom 插件同时轮询 3 个以上服务会变慢，见 DEV_NOTES）。
+        # 但只有 claude 真的启动、它那条通道也连上了 Lightroom 之后才切过去（见 _watch_side）；在那之前、或 claude 没装/没登录/
+        # 启动失败时，一直用窗口自己的 Bridge，图库、导出、预设、版本照常可用。
+        self._borrowing = False
+        self._mode_lock = threading.RLock()
+        self._closing = threading.Event()
+        self._lr = self._make_lr(False)
         self._hub = ConfirmHub(self._emit, current_values=self._lr.current_values)
         self._hub.start()
         self._preview = PreviewManager(self._lr, PreviewServer(PreviewStore()), self._emit)
@@ -127,9 +130,7 @@ class Api:
             self._lr.start()
         threading.Thread(target=warm, daemon=True).start()
         if self._persistent:
-            token = self._hub.begin_session()
-            self._provider.start({"LRAPP_PORT": str(self._hub.port), "LRAPP_TOKEN": token,
-                                  "LRAPP_RPC_TOKEN": self._rpc_token})
+            self._start_resident()
         self._preview.server.start()
         self._preview.start()
         self._photolib.server.start()
@@ -168,38 +169,83 @@ class Api:
         if not self._ai_chosen() or want == self._provider.id or not is_selectable(want):
             return False
         next_persistent = (self._preferred_persistent and want == "claude") if want in ("claude", "codex") else self._persistent
-        old = self._provider
-        mode_changed = next_persistent != self._persistent
-        if mode_changed:
+        with self._mode_lock:
+            old = self._provider
+            self._persistent = next_persistent
+            self._state_file = STATE_DIR / "claude_side.json" if self._persistent else None
+            self._provider = create_provider(want, state_file=self._state_file, persistent=self._persistent)
+            self._session = self._provider
+            if self._borrowing:
+                # 借用的是旧 claude 的通道，它马上要关：先换回窗口自己的 Bridge
+                self._switch_lr(False)
+            else:
+                self._backend.session = self._provider
+            old.close()
+        if self._persistent:
+            self._start_resident()
+        return True
+
+    # ---- 窗口的 Lightroom 通道：自己的 Bridge / 借用常驻 claude 的通道 ----
+    def _make_lr(self, borrow: bool):
+        if borrow:
+            return LrService(state_file=self._state_file, rpc_token=self._rpc_token, alive=lambda: self._session.alive,
+                             restart_hook=lambda: not self._session.busy and self._session.restart())
+        return LrService()
+
+    def _switch_lr(self, borrow: bool) -> None:
+        """换窗口的 Lightroom 通道，并让所有持有它的功能（预览、巡检、图库、导入、导出、挑片、预设）指向新的对象。"""
+        with self._mode_lock:
             self._backend.stop()
             self._preview.stop()
             self._lr.stop()
-            self._persistent = next_persistent
-            self._state_file = STATE_DIR / "claude_side.json" if self._persistent else None
-        self._provider = create_provider(want, state_file=self._state_file, persistent=self._persistent)
-        self._session = self._provider
-        old.close()
-        if mode_changed:
-            self._lr = (LrService(state_file=self._state_file, rpc_token=self._rpc_token,
-                                  alive=lambda: self._session.alive,
-                                  restart_hook=lambda: not self._session.busy and self._session.restart())
-                        if self._persistent else LrService())
+            self._borrowing = borrow
+            self._lr = self._make_lr(borrow)
             self._hub.current_values = self._lr.current_values
             self._preview = PreviewManager(self._lr, PreviewServer(PreviewStore()), self._emit)
             self._preview.set_edge(self._settings.data["preview_edge"])
             self._backend = Backend(self._lr, self._session, self._tracker, self._emit,
                                     state_file=None, previews=self._preview,
-                                 hold_restart=self._autolaunch_in_grace)
+                                    hold_restart=self._autolaunch_in_grace)
             self._rebind_lr_services()
-            threading.Thread(target=self._lr.start, daemon=True).start()
+            if borrow:
+                self._lr.start()                 # 借用模式的 start 只是建对象，不阻塞
+            else:
+                threading.Thread(target=self._lr.start, daemon=True).start()
             self._preview.server.start()
             self._preview.start()
             self._backend.start()
-        else:
-            self._backend.session = self._provider
-        if self._persistent:
-            self._provider.start(self._provider_env())
-        return True
+
+    def _start_resident(self) -> bool:
+        """启动常驻 claude（失败不抛出），并在后台等它那条通道连上 Lightroom 后再切到借用模式。返回是否启动成功。"""
+        provider = self._provider
+        try:
+            ok = bool(provider.start(self._provider_env()))
+        except Exception:                        # noqa: BLE001 - 启动失败：继续用窗口自己的 Bridge
+            ok = False
+        threading.Thread(target=self._watch_side, args=(provider,), daemon=True).start()
+        return ok
+
+    def _side_ready(self, provider) -> bool:
+        if not bool(getattr(provider, "alive", False)) or self._state_file is None:
+            return False
+        side = connmod.read_side_state(self._state_file)
+        return bool(side.get("connected") and side.get("rpc_port"))
+
+    def _watch_side(self, provider, interval: float = 1.0) -> None:
+        """常驻 claude 那条通道连上 Lightroom 之后才切到借用模式（不在处理请求时切）。claude 没装/没登录时一直等着，
+        窗口继续用自己的 Bridge；以后 claude 被巡检重建并连上了，照样会切过去。来源换掉或软件关闭就结束。"""
+        while not self._closing.is_set():
+            if self._provider is not provider or not self._persistent or self._borrowing:
+                return
+            try:
+                if self._side_ready(provider) and not self._busy and not bool(getattr(provider, "busy", False)):
+                    with self._mode_lock:
+                        if self._provider is provider and self._persistent and not self._borrowing:
+                            self._switch_lr(True)
+                    return
+            except Exception:                    # noqa: BLE001 - 读状态出错：下次再看
+                pass
+            self._closing.wait(interval)
 
     def _rebind_lr_services(self) -> None:
         """换了 LrService / 预览服务（Claude 常驻会话与 Codex 每轮启动之间切换）后，让所有持有它们的功能指向新的对象，
@@ -210,6 +256,9 @@ class Api:
         self._pick.store = self._preview.server.store
 
     def _shutdown(self) -> None:
+        closing = getattr(self, '_closing', None)
+        if closing is not None:
+            closing.set()                        # 让等待切换通道的后台线程结束
         self._autolaunch.stop()                  # 只停止等待；不会关闭用户的 Lightroom
         self._backend.stop()
         self._preview.stop()

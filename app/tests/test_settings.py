@@ -303,9 +303,10 @@ def test_switch_to_codex_updates_import_and_export_services(api, monkeypatch):
     monkeypatch.setattr(main, "PreviewManager", lambda *a, **k: MagicMock())
     monkeypatch.setattr(main, "PreviewServer", lambda *a, **k: MagicMock())
     monkeypatch.setattr(main, "Backend", lambda *a, **k: MagicMock())
+    api._borrowing = True                       # 1.1.1：常驻 claude 那条通道连上后才借用；这里模拟已经借用
     api._settings.data["provider"] = "codex"
     assert api._apply_provider_choice()
-    assert api._import.lr is new_lr and api._export.lr is new_lr
+    assert api._import.lr is new_lr and api._export.lr is new_lr and api._borrowing is False
 
 
 # ---------------------------------------------------------------- 浏览目录暂时不在：设置保留，只在运行时当作不可用
