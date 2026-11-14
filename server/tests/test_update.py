@@ -13,6 +13,21 @@ def test_version_compare():
     assert not is_newer("latest", "0.3.0") and not is_newer("", "0.3.0")
 
 
+def test_new_repository_name_and_v_tags():
+    assert update.LATEST_URL == "https://api.github.com/repos/Denvolatos/lightroom-mcp-latos-hue/releases/latest"
+    assert update.RELEASES_PAGE == "https://github.com/Denvolatos/lightroom-mcp-latos-hue/releases/latest"
+    assert "lightroom-mcp-win" not in update.LATEST_URL + update.RELEASES_PAGE
+    assert update.parse_version("v1.1.1") == (1, 1, 1) and is_newer("v1.1.1", "1.1.0") and is_newer("v1.2.0", "1.1.1")
+    assert update.parse_version("app-v1.1.1") is None
+
+
+def test_pyproject_points_to_the_new_repository():
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+    assert "lightroom-mcp-win" not in text and "Denvolatos/lightroom-mcp-latos-hue/issues" in text
+
+
 def test_notice_when_newer(tmp_path):
     c = UpdateChecker(tmp_path, fetch=lambda: "v0.4.0", current="0.3.0")
     c.check_now()
