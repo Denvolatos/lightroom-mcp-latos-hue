@@ -297,6 +297,43 @@ def test_catalog_errors_translated(env):
     assert env.lib.state()["message"] == "插件拒绝了请求"
 
 
+def test_refresh_failure_keeps_previous_list_and_selection(env):
+    """1.1.1：刷新失败一次不再清空整个列表和选区；保留上一次结果，只提示“暂时无法更新”。"""
+    seed(env)
+    env.lib.refresh_sync()
+    ids = [p["id"] for p in env.lib.state()["photos"]]
+    env.lib.select([ids[0]])
+    for breakit, fixit in (
+            (lambda: setattr(env.lr, "connected", False), lambda: setattr(env.lr, "connected", True)),
+            (lambda: setattr(env.lr, "library_list", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("插件忙"))),
+             lambda: env.lr.__dict__.pop("library_list"))):
+        breakit()
+        env.lib.refresh_sync()
+        s = env.lib.state()
+        assert s["state"] == "ready" and s["stale"] is True and len(s["photos"]) == 5
+        assert s["message"].startswith(pl.MSG_STALE_PREFIX) and s["selection"]["ids"] == [ids[0]]
+        fixit()
+        env.lib.refresh_sync()
+        s = env.lib.state()
+        assert s["state"] == "ready" and s["stale"] is False and s["message"] == "" and len(s["photos"]) == 5
+
+
+def test_refresh_failure_without_previous_result_or_after_folder_change_is_an_error(env, tmp_path):
+    env.lr.connected = False
+    env.lib.refresh_sync()
+    assert env.lib.state()["state"] == "error" and env.lib.state()["stale"] is False
+    env.lr.connected = True
+    seed(env)
+    env.lib.refresh_sync()
+    other = tmp_path / "other"
+    other.mkdir()
+    env.lib.settings.data["base_folder"] = str(other)                         # 换了目录：旧目录的列表不能冒充新目录
+    env.lr.connected = False
+    env.lib.refresh_sync()
+    s = env.lib.state()
+    assert s["state"] == "error" and s["photos"] == []
+
+
 def test_refresh_coalesces_while_running(tmp_path):
     started = threading.Event()
     release = threading.Event()

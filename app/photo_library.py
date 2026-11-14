@@ -44,7 +44,8 @@ MSG_BROWSE_GONE = "浏览目录暂时无法访问，请检查磁盘，或点“�
 MSG_OFFLINE = "Lightroom 未连接，无法显示照片信息"
 MSG_TIMEOUT = "Lightroom 没有在时限内回复，可能正忙。请稍后再试。"
 MSG_TRUNCATED = f"仅显示前 {MAX_PHOTOS} 张。"
-MSG_READONLY = "只读模式已开启，无法加入 Lightroom。请先关闭只读模式（删除只读开关文件）后再试。"
+MSG_STALE_PREFIX = "暂时无法更新图库，显示的是上一次读到的内容："
+MSG_READONLY ="只读模式已开启，无法加入 Lightroom。请先关闭只读模式（删除只读开关文件）后再试。"
 THUMB_ERRORS = {"not_found": "照片在 Lightroom 目录中不存在", "timeout": "读取缩略图超时", "too_large": "缩略图过大（超过 150 KB），无法显示",
                 "bad_jpeg": "缩略图数据无效", "no_reply": "Lightroom 没有返回该缩略图", "not_added": "尚未加入 Lightroom，没有缩略图"}
 AUTO_RETRY_CODES = ("timeout", "too_large")   # 偶发失败（一批同时渲染的超时；真机上冷启动时偶尔先得到过大的预览，再取就正常）：自动再试一次（只一次），仍失败才显示“读取失败”
@@ -167,6 +168,8 @@ class PhotoLibrary:
         self.truncated = False
         self.photos: list[dict] = []
         self._by_uid: dict[str, dict] = {}
+        self.stale = False                       # 最近一次刷新失败、显示的是上一次的结果
+        self._loaded_base = ""                   # self.photos 来自哪个浏览目录
         # 选中
         self.sel_ids: list[str] = []
         self.active: str | None = None
@@ -212,8 +215,7 @@ class PhotoLibrary:
                 try:
                     self.refresh_sync()
                 except Exception as e:           # noqa: BLE001 - 兜底：不让后台线程悄悄死掉
-                    with self._lock:
-                        self.state_name, self.message = "error", err_text(e)
+                    self._set_error(err_text(e))
                 with self._lock:
                     if not self._again:
                         self._refreshing = False
@@ -296,7 +298,8 @@ class PhotoLibrary:
         with self._lock:
             self.photos, self._by_uid = recs, {p["uid"]: p for p in recs}
             self.in_catalog, self.truncated = in_catalog, truncated
-            self.state_name, self.message = "ready", ""
+            self.state_name, self.message, self.stale = "ready", "", False
+            self._loaded_base = base
             # 选区里已不在图库的照片去掉；等待中的缩略图请求同理
             self.sel_ids = [i for i in self.sel_ids if i in self._by_uid]
             if self.active not in self._by_uid:
@@ -305,8 +308,13 @@ class PhotoLibrary:
             self._failed = {k: v for k, v in self._failed.items() if k in self._by_uid}
 
     def _set_error(self, msg: str) -> None:
+        """刷新失败。同一个浏览目录上次读到过照片时，保留上一次的列表和选区，只提示“暂时无法更新”（stale=True）；
+        从没读到过（或换了目录）才显示错误并清空。"""
         with self._lock:
-            self.state_name, self.message = "error", msg
+            if self.photos and norm_key(self._loaded_base) == norm_key(self.base):
+                self.state_name, self.message, self.stale = "ready", MSG_STALE_PREFIX + msg, True
+                return
+            self.state_name, self.message, self.stale = "error", msg, False
             self.photos, self._by_uid, self.truncated = [], {}, False
             self.sel_ids, self.active = [], None
 
@@ -324,7 +332,8 @@ class PhotoLibrary:
                 e = self.store.peek(p["uid"])
                 if e is not None:
                     thumbs[p["uid"]] = self.server.url_for(e)
-            return {"ok": True, "state": self.state_name, "message": self.message, "base": self.base, "base_exists": self.base_exists,
+            return {"ok": True, "state": self.state_name, "message": self.message, "stale": self.stale,
+                    "base": self.base, "base_exists": self.base_exists,
                     "in_catalog": self.in_catalog, "lr_connected": bool(self.lr.connected), "total": len(photos), "limit": MAX_PHOTOS,
                     "truncated": self.truncated, "truncated_message": MSG_TRUNCATED if self.truncated else "",
                     "not_added": sum(1 for p in photos if not p["added"]), "missing": sum(1 for p in photos if p["missing"]),
