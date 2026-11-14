@@ -592,13 +592,14 @@ $('#ltabs').onclick = e => { const t=e.target.closest('.tab'); if(!t) return;
   document.querySelectorAll('#ltabs .tab').forEach(x=>x.classList.toggle('on',x===t)); ltab=t.dataset.t;
   if (REAL() && ltab==='preset' && LB.sub==='lr' && !LB.lr) loadLr(); renderLeft(); };
 /* ---- 预设 / 收藏 / 经验（真实模式；演示模式仍用上面的示例数据）---- */
-const LB = {sub:'mine', presets:null, sel:null, strength:100, lrq:'', lr:null, lrSel:null, notes:null, nq:'', ntag:'', nsel:null, fav:null, err:''};
+const LB = {sub:'mine', presets:null, sel:null, strength:100, lrq:'', lr:null, lrSel:null, notes:null, nq:'', ntag:'', nsel:null, fav:null, err:'',
+  lrDraft:null, nqDraft:null, lrSeq:0, nSeq:0};    // lrDraft/nqDraft：搜索框里打了但还没按回车的字，重绘左栏时保留
 const lapi = () => window.pywebview.api;
 async function loadLib(which){
   if (!REAL()) return;
   try {
     if (!which || which==='p') LB.presets = await lapi().lib_presets();
-    if (!which || which==='n') LB.notes = await lapi().lib_notes(LB.nq, LB.ntag);
+    if (!which || which==='n'){ const seq = ++LB.nSeq; const n = await lapi().lib_notes(LB.nq, LB.ntag); if (seq===LB.nSeq) LB.notes = n; }   // 只接受最新一次搜索的结果
     if (!which || which==='f') LB.fav = await lapi().lib_favs();
     LB.err = '';
   } catch(e){ LB.err = '无法读取预设、经验或收藏，请重试。'; }
@@ -631,8 +632,12 @@ function renderLeft(){
   let h = '';
   if (LB.err) h += `<div class="empty bad">${esc(LB.err)}</div>`;
   if (ltab==='preset') h += presetTabHtml(); else if (ltab==='fav') h += favTabHtml(); else h += noteTabHtml();
+  const ae = document.activeElement, fid = ae && p.contains(ae) && ae.id ? ae.id : null;   // 重绘前记下焦点和光标位置
+  let ss = null; try { if (fid && ae.selectionStart!=null) ss = [ae.selectionStart, ae.selectionEnd]; } catch(e){}
   p.innerHTML = h; p.dataset.k = '';
   bindLeft(p);
+  const f = fid && p.querySelector('#'+fid);
+  if (f){ f.focus({preventScroll:true}); if (ss) try { f.setSelectionRange(ss[0], ss[1]); } catch(e){} }
 }
 function presetTabHtml(){
   let h = subSeg([['mine','我的预设'],['lr','Lightroom 预设']], LB.sub, 'sub');
@@ -649,7 +654,7 @@ function presetTabHtml(){
       <button class="btn small" id="pr_ren">重命名</button><button class="btn small" id="pr_note">编辑备注</button><button class="btn small" id="pr_exp">导出</button><button class="btn small" id="pr_del">删除</button></div></div>`;
     return h;
   }
-  h += `<div class="tools"><input type="text" id="lr_q" placeholder="搜索名称或分组（一个词）" value="${esc(LB.lrq)}"><button class="btn small" id="lr_go">搜索</button></div>`;
+  h += `<div class="tools"><input type="text" id="lr_q" placeholder="搜索名称或分组（一个词）" value="${esc(LB.lrDraft!=null?LB.lrDraft:LB.lrq)}"><button class="btn small" id="lr_go">搜索</button></div>`;
   if (!LB.lr) return h + '<div class="empty">正在读取 Lightroom 预设…</div>';
   if (!LB.lr.ok) return h + `<div class="empty bad">${esc(LB.lr.message)}</div>`;
   h += `<div class="dm pad">${esc(LB.lr.note)}</div>`;
@@ -674,7 +679,7 @@ function noteTabHtml(){
   const N = LB.notes; 
   let h = `<div class="tools"><button class="btn small primary" id="nt_new">新建经验</button><button class="btn small" id="nt_imp">导入</button><button class="btn small" id="nt_exp">导出</button></div>`;
   if (!N) return h + '<div class="empty">正在读取…</div>';
-  h += `<div class="tools"><input type="text" id="nt_q" placeholder="搜索标题、正文、标签" value="${esc(LB.nq)}"><select id="nt_tag"><option value="">全部标签</option>${N.tags.map(t=>`<option value="${esc(t)}" ${LB.ntag===t?'selected':''}>${esc(t)}</option>`).join('')}</select></div>`;
+  h += `<div class="tools"><input type="text" id="nt_q" placeholder="搜索标题、正文、标签" value="${esc(LB.nqDraft!=null?LB.nqDraft:LB.nq)}"><select id="nt_tag"><option value="">全部标签</option>${N.tags.map(t=>`<option value="${esc(t)}" ${LB.ntag===t?'selected':''}>${esc(t)}</option>`).join('')}</select></div>`;
   if (!N.notes.length) h += (LB.nq||LB.ntag) ? '<div class="empty">没有符合条件的经验。</div>' : '<div class="empty">还没有经验。点击“新建经验”记录你自己的调色心得，或在 AI 完成一次调整后点击“把这次做法记成经验”。经验只保存在本机，软件不预装任何经验。</div>';
   N.notes.forEach(n=>{ h += `<div class="list-item" data-nid="${esc(n.id)}"><span class="name">${esc(n.title)}<span class="sub2">${esc([n.scene, ...n.tags].filter(Boolean).join(' · '))}${n.use_in_chat?'':' · 不参与对话'}</span></span>${starHtml(n.fav, `data-fav="note" data-key="${esc(n.id)}"`)}</div>`; });
   h += `<div class="dm pad">${N.context.eligible ? `开启“让 AI 参考我的经验库”时，新对话将提供最近的 ${N.context.used} 条（共 ${N.context.eligible} 条参与对话${N.context.truncated?'，超出长度上限的已舍弃':''}）。` : '没有“参与对话”的经验，AI 不会收到经验资料。'}</div>`;
@@ -692,19 +697,25 @@ function bindLeft(p){
   p.querySelectorAll('[data-fk]').forEach(d=>d.onclick=()=>favClick(d.dataset.fk, d.dataset.key));
   const on = (id, fn)=>{ const e = p.querySelector('#'+id); if (e) e.onclick = fn; };
   on('pr_save', openSavePreset); on('pr_imp', importPreset); on('pr_apply', ()=>applyMine()); on('pr_ren', renamePreset); on('pr_note', notePreset);
-  on('pr_exp', exportPreset); on('pr_del', deletePreset); on('lr_go', ()=>{ LB.lrq = p.querySelector('#lr_q').value; loadLr(); }); on('lr_apply', ()=>applyLr());
+  on('pr_exp', exportPreset); on('pr_del', deletePreset); on('lr_go', ()=>{ LB.lrq = p.querySelector('#lr_q').value; LB.lrDraft = null; loadLr(); }); on('lr_apply', ()=>applyLr());
   on('nt_new', ()=>openNote(null)); on('nt_imp', importNotes); on('nt_exp', exportNotes);
   on('fv_photo', async()=>{ const r = await lapi().lib_fav_toggle('photo','',''); if (!r.ok) toast(r.message||'无法收藏'); loadLib('f'); });
   const str = p.querySelector('#pr_str'); if (str) str.oninput = ()=>{ LB.strength = parseInt(str.value,10); p.querySelector('#pr_strv').textContent = LB.strength+'%'; };
-  const q = p.querySelector('#lr_q'); if (q) q.onkeydown = e=>{ if (e.key==='Enter'){ LB.lrq = q.value; loadLr(); } };
-  const nq = p.querySelector('#nt_q'); if (nq) nq.onkeydown = e=>{ if (e.key==='Enter'){ LB.nq = nq.value; loadLib('n'); } };
-  const nt = p.querySelector('#nt_tag'); if (nt) nt.onchange = ()=>{ LB.ntag = nt.value; LB.nq = p.querySelector('#nt_q').value; loadLib('n'); };
+  const q = p.querySelector('#lr_q'); if (q){ q.oninput = ()=>{ LB.lrDraft = q.value; }; q.onkeydown = e=>{ if (e.key==='Enter'){ LB.lrq = q.value; LB.lrDraft = null; loadLr(); } }; }
+  const nq = p.querySelector('#nt_q'); if (nq){ nq.oninput = ()=>{ LB.nqDraft = nq.value; }; nq.onkeydown = e=>{ if (e.key==='Enter'){ LB.nq = nq.value; LB.nqDraft = null; loadLib('n'); } }; }
+  const nt = p.querySelector('#nt_tag'); if (nt) nt.onchange = ()=>{ LB.ntag = nt.value; LB.nq = p.querySelector('#nt_q').value; LB.nqDraft = null; loadLib('n'); };
 }
-async function loadLr(keep){ if (!keep) LB.lr = null; renderLeft(); try { LB.lr = await lapi().lib_lr_presets(LB.lrq); } catch(e){ LB.lr = {ok:false, message:'无法读取 Lightroom 预设。'}; } renderLeft(); }
+async function loadLr(keep){
+  const seq = ++LB.lrSeq;                 // 连按搜索时只接受最新一次的结果，先发出的慢请求不会覆盖
+  if (!keep) LB.lr = null; renderLeft();
+  let r; try { r = await lapi().lib_lr_presets(LB.lrq); } catch(e){ r = {ok:false, message:'无法读取 Lightroom 预设。'}; }
+  if (seq!==LB.lrSeq) return;
+  LB.lr = r; renderLeft();
+}
 function favClick(kind, key){
   if (kind==='preset'){ const x = (LB.presets&&LB.presets.presets||[]).find(p=>p.name===key); ltab='preset'; LB.sub='mine'; if (x) LB.sel = x.id; tabsOn(); renderLeft(); }
   else if (kind==='note'){ openNote(key); }
-  else if (kind==='lr_preset'){ ltab='preset'; LB.sub='lr'; LB.lrq=''; tabsOn(); loadLr(); }
+  else if (kind==='lr_preset'){ ltab='preset'; LB.sub='lr'; LB.lrq=''; LB.lrDraft=null; tabsOn(); loadLr(); }
   else { const i = $('#fv_info'); if (i) i.textContent = '照片收藏仅记录名称与收藏时间。软件暂时不能在 Lightroom 中自动选中该照片，请在 Lightroom 中自行选择。'; }
 }
 function tabsOn(){ document.querySelectorAll('#ltabs .tab').forEach(x=>x.classList.toggle('on', x.dataset.t===ltab)); }
