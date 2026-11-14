@@ -1231,6 +1231,45 @@ def activate_existing_window(titles=(MAIN_TITLE, splashmod.TITLE), user32=None) 
     return False
 
 
+OLD_WEBVIEW_PREFIX = ".latoshue-webview-"
+
+
+def webview_storage_dir(env=None) -> str | None:
+    """WebView2 的数据目录：固定放在本机 %LOCALAPPDATA%\\LatosHue\\WebView2（不在照片盘上，每次复用，冷启动更快）。
+    配合 pywebview 默认的 private_mode，不保存 Cookie 和网页存储。拿不到或建不了就返回 None（用 pywebview 的默认位置）。"""
+    env = os.environ if env is None else env
+    root = env.get("LOCALAPPDATA")
+    if not root:
+        return None
+    path = Path(root) / "LatosHue" / "WebView2"
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    return str(path)
+
+
+def clean_old_webview_dirs(base: str) -> list[str]:
+    """删除工作文件夹里旧版本留下的 .latoshue-webview-* 目录（只看这一层、只删目录、只删这个前缀）；失败忽略。返回删掉的名字。"""
+    import shutil
+    removed: list[str] = []
+    try:
+        if not base or not os.path.isdir(base):
+            return removed
+        entries = list(os.scandir(base))
+    except OSError:
+        return removed
+    for e in entries:
+        try:
+            if e.name.startswith(OLD_WEBVIEW_PREFIX) and e.is_dir(follow_symlinks=False):
+                shutil.rmtree(e.path, ignore_errors=True)
+                if not os.path.exists(e.path):
+                    removed.append(e.name)
+        except OSError:
+            pass
+    return removed
+
+
 def setup_windows(api, create_window=None, use_splash: bool = True):
     """创建主窗口（先隐藏）和启动窗口，返回启动界面控制器（没有启动界面时为 None，主窗口直接显示）。
     主窗口先创建，保证它是 pywebview 的主窗口：启动窗口关闭不会让程序退出。创建启动窗口出任何错，都退回"直接显示主窗口"。"""
@@ -1270,22 +1309,13 @@ def main() -> None:
             if ctrl.splash is None:              # 没能创建启动窗口：直接显示主窗口
                 ctrl.finish()
         api._start_background()
-    base = api._settings.data["base_folder"]
-    cache = None
+    base = api._settings.data.get("base_folder") or ""
+    # 旧版本每次在照片工作文件夹里建的 WebView2 临时目录：后台顺带清掉（只删这个前缀的目录，删不掉就算了）
+    threading.Thread(target=clean_old_webview_dirs, args=(base,), daemon=True).start()
     try:
-        if base and os.path.isdir(base):
-            # WebView's private data is temporary and lives on the chosen photo drive.
-            cache = tempfile.TemporaryDirectory(prefix=".latoshue-webview-", dir=base)
-        webview.start(run, icon=icon, storage_path=cache.name if cache else None)
+        webview.start(run, icon=icon, storage_path=webview_storage_dir())
     finally:
-        try:
-            api._shutdown()
-        finally:
-            if cache is not None:
-                try:
-                    cache.cleanup()
-                except OSError:
-                    pass  # WebView may still have files open during shutdown.
+        api._shutdown()
 
 
 if __name__ == "__main__":
