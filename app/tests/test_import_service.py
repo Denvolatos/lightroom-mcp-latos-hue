@@ -4,6 +4,7 @@
 import os
 import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -42,9 +43,12 @@ class FakeLr:
         return {"status": "imported"}
 
 
-def make(p: Path, size=10):
+def make(p: Path, size=10, when=None):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(b"x" * size)
+    if when is not None:
+        ts = datetime(*when).timestamp()
+        os.utime(p, (ts, ts))
     return p
 
 
@@ -60,9 +64,9 @@ def wait(pred, timeout=5.0):
 @pytest.fixture
 def env(tmp_path):
     card = tmp_path / "card"
-    make(card / "DCIM" / "A.ARW", 40)
-    make(card / "DCIM" / "B.JPG", 25)
-    make(card / "DCIM" / "C.HEIC", 5)
+    make(card / "DCIM" / "A.ARW", 40, (2025, 12, 31, 23, 0, 0))       # 没有 EXIF 的假文件：按修改时间（本地时间）定日期文件夹
+    make(card / "DCIM" / "B.JPG", 25, (2025, 12, 31, 8, 0, 0))
+    make(card / "DCIM" / "C.HEIC", 5, (2026, 1, 2, 9, 0, 0))
     make(card / "readme.txt", 5)
     base = tmp_path / "lib"
     base.mkdir()
@@ -85,19 +89,20 @@ def test_scan_then_prepare_summary(env):
     p = svc.prepare("")
     f = p["found"]
     assert p["can_start"] and (f["n"], f["raw"], f["jpeg"], f["other"], f["total_size"]) == (3, 1, 1, 1, 70)
-    assert p["target"] == str(base) and p["base_exists"] and p["free"] and p["free_text"] != "未知"
+    assert p["base"] == str(base) and p["base_exists"] and p["free"] and p["free_text"] != "未知"
+    assert "target" not in p and "category" not in p
+    assert p["date_summary"] == [{"day": "2025-12-31", "count": 2}, {"day": "2026-01-02", "count": 1}] and p["date_more"] is None
+    assert p["to_copy"]["count"] == 3 and p["to_copy"]["size"] == 70 and p["duplicates"]["count"] == 0
     assert any(e.get("type") == "import_scan" and e.get("state") == "done" for e in events)
     assert not any("files" in e for e in events)                       # 文件清单只留在后台，不推给页面
 
 
-def test_prepare_category_rules(env):
+def test_prepare_ignores_legacy_category_argument(env):
     svc, lr, events, card, base = env
     scan(svc, card)
-    ok = svc.prepare("雪山")
-    assert ok["can_start"] and ok["target"] == str(base / "雪山")
-    for bad in ("a/b", "..", "x\\y", "C:\\x"):
-        r = svc.prepare(bad)
-        assert not r["can_start"] and "category" in r["errors"]
+    for cat in ("雪山", "a/b", "..", "x\\y", "C:\\x", None):
+        r = svc.prepare(cat)
+        assert r["can_start"] and "category" not in r["errors"] and "target" not in r
 
 
 def test_prepare_blocks_overlapping_folders(env):
@@ -190,36 +195,39 @@ def test_full_import_copy_and_register(env):
     svc, lr, events, card, base = env
     scan(svc, card)
     before = {p: (p.stat().st_size, p.stat().st_mtime_ns) for p in card.rglob("*") if p.is_file()}
-    assert svc.start("雪山")["ok"]
+    assert svc.start("雪山")["ok"]                                       # 旧版的分类参数被忽略
     assert wait(lambda: svc.stage == "done")
     res = svc.state()["result"]
     assert res["counts"]["copied"] == 3 and res["counts"]["lr_ok"] == 3 and res["problems"] == []
-    assert sorted(p.name for p in (base / "雪山").iterdir()) == ["A.ARW", "B.JPG", "C.HEIC"]
-    assert all(str(base / "雪山") in c for c in lr.calls)
+    assert sorted(p.name for p in (base / "2025" / "2025-12-31").iterdir()) == ["A.ARW", "B.JPG"]
+    assert [p.name for p in (base / "2026" / "2026-01-02").iterdir()] == ["C.HEIC"]
+    assert not (base / "雪山").exists()
+    assert all(str(base) in c and ("2025-12-31" in c or "2026-01-02" in c) for c in lr.calls)
     after = {p: (p.stat().st_size, p.stat().st_mtime_ns) for p in card.rglob("*") if p.is_file()}
     assert before == after                                              # 原片丝毫未变
     assert [e["type"] for e in events if e["type"].startswith("import")][-1] == "import_done"
 
 
-def test_flat_import_when_category_blank(env):
+def test_import_without_category_uses_date_folders(env):
     svc, lr, events, card, base = env
     scan(svc, card)
     assert svc.start("")["ok"] and wait(lambda: svc.stage == "done")
-    assert sorted(p.name for p in base.iterdir()) == ["A.ARW", "B.JPG", "C.HEIC"]
+    assert sorted(p.name for p in base.iterdir()) == ["2025", "2026"]
+    assert sorted(p.name for p in base.rglob("*") if p.is_file()) == ["A.ARW", "B.JPG", "C.HEIC"]
 
 
-def test_rerun_skips_and_already(env):
+def test_rerun_finds_everything_already_in_library(env):
     svc, lr, events, card, base = env
     scan(svc, card)
     svc.start("")
     wait(lambda: svc.stage == "done")
     svc.close()
+    calls = len(lr.calls)
     scan(svc, card)
-    svc.start("")
-    wait(lambda: svc.stage == "done")
-    c = svc.state()["result"]["counts"]
-    assert c["skipped"] == 3 and c["copied"] == 0 and c["lr_ok"] == 3
-    assert len(list(base.iterdir())) == 3
+    p = svc.prepare("")
+    assert not p["can_start"] and "all_duplicate" in p["errors"] and p["duplicates"]["in_library"] == 3 and p["to_copy"]["count"] == 0
+    assert not svc.start("")["ok"]
+    assert len(lr.calls) == calls and len(list(base.rglob("*.*"))) == 3
 
 
 def test_readonly_blocks_before_anything(env):
@@ -259,7 +267,7 @@ def test_start_creates_missing_base_only_after_consent(env, tmp_path):
     r = svc.start("")
     assert not r["ok"] and r["needs_create"] and not new.exists()
     assert svc.start("", create_base=True)["ok"] and wait(lambda: svc.stage == "done")
-    assert len(list(new.iterdir())) == 3
+    assert len([p for p in new.rglob("*") if p.is_file()]) == 3
 
 
 def test_start_without_scan_and_double_start(env):
@@ -291,21 +299,23 @@ def test_cancel_during_copy_keeps_finished(env):
     assert svc.start("")["ok"] and wait(lambda: svc.stage == "done")
     res = svc.state()["result"]
     assert res["cancelled"] and res["counts"]["copied"] == 1
-    assert len(list(base.iterdir())) == 1 and not list(base.glob("*.part*"))
+    assert len([p for p in base.rglob("*") if p.is_file()]) == 1 and not list(base.rglob("*.part*"))
 
 
-def test_category_cannot_escape_base_via_junction(env, tmp_path):
+def test_date_folder_cannot_escape_base_via_junction(env, tmp_path):
     if os.name != "nt":
         pytest.skip("联接点仅 Windows")
     svc, lr, events, card, base = env
     outside = tmp_path / "outside"
     outside.mkdir()
-    r = subprocess.run(["cmd", "/c", "mklink", "/J", str(base / "evil"), str(outside)], capture_output=True)
+    r = subprocess.run(["cmd", "/c", "mklink", "/J", str(base / "2025"), str(outside)], capture_output=True)
     if r.returncode != 0:
         pytest.skip("无法创建联接点")
     scan(svc, card)
-    res = svc.start("evil")
-    assert not res["ok"] and "不在软件文件夹" in res["message"] and list(outside.iterdir()) == []
+    assert svc.start("")["ok"] and wait(lambda: svc.stage == "done")
+    res = svc.state()["result"]
+    assert res["counts"]["failed"] == 2 and res["counts"]["copied"] == 1 and any("不在软件文件夹" in p["reason"] for p in res["problems"])
+    assert list(outside.iterdir()) == []
 
 
 def test_library_listing(env):
@@ -365,10 +375,11 @@ def test_api_choose_source_folder_flow(api, tmp_path):
     assert r["ok"] and r["path"] == str(card)
     assert wait(lambda: api.import_state()["stage"] == "ready")
     assert api.import_prepare("")["can_start"]
-    assert api.import_start("2026")["ok"]
+    assert api.import_start("2026")["ok"]                                  # 旧前端可能还传分类：被忽略、不报错
     assert wait(lambda: api.import_state()["stage"] == "done")
     assert api.import_state()["result"]["counts"]["lr_ok"] == 1
-    assert (lib / "2026" / "A.ARW").exists()
+    day = datetime.fromtimestamp((card / "A.ARW").stat().st_mtime)
+    assert (lib / f"{day:%Y}" / f"{day:%Y-%m-%d}" / "A.ARW").exists()
     assert api.import_close()["ok"] and api.import_state()["stage"] == "idle"
 
 

@@ -16,6 +16,8 @@ import threading
 import time
 from pathlib import Path
 
+import capture_date
+
 PHOTO_EXTS = frozenset("jpg jpeg arw cr2 cr3 nef nrw raf orf rw2 dng tif tiff heic heif png".split())   # 与插件一致
 RAW_EXTS = frozenset("arw cr2 cr3 nef nrw raf orf rw2 dng".split())
 JPEG_EXTS = frozenset("jpg jpeg".split())
@@ -182,6 +184,164 @@ def scan_folder(root, should_cancel=lambda: False, progress=None, max_files: int
     return res
 
 
+# ---------------------------------------------------------------- 日期文件夹与全库去重（1.2.0）
+DATE_REL_RE = re.compile(r"^\d{4}/\d{4}-\d{2}-\d{2}$")
+LIBRARY_MAX_DEPTH = 12
+
+
+class Cancelled(Exception):
+    """分析被用户取消。"""
+
+
+def hash_file(path, should_cancel=lambda: False) -> bytes:
+    """SHA-256；每读一块检查一次取消。"""
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            if should_cancel():
+                raise Cancelled()
+            block = f.read(CHUNK)
+            if not block:
+                break
+            digest.update(block)
+    return digest.digest()
+
+
+def library_sizes(base, should_cancel=lambda: False, progress=None) -> dict[int, list[str]]:
+    """软件文件夹（库）里所有照片文件的 {大小: [路径]}，不限分类/日期文件夹（深度上限 LIBRARY_MAX_DEPTH）。
+    只读；不跟随链接，跳过隐藏/系统目录；.part 等非照片文件不计。库不存在返回 {}。取消时抛 Cancelled。"""
+    out: dict[int, list[str]] = {}
+    stack = [(str(base), 0)]
+    seen = 0
+    last = 0.0
+    while stack:
+        if should_cancel():
+            raise Cancelled()
+        d, depth = stack.pop()
+        try:
+            with os.scandir(d) as it:
+                entries = list(it)
+        except OSError:
+            continue
+        for e in entries:
+            try:
+                st = e.stat(follow_symlinks=False)
+            except OSError:
+                continue
+            if _is_link_or_reparse(st):
+                continue
+            if stat.S_ISDIR(st.st_mode):
+                if depth < LIBRARY_MAX_DEPTH and not e.name.startswith(".") and e.name.lower() not in SKIP_DIR_NAMES \
+                        and not _attrs(st) & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM):
+                    stack.append((e.path, depth + 1))
+                continue
+            if stat.S_ISREG(st.st_mode) and "." in e.name and e.name.rsplit(".", 1)[-1].lower() in PHOTO_EXTS:
+                out.setdefault(st.st_size, []).append(e.path)
+                seen += 1
+        now = time.monotonic()
+        if progress and now - last > 0.3:
+            last = now
+            progress("library", seen, 0)
+    return out
+
+
+def plan_import(files, base, should_cancel=lambda: False, progress=None, *, check_library: bool = True) -> dict:
+    """为每个来源文件定下日期文件夹，并找出重复。files = [(路径, 大小)]（来自 scan_folder）。
+
+    返回 {"items": [{"src","size","rel","status","dup_of"}], "library_files", "cancelled"}：
+      status = "copy"（要复制）| "dup_library"（库里已有内容相同的文件）| "dup_batch"（同一批里前面已有内容相同的文件，只复制第一份）。
+    “内容相同”= 大小相同且 SHA-256 相同；惰性策略：只有大小与库里文件或本批其他文件相同的才算哈希，没有持久索引。
+    只读；取消时返回 cancelled=True（已算的结果丢弃）；进度回调 progress(阶段, 已完成, 总数)。"""
+    files = list(files)
+    res = {"items": [], "library_files": 0, "cancelled": False}
+    try:
+        lib = library_sizes(base, should_cancel, progress) if (check_library and base and os.path.isdir(str(base))) else {}
+        res["library_files"] = sum(len(v) for v in lib.values())
+        by_size: dict[int, int] = {}
+        for _p, size in files:
+            by_size[size] = by_size.get(size, 0) + 1
+        hashes: dict[str, bytes] = {}
+
+        def digest(path: str) -> bytes:
+            h = hashes.get(path)
+            if h is None:
+                h = hashes[path] = hash_file(path, should_cancel)
+            return h
+
+        first_of: dict[tuple[int, bytes], str] = {}
+        n = len(files)
+        for i, (path, size) in enumerate(files):
+            if should_cancel():
+                raise Cancelled()
+            if progress:
+                progress("checking", i, n)
+            try:
+                st = os.stat(path)
+                mtime = st.st_mtime
+            except OSError:
+                mtime = None
+            rel = capture_date.date_folder(path, mtime)
+            item = {"src": str(path), "size": size, "rel": rel, "status": "copy", "dup_of": ""}
+            cands = lib.get(size, [])
+            if cands or by_size.get(size, 0) > 1:
+                try:
+                    h = digest(str(path))
+                except OSError:
+                    h = None                      # 读不出来：不当作重复，复制阶段会给出具体失败原因
+                if h is not None:
+                    for c in cands:
+                        try:
+                            if os.path.normcase(os.path.abspath(c)) == os.path.normcase(os.path.abspath(str(path))):
+                                continue
+                            if digest(c) == h:
+                                item.update(status="dup_library", dup_of=c)
+                                break
+                        except OSError:
+                            continue
+                    if item["status"] == "copy":
+                        prev = first_of.get((size, h))
+                        if prev is not None:
+                            item.update(status="dup_batch", dup_of=prev)
+                        else:
+                            first_of[(size, h)] = str(path)
+            res["items"].append(item)
+        if progress:
+            progress("checking", n, n)
+    except Cancelled:
+        res["cancelled"] = True
+        res["items"] = []
+    return res
+
+
+def summarize_plan(items, max_days: int = 30) -> dict:
+    """把 plan_import 的结果整理成给界面的摘要：
+    {"date_summary": [{"day","count"}]（要复制的照片按拍摄日期，最多 max_days 项，按日期升序）, "date_more": {"days","count"} | None,
+     "duplicates": {"count","size","size_text","in_library","in_batch"}, "to_copy": {"count","size","size_text"}}"""
+    days: dict[str, int] = {}
+    to_copy_n = to_copy_size = 0
+    dup_lib = dup_batch = dup_size = 0
+    for it in items:
+        if it["status"] == "copy":
+            to_copy_n += 1
+            to_copy_size += it["size"]
+            day = it["rel"].rsplit("/", 1)[-1]
+            days[day] = days.get(day, 0) + 1
+        else:
+            dup_size += it["size"]
+            if it["status"] == "dup_library":
+                dup_lib += 1
+            else:
+                dup_batch += 1
+    ordered = sorted(days.items())
+    shown = [{"day": d, "count": c} for d, c in ordered[:max_days]]
+    rest = ordered[max_days:]
+    more = {"days": len(rest), "count": sum(c for _d, c in rest)} if rest else None
+    return {"date_summary": shown, "date_more": more,
+            "duplicates": {"count": dup_lib + dup_batch, "size": dup_size, "size_text": fmt_size(dup_size),
+                           "in_library": dup_lib, "in_batch": dup_batch},
+            "to_copy": {"count": to_copy_n, "size": to_copy_size, "size_text": fmt_size(to_copy_size)}}
+
+
 # ---------------------------------------------------------------- 复制
 class CopyResult(dict):
     """{"status": copied|skipped|failed, "dest", "reason"}"""
@@ -337,12 +497,16 @@ def add_to_lightroom(path: str, import_fn, *, sleep=time.sleep) -> dict:
 
 # ---------------------------------------------------------------- 导入任务
 class ImportJob:
-    """顺序处理：逐个文件 复制 -> 加入 Lightroom。cancel() 后在当前文件处理完停止。"""
+    """顺序处理：逐个文件 复制 -> 加入 Lightroom。cancel() 后在当前文件处理完停止。
+
+    每个文件有自己的目标文件夹：files 的元素是 (源路径, 大小, 相对库的日期文件夹)，日期文件夹形如 "2026/2026-11-14"，
+    "" 表示直接放在库根下；只有 (源路径, 大小) 时由本任务按拍摄日期（取不到用修改时间）自己算。"""
 
     def __init__(self, files, folder, *, import_fn=None, connected=lambda: True, emit=lambda ev: None,
-                 clock=time.monotonic, sleep=time.sleep, free_check=None, mode="import"):
-        self.files = list(files)                 # [(源路径, 大小)]；mode="retry" 时是 [(已复制的目标路径, 大小)]
-        self.folder = Path(folder)
+                 clock=time.monotonic, sleep=time.sleep, free_check=None, mode="import", duplicates=None):
+        self.files = list(files)                 # [(源路径, 大小[, 日期文件夹])]；mode="retry" 时是 [(已复制的目标路径, 大小)]
+        self.folder = Path(folder)               # 库（软件文件夹）
+        self.duplicates = {"library": 0, "batch": 0, "size": 0, **(duplicates or {})}   # 扫描阶段发现并跳过的重复，不在 files 里
         self.import_fn, self.connected, self.emit = import_fn, connected, emit
         self._clock, self._sleep, self._free = clock, sleep, free_check
         self.mode = mode
@@ -365,7 +529,8 @@ class ImportJob:
         self._thread.start()
 
     def counts(self) -> dict:
-        c = {"copied": 0, "skipped": 0, "failed": 0, "lr_ok": 0, "lr_uncertain": 0, "lr_pending": 0, "lr_failed": 0}
+        c = {"copied": 0, "skipped": 0, "failed": 0, "lr_ok": 0, "lr_uncertain": 0, "lr_pending": 0, "lr_failed": 0,
+             "duplicate": self.duplicates["library"] + self.duplicates["batch"]}
         for it in self.items:
             if it["copy"] in ("copied", "skipped", "failed"):
                 c[it["copy"]] += 1
@@ -383,7 +548,9 @@ class ImportJob:
     def snapshot(self) -> dict:
         el = (self._clock() - self.started) if self.state == "running" else self.elapsed
         return {"state": self.state, "i": self.done_count, "n": len(self.files), "name": self.current,
-                "elapsed": round(el, 1), "counts": self.counts(), "cancelled": self.cancelled, "mode": self.mode}
+                "elapsed": round(el, 1), "counts": self.counts(), "cancelled": self.cancelled, "mode": self.mode,
+                "duplicates": {"count": self.duplicates["library"] + self.duplicates["batch"], "in_library": self.duplicates["library"],
+                               "in_batch": self.duplicates["batch"], "size": self.duplicates["size"]}}
 
     def _progress(self) -> None:
         self.emit({"type": "import_progress", **self.snapshot()})
@@ -392,7 +559,9 @@ class ImportJob:
         self.started = self._clock()
         self.state = "running"
         try:
-            for idx, (path, size) in enumerate(self.files):
+            for idx, entry in enumerate(self.files):
+                path = entry[0]
+                rel = entry[2] if len(entry) > 2 else None
                 if self._cancel.is_set():
                     self.cancelled = True
                     break
@@ -403,7 +572,11 @@ class ImportJob:
                 if self.mode == "retry":
                     item.update(copy="copied", dest=str(path))
                 else:
-                    r = copy_one(path, self.folder, free_check=self._free)
+                    target, why = self._target_folder(path, rel)
+                    if target is None:
+                        r = CopyResult(status="failed", dest="", reason=why)
+                    else:
+                        r = copy_one(path, target, free_check=self._free)
                     item.update(copy=r["status"], dest=r["dest"], reason=r["reason"] if r["status"] == "failed" else "")
                 if item["copy"] in ("copied", "skipped") and self.import_fn is not None:
                     if not self.connected():
@@ -420,6 +593,28 @@ class ImportJob:
             self.current = ""
             self.state = "done"
             self.emit({"type": "import_done", **self.result()})
+
+    def _target_folder(self, src, rel) -> tuple[Path | None, str]:
+        """这个文件的目标文件夹（必要时创建），且必须真的落在库之内。返回 (文件夹或 None, 中文原因)。"""
+        if rel is None:
+            try:
+                mtime = os.stat(src).st_mtime
+            except OSError:
+                mtime = None
+            rel = capture_date.date_folder(src, mtime)
+        if rel != "" and not DATE_REL_RE.match(rel):
+            return None, "目标日期文件夹无效，已拒绝。"
+        folder = self.folder / rel if rel else self.folder
+        escaped = "目标位置不在软件文件夹之内，已拒绝。"
+        if not _contains(_real(self.folder), _real(folder)):         # 先查再建：库里已有的 年份 文件夹可能其实是指向别处的联接点
+            return None, escaped
+        try:
+            os.makedirs(folder, exist_ok=True)
+        except OSError as e:
+            return None, f"无法创建目标文件夹：{e.strerror or e}"
+        if not _contains(_real(self.folder), _real(folder)):         # 建完再查一次（防止检查与创建之间被替换）
+            return None, escaped
+        return folder, ""
 
     def result(self) -> dict:
         problems = [{"name": it["name"], "copy": it["copy"], "lr": it["lr"], "reason": it["reason"]}
@@ -443,9 +638,13 @@ class ImportJob:
 
 
 # ---------------------------------------------------------------- 软件文件夹目录树（只读）
+TREE_MAX_DEPTH = 3
+
+
 def library_tree(base, limit: int = 300) -> dict:
     """软件文件夹的只读目录：{"exists", "total", "groups": [{"name", "count", "files": [{"name","size"}]}], "shown", "more"}。
-    第一层：根目录下的照片归“（未分类）”，每个子文件夹为一个分类；只列到两层，.part 与非照片文件不计。"""
+    根目录下的照片归“（未分类）”，其余按所在文件夹（相对库，用 / 连接，例如旧的分类文件夹或 2026/2026-11-14）分组；
+    最多往下找 TREE_MAX_DEPTH 层，.part 与非照片文件不计。"""
     base = Path(base)
     out = {"exists": base.is_dir(), "total": 0, "groups": [], "shown": 0, "more": 0}
     if not out["exists"]:
@@ -467,19 +666,22 @@ def library_tree(base, limit: int = 300) -> dict:
             pass
         return sorted(res, key=lambda f: f["name"].lower())
 
-    root_files = photos(base)
-    if root_files:
-        groups["（未分类）"] = root_files
-    try:
-        with os.scandir(base) as it:
-            dirs = sorted((e for e in it if e.is_dir(follow_symlinks=False) and not e.name.startswith(".")),
-                          key=lambda e: e.name.lower())
-    except OSError:
-        dirs = []
-    for e in dirs:
-        fs = photos(Path(e.path))
+    def visit(folder: Path, rel: str, depth: int) -> None:
+        fs = photos(folder)
         if fs:
-            groups[e.name] = fs
+            groups[rel or "（未分类）"] = fs
+        if depth >= TREE_MAX_DEPTH:
+            return
+        try:
+            with os.scandir(folder) as it:
+                dirs = sorted((e for e in it if e.is_dir(follow_symlinks=False) and not e.name.startswith(".")),
+                              key=lambda e: e.name.lower())
+        except OSError:
+            return
+        for e in dirs:
+            visit(Path(e.path), f"{rel}/{e.name}" if rel else e.name, depth + 1)
+
+    visit(base, "", 0)
     shown = 0
     for name, fs in groups.items():
         out["total"] += len(fs)

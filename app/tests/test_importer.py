@@ -438,7 +438,7 @@ def files_of(tmp_path, specs):
     out = []
     for rel, data in specs:
         p = make(tmp_path, "card/" + rel, data=data)
-        out.append((str(p), len(data)))
+        out.append((str(p), len(data), ""))          # "" = 直接放在库根（旧的平铺行为），日期文件夹的行为在文件后面单独测
     return out
 
 
@@ -535,7 +535,7 @@ def test_job_cancel_stops_after_current_file(tmp_path):
     job.run()
     assert job.cancelled and job.counts()["copied"] == 2 and len(job.items) == 2
     assert sorted(p.name for p in lib.iterdir()) == ["0.jpg", "1.jpg"]            # 已完成的保留，其余没复制，没有 .part
-    assert all(os.path.exists(p) for p, _ in fs)                                           # 原片都在
+    assert all(os.path.exists(p) for p, *_ in fs)                                           # 原片都在
     assert events[-1]["cancelled"] is True
 
 
