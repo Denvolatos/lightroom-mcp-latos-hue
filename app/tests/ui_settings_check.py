@@ -42,7 +42,7 @@ async function run(){
       ok((t.getAttribute('aria-selected') === 'true') === (i === 0), k + ' aria-selected 不对'); ok(vis(p) === (i === 0), k + ' 面板可见性不对'); });
     ok($$('#s_folder').value === 'D:\\示例\\照片库', '照片库位置没填：' + $$('#s_folder').value);
     ok($$('#s_edge').options.length === 4 && $$('#s_edge').value === '1024', '预览清晰度不对');
-    ok($$('#s_theme').value === (q.get('theme') || 'system') && $$('#s_fsize').value === 'standard', '外观默认值不对');
+    ok($$('#s_theme').options.length === 4 && Array.from($$('#s_theme').options).map(o => o.textContent).join(',') === '跟随系统,浅色纸感,夜蓝玻璃,暗室', '主题下拉应有四项'); ok($$('#s_theme').value === (q.get('theme') || 'system') && $$('#s_fsize').value === 'standard', '外观默认值不对');
     ok(vis($$('#s_wizard')) && vis($$('#s_upd')), '常规里应有环境检查入口和检查更新开关');
     const all = $$('#smask').innerText + Array.from($$('#smask').querySelectorAll('[title],[aria-label]')).map(e => (e.title||'') + (e.getAttribute('aria-label')||'')).join('');
     ['托盘', '开机自启', '开机启动', '关闭窗口', '最小化到'].forEach(w => ok(all.indexOf(w) < 0, '设置里不应出现“' + w + '”'));
@@ -124,7 +124,7 @@ async function run(){
     const c = window.__SAVED__[0] || {}; ok(c.theme === 'dark' && c.font_size === 'xlarge', '保存应带 theme/font_size ' + JSON.stringify(c));
     ok(root.dataset.theme === 'dark' && getComputedStyle(root).fontSize === '20px', '保存后外观应保持');
     ok(localStorage.getItem('lh_theme') === 'dark' && localStorage.getItem('lh_font_size') === 'xlarge', '保存后应更新本地缓存');
-    await openAt(); $$('#s_theme').value = 'light'; $$('#s_theme').onchange(); closeSettings(); await wait(50);
+    await openAt(); $$('#s_theme').value = 'paper'; $$('#s_theme').onchange(); closeSettings(); await wait(50);
     ok(root.dataset.theme === 'dark', '点遮罩/关闭取消后也应恢复为已保存的深色');
   }
   if (T === 'readonly') {
@@ -161,7 +161,7 @@ async function run(){
       const go = Array.from(document.querySelectorAll('.mask.show .dialog.small button')).find(x => x.textContent === '恢复默认'); go.click(); await wait(300);
       ok(calls('reset_settings').length === 1, '确认后应调用一次 reset_settings'); ok(!$$('#m_reset').disabled, '恢复结束后按钮必须恢复');
       ok($$('#m_reset_msg').textContent.indexOf('已恢复默认设置') >= 0, '应显示结果：' + $$('#m_reset_msg').textContent);
-      ok($$('#s_theme').value === 'system' && document.documentElement.dataset.theme === 'light' && getComputedStyle(document.documentElement).fontSize === '16px', '恢复后外观应回到默认');
+      ok($$('#s_theme').value === 'system' && document.documentElement.dataset.theme === 'paper' && getComputedStyle(document.documentElement).fontSize === '16px', '恢复后外观应回到默认');
     }
   }
   if (T === 'about') {
@@ -233,7 +233,7 @@ def main(out: Path) -> int:
     srv = Server(build_page(TAIL))
     try:
         jobs = [
-            ("settings_general_light", "theme=light&t=general", 1440, 900, False, True),
+            ("settings_general_paper", "theme=paper&t=general", 1440, 900, False, True),
             ("settings_general_dark", "theme=dark&t=general", 1440, 900, False, True),
             ("settings_tabs", "t=tabs", 1100, 700, False, False),
             ("settings_error", "t=error", 1440, 900, False, True),
@@ -255,7 +255,7 @@ def main(out: Path) -> int:
             ("settings_maint_cachethrow", "t=maint&cachefail=throw", 1100, 700, False, False),
             ("settings_maint_diag_cancel", "t=maint&diag=cancel", 1100, 700, False, False),
             ("settings_maint_diag_fail", "t=maint&diag=fail", 1100, 700, False, False),
-            ("settings_about_light", "theme=light&t=about", 1440, 900, False, True),
+            ("settings_about_paper", "theme=paper&t=about", 1440, 900, False, True),
             ("settings_about_dark", "theme=dark&t=about", 1440, 900, False, True),
             ("settings_about_linkfail", "t=about_linkfail&linkfail=1", 1100, 700, False, False),
             ("settings_about_linkmsg", "t=about_linkmsg&linkfail=msg", 1100, 700, False, False),
@@ -266,9 +266,9 @@ def main(out: Path) -> int:
             ("settings_lr_timeout", "t=lr_timeout", 1440, 900, False, False),
         ]
         for f in ("small", "standard", "large", "xlarge"):
-            for th in ("light", "dark"):
+            for th in ("paper", "glass", "dark"):
                 for w in (800, 1100, 1440):
-                    jobs.append((f"settings_layout_{f}_{th}_{w}", f"t=layout&font={f}&theme={th}", w, 700 if w < 1440 else 860, False, f == "large" and w == 800 and th == "light"))
+                    jobs.append((f"settings_layout_{f}_{th}_{w}", f"t=layout&font={f}&theme={th}", w, 700 if w < 1440 else 860, False, f == "large" and w == 800 and th == "glass"))
         code = run_jobs(srv, jobs, out)
     finally:
         srv.close()

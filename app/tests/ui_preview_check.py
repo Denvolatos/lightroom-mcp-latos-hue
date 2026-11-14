@@ -38,7 +38,7 @@ setTimeout(()=>{
     window.onClaudeEvent({type:'adjust', rows:[{label:'曝光', before:'0', after:'0.1', status:'已应用', edit_id:'e1', reason:'整体略微提亮'}]});
     window.onClaudeEvent({type:'status', state:'connected', text:'Lightroom 已连接', hint:''});
   }
-  if (scen === 'zoom') document.getElementById('zoom').click();
+  if (scen === 'zoom') document.querySelector('#zoomctl .zp[data-z="100"]').click();
   if (scen === 'busy') window.onClaudeEvent(Object.assign({loading:true}, S.ok));
 }, 50);
 </script>"""

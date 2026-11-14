@@ -52,7 +52,12 @@ FAKE_API = r"""<script>
   const A = {
     send: ()=>Promise.resolve({ok:true}), stop(){}, reset(){}, answer(){}, undo(){}, restore_original(){},
     status: ()=>Promise.resolve({state:'connected', text:'Lightroom 已连接', hint:'', photo:{id:'P', name:'DSC08238.ARW'}}),
-    preview_state: ()=>Promise.resolve({type:'preview', state:'none', message:'Lightroom 中未选中照片'}), set_preview_edge: ()=>Promise.resolve({ok:true}),
+    preview_state: ()=>Promise.resolve(({
+      ok: {type:'preview', state:'ok', photo:{id:'P', name:'DSC08238.ARW', camera:'Sony ILCE-7CM2', iso:'ISO 100', aperture:'ƒ / 8.0', shutter:'1/800 秒', focal:'20 mm', format:'RAW', size:'1600 × 1000'},
+           initial:{url:'/img/initial.jpg', w:1600, h:1000, version:'v0'}, current:{url:'/img/adjusted.jpg', w:1600, h:1000, version:'v1'}, same:false, edge:1600},
+      error: {type:'preview', state:'error', message:'无法读取预览：请确认 Lightroom 已打开并选中了照片'},
+      loading: {type:'preview', state:'loading', message:'正在读取预览', photo:{id:'P', name:'DSC08238.ARW'}}
+    })[q.get('pv')] || {type:'preview', state:'none', message:'Lightroom 中未选中照片'}), set_preview_edge: ()=>Promise.resolve({ok:true}),
     autolaunch_state: ()=>Promise.resolve({state:'idle', message:''}),
     get_settings: ()=>(q.get('delay') ? new Promise(r=>setTimeout(r, 1500)) : Promise.resolve()).then(()=>({settings: full(), readonly, lightroom_detected:q.get('lrnone')?'':'C:\\Program Files\\Adobe\\Lightroom.exe', providers, current_provider:'claude', edges:[768,1024,1536,2048],
       about:{app_version:'1.3.0', lightroom_version:'15.0.0', plugin_version:'1.3.0', data_dir:'~/LrMcp', project_url:'https://github.com/Denvolatos/lightroom-mcp-latos-hue'}})),
@@ -97,6 +102,13 @@ window.ok = (c, m) => { if (!c) window.__bad.push(m); };
 window.rgb = c => { const m = String(c).match(/[\d.]+/g) || []; return m.slice(0,3).map(Number); };
 window.lum = c => { const [r,g,b] = rgb(c).map(v => { v/=255; return v<=0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4); }); return 0.2126*r+0.7152*g+0.0722*b; };
 window.contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x,y)+0.05)/(Math.min(x,y)+0.05); };
+/* 元素的“实际底色”：从元素往上叠加半透明背景，直到遇到不透明的，最后叠在 body 底色上（渐变背景图不计，按底色算） */
+window.effBg = el => { const layers = []; let opaque = false;
+  for (let e = el; e && e.nodeType === 1 && !opaque; e = e.parentElement) { const m = (getComputedStyle(e).backgroundColor.match(/[\d.]+/g) || []).map(Number); if (m.length < 3) continue;
+    const a = m.length > 3 ? m[3] : 1; if (a > 0) layers.push([m[0], m[1], m[2], a]); if (a >= 1) opaque = true; }
+  let base = opaque ? layers.pop().slice(0, 3) : rgb(getComputedStyle(document.body).backgroundColor);
+  layers.reverse().forEach(l => { base = [0,1,2].map(i => Math.round(l[i] * l[3] + base[i] * (1 - l[3]))); });
+  return 'rgb(' + base.join(',') + ')'; };
 window.pointer = (el, type, x, y, extra) => el.dispatchEvent(new PointerEvent(type, Object.assign({bubbles:true, cancelable:true, clientX:x, clientY:y, pointerId:1, pointerType:'mouse', isPrimary:true, button:0, buttons:type==='pointerup'?0:1}, extra||{})));
 window.__finish = (name, extra) => { const pre = document.createElement('pre'); pre.id = 'chk'; pre.style.cssText = 'position:fixed;left:-9999px;top:0';
   pre.textContent = 'CHK[' + name + ']:' + (window.__bad.length ? window.__bad.join(' | ') : 'OK') + (extra ? ' ' + extra : ''); document.body.appendChild(pre); };
@@ -111,13 +123,24 @@ def build_page(tail: str) -> bytes:
 
 
 class Server:
-    def __init__(self, page: bytes):
+    def __init__(self, page: bytes, extra: dict | None = None):
+        """extra: {"/img/a.jpg": (bytes, "image/jpeg")} 额外的静态响应（测试图片等）。"""
+        extra = extra or {}
+
         class H(BaseHTTPRequestHandler):
             def log_message(self, *a):
                 pass
 
             def do_GET(self):
                 if serve_static(self):
+                    return
+                hit = extra.get(self.path.split("?")[0])
+                if hit:
+                    self.send_response(200)
+                    self.send_header("Content-Type", hit[1])
+                    self.send_header("Content-Length", str(len(hit[0])))
+                    self.end_headers()
+                    self.wfile.write(hit[0])
                     return
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -168,3 +191,24 @@ def run_jobs(server: Server, jobs, out: Path) -> int:
 
 def dumps(o) -> str:
     return json.dumps(o, ensure_ascii=False)
+
+
+def sample_jpeg(w: int, h: int, warm: bool = False) -> bytes:
+    """测试用的渐变图（不是真实照片）：带网格线，方便肉眼确认缩放和平移。"""
+    import io
+
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", (w, h))
+    px = im.load()
+    for y in range(h):
+        for x in range(w):
+            px[x, y] = (int(40 + 180 * x / w) + (25 if warm else 0), int(90 + 100 * y / h), int(200 - 120 * x / w)) if True else (0, 0, 0)
+    d = ImageDraw.Draw(im)
+    for gx in range(0, w, 100):
+        d.line([(gx, 0), (gx, h)], fill=(255, 255, 255), width=1)
+    for gy in range(0, h, 100):
+        d.line([(0, gy), (w, gy)], fill=(255, 255, 255), width=1)
+    d.rectangle([w // 2 - 40, h // 2 - 40, w // 2 + 40, h // 2 + 40], outline=(255, 220, 0), width=4)
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=85)
+    return buf.getvalue()
