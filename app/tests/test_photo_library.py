@@ -1001,6 +1001,25 @@ def test_api_tracker_change_invalidates_current_photo(api):
     assert "101" not in api.library_state()["thumbs"]
 
 
+def test_api_adjust_event_invalidates_only_that_photo(api):
+    """1.1.1：一次调整只让涉及的那张照片的缩略图失效，本次会话里调整过的其他照片保留缓存。"""
+    touch(api._base / "A.jpg")
+    touch(api._base / "B.jpg")
+    api._photolib.lr.catalog = [cat(1, api._base / "A.jpg"), cat(2, api._base / "B.jpg")]
+    api.library_refresh()
+    api.library_thumbnails(["101", "102"])
+    while api._photolib.process_thumbs_once():
+        pass
+    api._tracker.rows.append({"rid": "old:Exposure2012", "edit_id": "E0", "key": "Exposure2012", "label": "曝光", "before": "0",
+                              "after": "0.1", "reason": "", "photo": "101", "status": "已应用"})
+    api._backend.photo = {"id": "101", "name": "A.jpg"}
+    api._on_event({"type": "tool", "name": "lr_set_develop", "id": "T2", "input": {"photo": "102", "changes": {"Exposure2012": 0.2}}})
+    thumbs = api.library_state()["thumbs"]
+    assert "102" not in thumbs and "101" in thumbs                             # 以前两张都会失效
+    api._on_event({"type": "text", "text": "随便说说"})                       # 表格没变化：什么都不失效
+    assert "101" in api.library_state()["thumbs"]
+
+
 def test_api_signatures_take_no_paths(api):
     assert list(inspect.signature(api.library_state).parameters) == []
     assert list(inspect.signature(api.library_refresh).parameters) == []
