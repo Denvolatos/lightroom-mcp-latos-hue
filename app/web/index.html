@@ -1042,7 +1042,16 @@ function previewArrived(ev){
 }
 function toggleZoom(){ if(!REAL()) return; actual=!actual; $('#zoom').textContent = actual ? '100%' : '适合窗口'; renderStage(); }
 $('#zoom').onclick=toggleZoom;
-$('#edge').onchange=()=>{ if(REAL()) window.pywebview.api.set_preview_edge(parseInt($('#edge').value,10)); };
+/* 顶栏的预览清晰度：立即生效并写进设置（只提交这一项），重启和保存设置时都不会被改回去 */
+$('#edge').onchange=async()=>{
+  if (!REAL()) return;
+  const v = parseInt($('#edge').value,10), api = window.pywebview.api;
+  let r = null;
+  try { r = await api.save_settings({preview_edge: v}, false); } catch(e){}
+  if (r && r.ok){ if (SET && SET.settings) SET.settings.preview_edge = r.settings.preview_edge; return; }
+  try { await api.set_preview_edge(v); } catch(e){}      // 没能写进设置：至少这次先生效
+  toast('预览清晰度已切换，但没能保存到设置，下次打开会恢复原值。');
+};
 setTimeout(()=>{ if(!REAL()){ noBackend=true; renderStage(); } }, 2500);
 
 /* ---- right ---- */
@@ -1968,14 +1977,24 @@ function fillSettings(r){
   $('#a_plugin').textContent = a.plugin_version || '未连接，无法读取'; $('#a_data').textContent = a.data_dir; $('#a_url').textContent = a.project_url;
 }
 function clearSettingsErrors(){ ['folder','provider','edge','lrpath'].forEach(k=>{ $('#e_'+k).textContent=''; }); $('#s_msg').textContent=''; $('#s_msg').className='msg-line'; }
+/* 读取设置期间：字段和“保存”都变灰，避免改了又被读回来的值冲掉，或把旧值存回去 */
+let SETLOAD = 0;
+function settingsLock(on){
+  document.querySelectorAll('#smask .body button, #smask .body input, #smask .body select, #s_save').forEach(e=>{ e.disabled = !!on; });
+}
 async function openSettings(){
   if (!REAL()) return;
+  const tok = ++SETLOAD;
   clearSettingsErrors(); $('#smask').classList.add('show');
-  $('#s_msg').textContent = '正在读取设置…';
-  try { fillSettings(await window.pywebview.api.get_settings(true)); $('#s_msg').textContent = SET.settings.base_folder ? '' : '请先选择照片工作文件夹。'; }
-  catch(e){ $('#s_msg').textContent='无法读取设置，请重试。'; $('#s_msg').className='msg-line bad'; }
+  $('#s_msg').textContent = '正在读取设置…'; settingsLock(true);
+  let r = null;
+  try { r = await window.pywebview.api.get_settings(true); } catch(e){}
+  if (tok!==SETLOAD) return;                       // 期间又打开了一次：以后一次为准
+  if (!r || !r.settings){ $('#s_msg').textContent='无法读取设置，请关闭后重试。'; $('#s_msg').className='msg-line bad'; return; }   // 读不到时不能保存
+  settingsLock(false);
+  fillSettings(r); $('#s_msg').textContent = SET.settings.base_folder ? '' : '请先选择照片工作文件夹。';
 }
-function closeSettings(){ $('#smask').classList.remove('show'); }
+function closeSettings(){ $('#smask').classList.remove('show'); SETLOAD++; }
 $('#s_cancel').onclick=closeSettings;
 $('#smask').onclick=e=>{ if(e.target.id==='smask') closeSettings(); };
 $('#s_pick').onclick=async()=>{
@@ -2010,7 +2029,7 @@ async function saveSettings(createMissing=false){
   const m = $('#s_msg'); m.className='msg-line bad';
   m.textContent = (r.errors && r.errors._) ? r.errors._ : (shown ? '设置未保存，请修正标红项。' : '设置未保存。');
 }
-$('#s_save').onclick=()=>saveSettings(false);
+$('#s_save').onclick=()=>{ if (!SET || $('#s_save').disabled) return; saveSettings(false); };
 
 /* ---- update check (0.15.0)：只提示，点了才在浏览器里打开发布页；页面不传任何地址 ---- */
 let UPD = {state:'idle', latest:'', message:''};
