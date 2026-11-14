@@ -191,6 +191,17 @@ def test_thumbnail_timeout_is_the_same_for_one_and_24_photos(env):
     assert plugin.calls[0][2] == plugin.calls[1][2] <= 60
 
 
+def test_a_read_that_was_never_taken_is_the_same_busy_message(env):
+    from lightroom_mcp.bridge import BridgeNotRun
+
+    plugin, service, folder = env
+    plugin.raises = BridgeNotRun("not run")
+    with pytest.raises(LibraryError, match="没有在时限内回复"):
+        service.get_thumbnails(["A-1"])
+    with pytest.raises(LibraryError, match="没有在时限内回复"):
+        service.list_folder_photos(folder)
+
+
 def test_thumbnails_timeout(env):
     plugin, service, _ = env
     plugin.raises = BridgeTimeout("slow")

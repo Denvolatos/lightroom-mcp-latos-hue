@@ -15,7 +15,7 @@ import re
 import urllib.parse
 from typing import Callable
 
-from .bridge import BridgeError, BridgeTimeout
+from .bridge import BridgeError, BridgeNotRun, BridgeTimeout
 
 ID_RE = re.compile(r"[A-Za-z0-9\-]{1,64}")
 MAX_LIST_LIMIT = 500
@@ -73,7 +73,7 @@ class LibraryService:
     def _ask(self, command: str, params: dict, timeout: float) -> dict:
         try:
             return self.call(command, params, timeout=timeout)
-        except BridgeTimeout as e:
+        except (BridgeTimeout, BridgeNotRun) as e:   # read only: "not run" and "no answer" mean the same to the user
             raise LibraryError("Lightroom 没有在时限内回复，可能正忙。请稍后再试。") from e
 
     # ---- list the photos of a folder (read only) ----
