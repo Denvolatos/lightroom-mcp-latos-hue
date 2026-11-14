@@ -1394,8 +1394,22 @@ function M.list_folder_photos(params)
 	for i, e in ipairs(page) do
 		pagePhotos[i] = e.photo
 	end
-	local batch = batchRaw(catalog, pagePhotos, { "fileFormat", "rating", "pickStatus", "dateTimeOriginalISO8601", "dimensions", "isVirtualCopy" })
-	local extra = optionalRaw(catalog, pagePhotos)
+	local coreKeys = { "fileFormat", "rating", "pickStatus", "dateTimeOriginalISO8601", "dimensions", "isVirtualCopy" }
+	-- one batch for everything; only when Lightroom refuses it (e.g. an optional key name it does not know) split it up
+	local allKeys = {}
+	for _, k in ipairs(coreKeys) do
+		allKeys[#allKeys + 1] = k
+	end
+	for _, k in ipairs(OPTIONAL_KEYS) do
+		allKeys[#allKeys + 1] = k
+	end
+	local batch = batchRaw(catalog, pagePhotos, allKeys)
+	local extra = batch
+	if batch == nil then
+		batch = batchRaw(catalog, pagePhotos, coreKeys)
+		extra = optionalRaw(catalog, pagePhotos)
+	end
+	extra = extra or {}
 	local out = {}
 	for _, e in ipairs(page) do
 		local photo = e.photo
