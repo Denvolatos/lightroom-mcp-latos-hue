@@ -195,3 +195,64 @@ def test_the_token_is_never_written_to_the_log(lr):
     g.LOAD()
     assert "changed" in g.LOG_TEXT()
     assert "SECRETTOKEN" not in g.LOG_TEXT()
+
+
+# ---- 1.1.1: a dead server is asked less often; a Lua error does not end the polling of a server for good -------------
+def test_a_server_that_never_answers_is_asked_only_every_30_s(lr):
+    runtime, g = lr
+    g.ANNOUNCE("TOKEN", 1)
+    runtime.execute(
+        """
+        FAKE.no_auto_stop = true
+        FAKE.handler = function(token, n)
+          if n >= 4 then REMOVE() _G.LrMcp.stop = true end
+          return nil, { error = { errorCode = "cannotConnectToHost" } }
+        end
+        """
+    )
+    g.LOAD()
+    assert g.JOINED(g.FAKE["requests"]) == "TOKEN,TOKEN,TOKEN,TOKEN"
+    # 2 and 3 s as before, then 30 s in 1 s steps (the announcement is re-read every second), then the manager's 2 s
+    assert g.JOINED(g.FAKE["sleeps"]) == ",".join(["2", "3"] + ["1"] * 30 + ["2"])
+    assert "does not answer" in g.LOG_TEXT()
+
+
+def test_a_long_wait_ends_at_once_when_the_server_is_restarted(lr):
+    runtime, g = lr
+    g.ANNOUNCE("OLD", 1)
+    runtime.execute(
+        """
+        FAKE.no_auto_stop = true
+        local ticks = 0
+        local sleep = import("LrTasks").sleep
+        import("LrTasks").sleep = function(s)
+          sleep(s)
+          if s == 1 then ticks = ticks + 1 if ticks == 5 then ANNOUNCE("NEW", 2) end end
+        end
+        FAKE.handler = function(token, n)
+          if token == "NEW" or n > 20 then REMOVE() _G.LrMcp.stop = true return "none", { status = 200 } end -- n > 20: no endless loop
+          return nil, { error = { errorCode = "cannotConnectToHost" } }
+        end
+        """
+    )
+    g.LOAD()
+    assert g.JOINED(g.FAKE["requests"]) == "OLD,OLD,OLD,NEW"
+    assert g.JOINED(g.FAKE["sleeps"]).count("1") == 5      # left the 30 s wait after 5 s, when the new server appeared
+
+
+def test_a_lua_error_in_the_poller_is_logged_and_the_server_is_polled_again(lr):
+    runtime, g = lr
+    g.ANNOUNCE("TOKEN", 1)
+    runtime.execute(
+        """
+        FAKE.no_auto_stop = true
+        FAKE.handler = function(token, n)
+          if n == 1 then error("boom") end
+          REMOVE() _G.LrMcp.stop = true
+          return "none", { status = 200 }
+        end
+        """
+    )
+    g.LOAD()
+    assert g.JOINED(g.FAKE["requests"]) == "TOKEN,TOKEN"     # a new poller was started on the next round
+    assert "poller for port 58770 failed" in g.LOG_TEXT() and "boom" in g.LOG_TEXT()
