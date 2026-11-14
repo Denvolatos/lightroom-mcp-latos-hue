@@ -196,7 +196,7 @@ function fillSettings(r){
   setAutoLrUI(s.auto_launch_lightroom===true); lrChoice=null; showLrPath('');
   setUpdUI(s.check_updates!==false); updRender(UPD);
   setReadonlyUI(r.readonly === true); setRoMsg('');
-  const th = ['system','light','dark'].indexOf(s.theme) >= 0 ? s.theme : 'system';
+  const th = themeNormalize(s.theme);
   const fs = ['small','standard','large','xlarge'].indexOf(s.font_size) >= 0 ? s.font_size : 'standard';
   $('#s_theme').value = th; $('#s_fsize').value = fs; applyAppearance(th, fs); APP_SAVED = appearanceNow();
   const a = r.about || {};

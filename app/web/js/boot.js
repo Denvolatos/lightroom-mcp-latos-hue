@@ -5,7 +5,7 @@ if (location.hash !== '#demo') window.addEventListener('pywebviewready', ()=>{
   $('#demobadge').style.display='none';
   $('#newchat').style.display=''; $('#setbtn').style.display='';
   const ready=()=>{ try { window.pywebview.api.ui_ready(); } catch(e){} };   // 告诉软件主界面已准备好：关闭启动界面、显示主窗口
-  window.pywebview.api.get_settings(false).then(r=>{ confirmDefault=r.settings.confirm_default; setAsk(confirmDefault); applyAppearance(r.settings.theme, r.settings.font_size);
+  window.pywebview.api.get_settings(false).then(r=>{ confirmDefault=r.settings.confirm_default; setAsk(confirmDefault); applyAppearance(r.settings.theme, r.settings.font_size); layoutFromSettings(r.settings); zoomFromSettings(r.settings);
     $('#edge').value=String(r.settings.preview_edge); ready(); wizardStartup(); updPoll(8, 2500); }).catch(ready);
   const poll=()=>window.pywebview.api.status().then(s=>{ showStatus(s); if (s.photo && s.photo.name && s.photo.name!==photoName){ photoName=s.photo.name; renderStage(); } }).catch(()=>{});
   window.pywebview.api.autolaunch_state().then(r=>{ if (r && r.state!=='idle') onLrLaunch(r); }).catch(()=>{});

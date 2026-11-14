@@ -61,8 +61,13 @@
       <span id="versiontools" style="display:none;align-items:center;gap:6px"><select id="versionpick" aria-label="选择保存的版本"></select><button class="btn small" id="versionsave">保存当前</button><button class="btn small" id="versionapply">应用版本</button><button class="btn small" id="versionundo" style="display:none">撤销应用</button></span>
       <span class="spacer"></span>
       <span id="pvctl" style="display:none;align-items:center;gap:8px">
-        <label class="why">预览清晰度 <select id="edge"><option value="768">长边 768 px</option><option value="1024" selected>长边 1024 px</option><option value="1536">长边 1536 px</option><option value="2048">长边 2048 px</option></select></label>
-        <button class="btn small" id="zoom" title="双击画面也可切换">适合窗口</button>
+        <label class="why" id="edgebox">预览清晰度 <select id="edge"><option value="768">长边 768 px</option><option value="1024" selected>长边 1024 px</option><option value="1536">长边 1536 px</option><option value="2048">长边 2048 px</option></select></label>
+        <span class="zoomctl" id="zoomctl" role="group" aria-label="预览缩放">
+          <span class="why">缩放</span>
+          <button class="btn small zp" type="button" data-z="fit" aria-pressed="true" title="适合窗口（双击画面也可在“适合”和 100% 之间切换）">适合</button><button class="btn small zp" type="button" data-z="50" aria-pressed="false">50%</button><button class="btn small zp" type="button" data-z="100" aria-pressed="false">100%</button><button class="btn small zp" type="button" data-z="200" aria-pressed="false">200%</button>
+          <input type="range" id="zoomrange" min="10" max="400" step="1" value="100" aria-label="预览缩放比例（10% 到 400%）">
+          <output id="zoomtxt" class="zoomtxt" for="zoomrange">适合</output>
+        </span>
       </span>
       <span class="why" id="cur"></span>
     </div>
@@ -147,7 +152,7 @@
           <div class="sgroup">
             <h4>外观</h4>
             <div class="srow"><label for="s_theme">主题</label>
-              <select id="s_theme"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select>
+              <select id="s_theme"><option value="system">跟随系统</option><option value="paper">浅色纸感</option><option value="glass">夜蓝玻璃</option><option value="dark">暗室</option></select>
               <span class="sub">选了立刻生效；点“保存”后下次启动也保持，点“取消”则恢复原样。</span></div>
             <div class="srow"><label for="s_fsize">字体大小</label>
               <select id="s_fsize"><option value="small">小</option><option value="standard">标准</option><option value="large">大</option><option value="xlarge">特大</option></select></div>
@@ -278,6 +283,7 @@
 <script src="js/import.js"></script>
 <script src="js/pick.js"></script>
 <script src="js/gallery.js"></script>
+<script src="js/layout.js"></script>
 <script src="js/settings.js"></script>
 <script src="js/update.js"></script>
 <script src="js/wizard.js"></script>

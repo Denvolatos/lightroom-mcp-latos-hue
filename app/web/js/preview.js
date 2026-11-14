@@ -8,7 +8,7 @@ function renderFiles(){ if (REAL()) { updatePickBtn(); return; } loadGallery(); 
 /* ---- center ---- */
 function nApplied(){ return REAL() ? rows.filter(r=>r.status==='已应用').length : steps.length; }
 const DEMO = location.hash === '#demo';
-let pv = null, actual = false, noBackend = false;   // pv = 后端推送的最近一次预览内容
+let pv = null, noBackend = false;   // pv = 后端推送的最近一次预览内容
 let viewMode='pair', versionPhoto='', versionRows=[], versionImage='', versionUndo='', versionDifference=null, versionBusy=false;
 function versionButtons(){
   const has = versionRows.length>0;
@@ -121,7 +121,7 @@ function fmtInfo(p){ return [p.name,p.camera,p.iso,p.aperture,p.shutter,p.focal,
 function frameHTML(id, label, tip){ return `<div class="frame" id="${id}"><div class="scroller"><img class="pimg" alt=""></div><div class="ph"></div><span class="label" ${tip?`title="${esc(tip)}"`:''}>${label}</span><span class="chip">正在读取预览</span><span class="note"></span></div>`; }
 function setFrame(id, o){   // o: {url, text, note, busy}
   const f=$('#'+id), img=f.querySelector('.pimg');
-  if (o.url){ if (img.getAttribute('src')!==o.url) img.src=o.url; f.classList.add('has'); }
+  if (o.url){ if (img.getAttribute('src')!==o.url) img.src=o.url; f.classList.add('has'); img.onload=()=>zoomLayout(); }
   else { img.removeAttribute('src'); f.classList.remove('has'); f.querySelector('.ph').textContent=o.text||''; }
   f.classList.toggle('busy', !!o.busy); f.querySelector('.note').textContent=o.note||'';
 }
@@ -142,15 +142,15 @@ function renderStage(){
     $('#infobar').textContent=v?`版本：${v.name} · ${v.created||''}${v.note?' · '+v.note:''}。${diff?(diff.count?`与当前相差 ${diff.count} 项${examples?'：'+examples:''}${diff.count>5?' 等':''}`:'与当前完全相同'):'正在读取参数差异…'}`:'这张照片还没有保存过版本。';
     $('#cur').textContent=(p.photo||{}).name||photoName||'';
     showSwitching();
-    $('#pvctl').style.display='none'; return;
+    pvctlShow(true); zoomLayout(); return;
   }
-  s.classList.toggle('actual', actual && real);
+  zoomTrackPhoto();
   if (s.dataset.kind!==kind){
     s.dataset.kind=kind;
     if (kind==='demo') s.innerHTML=`<div class="frame has"><div class="scene"></div><span class="label">初始（示例）</span></div><div class="frame has"><div class="scene"></div><span class="label">当前（示例）</span><span class="note"></span></div>`;
     else { s.innerHTML=frameHTML('fi',PH_INITIAL,PH_INITIAL_TIP)+frameHTML('fc','当前'); s.ondblclick=toggleZoom; }
   }
-  $('#pvctl').style.display = real ? 'flex' : 'none';
+  if (real) pvctlShow(false); else $('#pvctl').style.display = 'none';
   if (real) updatePickBtn();
   if (kind==='demo'){ $('#cur').textContent='界面演示 · 示例画面，非真实照片';
     s.children[1].querySelector('.scene').classList.toggle('after', !!nApplied());
@@ -165,7 +165,8 @@ function renderStage(){
     const n = nApplied(), pi = p.current;
     setFrame('fi',{url:p.initial.url});
     setFrame('fc',{url:p.current.url, busy:!!p.loading, note: p.same ? (n?'':'与初始一致') : (n?'已调整 '+n+' 项':'')});
-    $('#infobar').innerHTML = `<div class="line">${esc(fmtInfo(ph))}</div><div>预览 ${pi.w&&pi.h?pi.w+' × '+pi.h+' 像素':''}${actual?'（100% 显示）':''}。“初始”指软件首次读取该照片时的状态；若此前已在 Lightroom 中调整过，则不等同于原片。</div>`;
+    $('#infobar').innerHTML = `<div class="line">${esc(fmtInfo(ph))}</div><div>预览 ${pi.w&&pi.h?pi.w+' × '+pi.h+' 像素':''}${zoomNote()}。“初始”指软件首次读取该照片时的状态；若此前已在 Lightroom 中调整过，则不等同于原片。</div>`;
+    zoomLayout();
   } else {
     const t = p.message || '正在读取预览';
     setFrame('fi',{text:t}); setFrame('fc',{text:t});
@@ -190,8 +191,112 @@ function previewArrived(ev){
   const ph = ev.photo || {};
   if (SWITCH && (ph.id===SWITCH.id || ph.name===SWITCH.name || (ev.state!=='ok' && ev.state!=='loading'))){ SWITCH=null; clearTimeout(markSwitching.t); }
 }
-function toggleZoom(){ if(!REAL()) return; actual=!actual; $('#zoom').textContent = actual ? '100%' : '适合窗口'; renderStage(); }
-$('#zoom').onclick=toggleZoom;
+/* ---- 预览无级缩放（1.3.0）：滑杆 10%–400%（step 1）+ 预设“适合 / 50% / 100% / 200%” + 数字显示 ----
+   ZOOM.mode：'fit'（适合窗口）或 'pct'（固定百分比；100% = 预览图的原始像素）。两个预览窗（初始/当前）共用同一个缩放和平移位置
+   （平移位置用 0–1 的归一化中心 cx/cy 表示），所以同步。Ctrl+滚轮以鼠标位置为中心缩放；放大后按住鼠标拖动平移；
+   双击在“适合”和 100% 之间切换。值写入设置 preview_zoom（"fit" 或整数），防抖保存；平移位置不保存。 */
+const ZOOM_MIN = 10, ZOOM_MAX = 400;
+let ZOOM = {mode:'fit', pct:100, cx:0.5, cy:0.5, photo:null}, zoomSaveT = null, PAN = null, zoomSuppressClick = false;
+function pvctlShow(multi){ $('#pvctl').style.display = 'flex'; $('#edgebox').style.display = multi ? 'none' : ''; }
+function zoomFrames(){ return Array.prototype.slice.call(document.querySelectorAll('#stage .frame.has')); }
+function zoomGeom(f){
+  const img = f.querySelector('.pimg'), sc = f.querySelector('.scroller'); if (!img || !sc) return null;
+  const nw = img.naturalWidth, nh = img.naturalHeight, fw = sc.clientWidth, fh = sc.clientHeight;
+  if (!nw || !nh || !fw || !fh) return null;
+  const fit = Math.min(fw / nw, fh / nh), s = ZOOM.mode === 'fit' ? fit : ZOOM.pct / 100, w = nw * s, h = nh * s;
+  let left = w <= fw ? (fw - w) / 2 : Math.min(0, Math.max(fw - w, fw / 2 - ZOOM.cx * w));
+  let top = h <= fh ? (fh - h) / 2 : Math.min(0, Math.max(fh - h, fh / 2 - ZOOM.cy * h));
+  return {img, nw, nh, fw, fh, fit, s, w, h, left, top};
+}
+function zoomLayout(){
+  const fr = zoomFrames(); let first = true;
+  fr.forEach(f=>{
+    const g = zoomGeom(f); if (!g) return;
+    g.img.style.width = g.nw + 'px'; g.img.style.height = g.nh + 'px';
+    g.img.style.transform = 'translate(' + g.left.toFixed(2) + 'px,' + g.top.toFixed(2) + 'px) scale(' + g.s + ')';
+    if (first){ first = false;
+      if (g.w > g.fw) ZOOM.cx = (g.fw / 2 - g.left) / g.w; else ZOOM.cx = 0.5;      // 把越界的中心收回到范围内，避免平移时“攒”出隐形位移
+      if (g.h > g.fh) ZOOM.cy = (g.fh / 2 - g.top) / g.h; else ZOOM.cy = 0.5;
+      ZOOM.shownPct = g.s * 100; ZOOM.canPan = g.w > g.fw + 0.5 || g.h > g.fh + 0.5; }
+  });
+  const st = $('#stage'); if (st){ st.classList.toggle('zoomed', !!ZOOM.canPan); }
+  zoomUI();
+}
+function zoomNote(){ return ZOOM.mode === 'fit' ? '' : '（' + ZOOM.pct + '% 显示）'; }
+function zoomUI(){
+  const shown = Math.round(ZOOM.shownPct || (ZOOM.mode === 'fit' ? 100 : ZOOM.pct));
+  const r = $('#zoomrange'); r.value = String(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, ZOOM.mode === 'fit' ? shown : ZOOM.pct)));
+  $('#zoomtxt').textContent = ZOOM.mode === 'fit' ? '适合 · ' + shown + '%' : ZOOM.pct + '%';
+  document.querySelectorAll('#zoomctl .zp').forEach(b=>{
+    const z = b.dataset.z, on = z === 'fit' ? ZOOM.mode === 'fit' : (ZOOM.mode === 'pct' && ZOOM.pct === Number(z));
+    b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.classList.toggle('on', on); });
+}
+function zoomSaveSoon(){
+  clearTimeout(zoomSaveT);
+  zoomSaveT = setTimeout(async()=>{
+    if (!REAL()) return;
+    try { await window.pywebview.api.save_settings({preview_zoom: ZOOM.mode === 'fit' ? 'fit' : ZOOM.pct}, false); } catch(e){ console.warn('保存预览缩放失败', e); }
+  }, 600);
+}
+function zoomClampPct(v){ v = Math.round(Number(v)); return isNaN(v) ? 100 : Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, v)); }
+/* 设成固定百分比；anchor = {frame, x, y}（窗口坐标）时，保持鼠标下的那一点不动 */
+function zoomSetPct(pct, anchor){
+  pct = zoomClampPct(pct);
+  let u = null, g0 = null;
+  if (anchor){ g0 = zoomGeom(anchor.frame); if (g0){ const r = anchor.frame.querySelector('.scroller').getBoundingClientRect();
+    u = {x:(anchor.x - r.left - g0.left) / g0.w, y:(anchor.y - r.top - g0.top) / g0.h, fx:anchor.x - r.left, fy:anchor.y - r.top}; } }
+  ZOOM.mode = 'pct'; ZOOM.pct = pct;
+  if (u && g0){ const w1 = g0.nw * pct / 100, h1 = g0.nh * pct / 100;
+    ZOOM.cx = u.x + (g0.fw / 2 - u.fx) / w1; ZOOM.cy = u.y + (g0.fh / 2 - u.fy) / h1; }
+  zoomLayout(); zoomSaveSoon(); renderZoomInfo();
+}
+function zoomSetFit(){ ZOOM.mode = 'fit'; ZOOM.cx = ZOOM.cy = 0.5; zoomLayout(); zoomSaveSoon(); renderZoomInfo(); }
+function renderZoomInfo(){ const el = document.querySelector('#infobar div:nth-child(2)'); if (el && pv && pv.state === 'ok' && el.textContent.indexOf('预览 ') === 0){
+  const pi = pv.current || {}; el.childNodes[0].textContent = '预览 ' + (pi.w && pi.h ? pi.w + ' × ' + pi.h + ' 像素' : '') + zoomNote() + '。“初始”指软件首次读取该照片时的状态；若此前已在 Lightroom 中调整过，则不等同于原片。'; } }
+function zoomFromSettings(s){
+  const z = s && s.preview_zoom;
+  if (typeof z === 'number' && z >= ZOOM_MIN && z <= ZOOM_MAX && Math.round(z) === z){ ZOOM.mode = 'pct'; ZOOM.pct = z; }
+  else { ZOOM.mode = 'fit'; }
+  ZOOM.cx = ZOOM.cy = 0.5; zoomLayout();
+}
+function zoomTrackPhoto(){ const id = ((pv && pv.photo) || {}).id; if (id !== ZOOM.photo){ ZOOM.photo = id; ZOOM.cx = ZOOM.cy = 0.5; } }
+function toggleZoom(e){
+  if (!REAL()) return;
+  if (ZOOM.mode === 'fit'){ const f = e && e.target && e.target.closest ? e.target.closest('.frame') : null;
+    zoomSetPct(100, f ? {frame:f, x:e.clientX, y:e.clientY} : null); }
+  else zoomSetFit();
+}
+document.querySelectorAll('#zoomctl .zp').forEach(b=>{ b.onclick = ()=>{ if (b.dataset.z === 'fit') zoomSetFit(); else zoomSetPct(Number(b.dataset.z), null); }; });
+$('#zoomrange').addEventListener('input', ()=>zoomSetPct($('#zoomrange').value, null));
+/* Ctrl+滚轮：以鼠标位置为中心缩放（不带 Ctrl 的滚轮不处理）；每格约 ±10% */
+$('#stage').addEventListener('wheel', e=>{
+  if (!e.ctrlKey || !REAL()) return;
+  const f = e.target.closest ? e.target.closest('.frame.has') : null; if (!f) return;
+  e.preventDefault();
+  const g = zoomGeom(f); if (!g) return;
+  const cur = ZOOM.mode === 'fit' ? g.fit * 100 : ZOOM.pct, factor = Math.pow(1.1, e.deltaY < 0 ? 1 : -1);
+  let next = Math.round(cur * factor); if (next === Math.round(cur)) next += e.deltaY < 0 ? 1 : -1;
+  zoomSetPct(next, {frame:f, x:e.clientX, y:e.clientY});
+}, {passive:false});
+/* 放大后按住鼠标拖动平移（两个预览窗一起动） */
+$('#stage').addEventListener('pointerdown', e=>{
+  if (e.button !== 0 || !ZOOM.canPan) return;
+  const f = e.target.closest ? e.target.closest('.frame.has') : null; if (!f) return;
+  const g = zoomGeom(f); if (!g) return;
+  PAN = {x:e.clientX, y:e.clientY, w:g.w, h:g.h, moved:false}; e.preventDefault();
+});
+document.addEventListener('pointermove', e=>{
+  if (!PAN) return;
+  const dx = e.clientX - PAN.x, dy = e.clientY - PAN.y;
+  if (!PAN.moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+  if (!PAN.moved){ PAN.moved = true; $('#stage').classList.add('panning'); }
+  ZOOM.cx -= dx / PAN.w; ZOOM.cy -= dy / PAN.h; PAN.x = e.clientX; PAN.y = e.clientY; zoomLayout();
+});
+function panEnd(){ if (!PAN) return; if (PAN.moved){ zoomSuppressClick = true; setTimeout(()=>{ zoomSuppressClick = false; }, 80); } PAN = null; $('#stage').classList.remove('panning'); }
+document.addEventListener('pointerup', panEnd); document.addEventListener('pointercancel', panEnd);
+$('#stage').addEventListener('dblclick', e=>{ if (zoomSuppressClick) return; }, true);
+window.addEventListener('resize', ()=>zoomLayout());
+if (window.ResizeObserver){ new ResizeObserver(()=>zoomLayout()).observe($('#stage')); }
 /* 顶栏的预览清晰度：立即生效并写进设置（只提交这一项），重启和保存设置时都不会被改回去 */
 $('#edge').onchange=async()=>{
   if (!REAL()) return;
