@@ -310,7 +310,7 @@ def build(tmp_path, **kw):
     log.write_text(LOG, encoding="utf-8")
     timing = tmp_path / "app_timing.jsonl"
     timing.write_text("\n".join(json.dumps({"t": "x", "mode": "persistent", "total_ms": 1000 + i, "startup_ms": 10, "model_ms": 900,
-                                             "tools_ms": 90, "tools": [{"name": "lr_secret_tool", "ms": 1}]}) for i in range(3)) + "\n{坏行\n")
+                                             "tools_ms": 90, "tools": [{"name": "lr_secret_tool", "ms": 1}]}) for i in range(3)) + "\n{坏行\n", encoding="utf-8")
     out = tmp_path / "out"
     out.mkdir()
     items = [{"id": "folder", "title": "照片工作文件夹", "state": "ready", "text": r"已就绪：D:\Photos\Alice Private\Trip", "hint": ""},
