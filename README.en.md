@@ -11,9 +11,9 @@ Lightroom Classic works in the background as the engine; your originals are neve
 
 [中文说明](README.md) · [Changelog (app)](app/CHANGELOG.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [LrMCP (server for AI clients)](#lrmcp-the-server-for-ai-clients)
 
-![Latos Hue: AI photo picking gives a ranking and star suggestions, written only after you confirm (sample photos)](app/docs/pick_result.png)
+![Latos Hue main window (light paper theme): photo panel grouped by capture-date folders on the left, "initial" and "current" previews side by side in the middle, the "changes in this session" table and the AI chat on the right](app/docs/readme_main.png)
 
-<sub>The photos and folders in the screenshots are test samples. The interface is in Chinese.</sub>
+<sub>Sample photos and sample data: the photos are images drawn by a script, and the file names, settings and chat are examples, not real retouching results. The interface is in Chinese.</sub>
 
 </div>
 
@@ -23,12 +23,14 @@ The project also provides **LrMCP**, a standalone Lightroom Classic plug-in and 
 
 > 🤖 **AI assistant reading this for a user?** Read [`AI_GUIDE.md`](AI_GUIDE.md) (it covers installing and using the LrMCP server).
 
-![Latos Hue: browsing photos grouped by folder in the gallery (sample photos)](app/docs/gallery_groups.png)
+![Latos Hue AI photo picking result: ranking, score, suggested stars and flag, with a note that nothing is written to Lightroom yet; it is written only after you confirm](app/docs/readme_pick.png)
+
+<sub>AI photo picking shows suggestions only; **it writes only after you confirm** (sample photos and sample data, not a real result).</sub>
 
 ## ✨ What it does
 
-- **Import:** choose photos from a memory card or any folder; they are copied into the app's work folder (the originals are not touched) and added to your Lightroom catalog.
-- **Gallery:** browse thumbnails grouped by folder, search, filter, sort and multi-select; the selected photos are what the AI works on. "换目录" (change folder) lets you browse any photo folder on your computer (it is only read; nothing is moved or copied); photos that are not in the Lightroom catalog yet can be added in place.
+- **Import:** choose photos from a memory card or any folder; they are copied into the app's photo work folder (the originals are not touched), filed into `year\year-month-day` folders by capture date, and added to your Lightroom catalog. A photo whose content is identical to one already in the library is skipped automatically.
+- **Photo library:** browse thumbnails grouped by capture-date folder, search, filter, sort (capture time, import time, name, rating and more) and multi-select; the selected photos are what the AI works on. Photos not yet synced to Lightroom carry an "未同步" (not synced) tag; click "同步到 Lightroom" (sync to Lightroom) to add them.
 - **AI photo picking:** select a few photos and let the AI compare them; it suggests a ranking plus star and flag ratings, shown in the app first, and **written only after you confirm**.
 - **AI retouching:** tell the AI the look you want in plain words. You can turn on "confirm each step" (the AI asks before every change), **every step can be undone**, and one click returns the photo to how it was before.
 - **Versions:** save how a photo looks now as a named version, compare "saved version" and "current" side by side later, go back to a version after confirming, and undo that switch.
@@ -36,6 +38,18 @@ The project also provides **LrMCP**, a standalone Lightroom Classic plug-in and 
 - **Presets, experience, favourites:** save your own presets, keep notes on the colour experience the AI learned, and mark favourite photos. They live only on your own computer.
 - **Export:** JPEG or TIFF (8 or 16 bit), you choose the folder and size, existing files are never overwritten.
 - **Small conveniences:** optional automatic start of Lightroom, a first-run "environment check" wizard, and an update check (it only tells you, it never installs by itself).
+
+### Three themes and the settings page
+
+The interface has three themes: light paper (default), night-blue glass and darkroom, plus "follow the system". The settings page has a sidebar on the left and cards on the right.
+
+![The same main window in three themes side by side: light paper, night-blue glass, darkroom](app/docs/readme_themes.png)
+
+<sub>Sample photos and sample data, not real retouching results.</sub>
+
+![Latos Hue settings page (darkroom theme): sidebar with General, Lightroom, AI source, Safety, Maintenance, About; cards for photo library, appearance and environment check](app/docs/readme_settings.png)
+
+<sub>Sample settings screenshot (the path is an example value).</sub>
 
 The AI can be **Claude** (the Claude Code command line already installed and signed in on your computer) or **Codex** (the Codex command line, installed and signed in). **You choose which one the first time you open the app**; the app does not decide for you and starts no AI before you have chosen.
 
@@ -55,7 +69,7 @@ Uninstalling removes the program and the plug-in; your settings and experience n
 
 1. Open Latos Hue. An "**environment check**" list appears: photo work folder, Lightroom, the Lightroom plug-in, the AI assistant. For anything not ready it tells you what to do next (for example "choose a folder", "choose the Lightroom program", or sign in to Claude or Codex in a terminal first). You can reopen it any time from Settings.
 2. In the "AI 助手" (AI assistant) item click "**使用 Claude**" (use Claude) or "**使用 Codex**" (use Codex). Next to each button you see its state (installed and signed in / installed but not signed in / not installed); you may pick one that is not installed yet, and the list then tells you what to do next. To change it later click "更换 AI 来源" (change AI source) or use Settings (it takes effect with the next "new conversation"). Turn on "start Lightroom automatically" in Settings if you like.
-3. Click "Import" (导入), pick a folder with photos, confirm; the photos are copied to your work folder and added to the Lightroom catalog. Or skip importing: click "换目录" above the gallery and browse a folder of photos you already have.
+3. Click "Import" (导入), pick a folder with photos, confirm; the photos are copied to your work folder by capture date and added to the Lightroom catalog.
 4. Click photos in the gallery on the left and tell the AI the look you want on the right, or select several photos and click "AI 挑片" (AI picking).
 5. Not happy? Click "撤销" (undo). Happy? Click "导出" (export).
 
@@ -63,7 +77,7 @@ Uninstalling removes the program and the plug-in; your settings and experience n
 
 ## 🔒 Privacy and data
 
-- **Your original photos are processed on your computer only**; the app does not upload them. The AI's edits are stored in the Lightroom catalog and can be undone; **the original photo files are not changed**. A folder you browse with "换目录" is only read, and "加入 Lightroom" (add to Lightroom) adds photos in place, without moving or copying them.
+- **Your original photos are processed on your computer only**; the app does not upload them. The AI's edits are stored in the Lightroom catalog and can be undone; **the original photo files are not changed**. Importing only copies photos into the work folder; the folder the originals came from is not changed.
 - **When you retouch or pick photos, a preview of the selected photos is sent to the AI service you chose** (the provider behind Claude or Codex). The app uploads nothing else about your photos.
 - The app **does not store your account and does not sign in for you**; you sign in yourself in the Claude / Codex command line.
 - Settings, presets, favourites and experience notes are stored on your own computer in `C:\Users\<you>\LrMcp`.
