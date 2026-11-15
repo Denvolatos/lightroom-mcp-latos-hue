@@ -1081,3 +1081,19 @@ PR 新增的 `version_save / version_apply / batch_plan_from_edit / batch_apply 
 - 无头 Edge 里“跟随系统”靠覆盖 `matchMedia` 模拟（无头 Edge 的 `prefers-color-scheme` 不好控制）；真实 WebView2 下的系统切换待真机看。
 - 触摸 / 笔输入的拖动没测；对话框拖动在多显示器、系统缩放不是 100% 时的表现待真机。
 - 启动画面（`splash.py`）只改了样式并用截图看过，没有走真实启动流程。
+
+### 1.3.0 主界面新布局「照片在左」（对照设计稿 `?s=a|b|c&p=main3`）
+- **整体四列**（`index.html` 的 `#main` 是一个网格）：图标栏 `#rail`（4.5rem）| 照片面板 `#ppanel`（`.col.left`，默认 260px，可拖宽）| 预览区 `#center` | 右栏 `#rcol`（默认 300px）。顶栏 `#topbar` 横跨照片面板之后的三列。分隔线 `#split_l` / `#split_r` 仍是零宽网格列。
+- **图标栏**：照片 `#r_photos`、配方库 `#r_lib`、导入 `#impbtn`（主按钮）、导出 `#exportbtn`、AI 挑片 `#pickbtn`；底部 更多 `#morebtn`、设置 `#setbtn`。导入/导出/挑片仍调用原来的 `startImport()` / `openExport()` / `openPick()`；`#pickbtn` 没有选中照片时仍然不可点（`updatePickBtn`）。
+- **照片面板**（`js/shell.js`）：照片（`#gal`，沿用 `js/gallery.js` 的分组 / 排序 / 选中 / 缩略图逻辑，顶部“照片 N 张 ◂收起”，刷新 / 打开文件夹是图标按钮）和配方库（`#libview`：预设 / 收藏 / 经验，沿用 `js/library.js`）二选一。点“照片”：正显示照片时收起，否则回到照片并展开；点“配方库”：替换内容，再点回到照片。
+- **收起状态**存在 `localStorage` 的 `lh_pp_collapsed`（读写都 try/catch；存储不可用时本次运行内仍可收起，只是不记住）。**后端设置里目前没有 `photo_panel_collapsed`**，合并后端时如要进设置，把 `ppSave()` / `PP.collapsed` 的初值改成读写设置即可。窄屏（≤900px）的抽屉状态不保存。
+- **顶栏**：当前照片名 `#cur` + 拍摄时间 `#curtime`（读 `preview` 事件里 `photo.captured`，没有就空）、并排 / 多版本 `#modes`、排列 `#arrange`（自动 / 左右 / 上下 / 滑动对比）、清晰度 `#edge`、缩放控件、更新提示 `#updnote`、撤销 `#undobtn`（调用原来的 `undo()`，撤销最近一次修改）、连接状态胶囊 `#lrpill`。多版本的控件 `#versiontools` 也在这一行。
+- **连接状态胶囊**：已连接 = 绿点 +“已连接”；正在连接 / 自动启动 Lightroom 中 = 黄色；未连接或出问题 = 红色 + 简短原因。完整提示放在胶囊的悬停提示里，点胶囊展开 `#lrhint`（原来的提示元素，id 不变，`textContent` 仍是完整提示）；展开 / 收起不改变顶栏高度。
+- **右栏**：“撤销本次”（原来的“还原到原始状态”，`restoreOriginal()`）在“本次调整”标题旁，只有存在已应用的调整时才显示；“逐项确认”开关和“新对话”在输入框正上方。
+- **更多菜单**：新对话、环境检查（`openWizard()`）、检查更新（打开设置的“关于”并触发检查）。菜单用 `position: fixed` 放在 `#main` 下（不放进图标栏，避免被 `overflow` 或玻璃主题的 `backdrop-filter` 裁掉）。
+- **预览框按照片真实比例**（`js/preview.js` 的 `arrangeLayout`）：每个框的宽高 = 照片在所在格子里 contain 后的大小（比例读 `img.naturalWidth/Height`，读不到用 `preview` 事件里的 `w/h`，再读不到用 3:2），居中；不拉伸、不裁剪。“自动”比较“左右”和“上下”两种排法下两张照片总共显示的面积，取大的（相同取左右）；窗口大小（`ResizeObserver`）、照片、面板收起 / 拖宽变化都会重新计算。排列选择存 `localStorage` 的 `lh_arrange`（无效值回落“自动”）。
+- **滑动对比**：只显示一张，两个框叠在同一格，用 `clip-path` 把“初始”裁到左半、“当前”裁到右半；中间竖线 `#slidehandle` 是 `role="slider"`（`aria-valuenow` 0–100）：鼠标 / 触摸拖动，← → 调 2%、Shift+← → 调 10%、Home / End 到 0 / 100。缩放 / 平移照样生效且两张同步。
+- **窄屏（≤900px）**：图标栏变成顶部横条（放不下可横向滚动），顶栏在它下面，照片面板变成从左边滑出的抽屉（叠在预览区上，不挤占它；点“照片 / 配方库”打开，“◂ 收起”或 Esc 关闭），分隔线隐藏，右栏宽度忽略保存值。
+- 为适配新结构改动的旧检查：`ui_layout_check.py` / `ui_versions_check.py` 的“按钮不换行”检查跳过图标栏按钮（图标 + 小字本来就是上下两行）；`ui_versions_check.py` 的“动态文字没有转义”检查放过设置对话框里固定的 logo 图片；`ui_sort_check.py`（窄屏先点“照片”滑出抽屉）、`ui_library_check.py`（先点“配方库”）、`ui_update_check.py`（先打开“关于”）、`ui_preview_check.py`（缩放预设按钮）改了入口。断言没有放宽。
+- 新增 `ui_shell_check.py`（图标栏 / 更多菜单 / 配方库 / 收起 / 顶栏 / 比例与自动排列 / 滑动对比 / 状态胶囊 / 右栏 / 窄屏抽屉 / 三套主题 × 800·1100·1440 截图）。
+- 没验证的点：只在假 `pywebview.api` 和无头 Edge 里跑过；真实 WebView2 里的触摸拖动、高分屏缩放、`backdrop-filter` 性能待真机看；图标栏里的符号图标（▦ ❖ ⇩ ⇧ ✦ ⋯ ⚙）依赖系统字体（Segoe UI Symbol），没有的系统上会换成别的字体。
