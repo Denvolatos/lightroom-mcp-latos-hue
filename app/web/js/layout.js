@@ -7,11 +7,16 @@
 const PANEL_LIM = {left:[200, 480], right:[240, 520]}, PANEL_DEF = {left:260, right:300}, PANEL_MIN_CENTER = 320;
 let PANEL = {left:PANEL_DEF.left, right:PANEL_DEF.right}, panelSaveT = null;
 const PANEL_SIDE = {split_l:'left', split_r:'right'};
-function panelMainWidth(){ const m = document.querySelector('.main'); return m ? m.clientWidth : innerWidth; }
+function panelMainWidth(){ const m = document.getElementById('main'); return m ? m.clientWidth : innerWidth; }
+function panelRoom(side){      // 这一栏最多能有多宽：总宽 − 图标栏 − 另一栏 − 中间区最小宽度
+  const m = document.getElementById('main'), rail = document.getElementById('rail');
+  const railW = (innerWidth > 900 && rail) ? rail.offsetWidth : 0, leftOff = !!(m && m.classList.contains('pp-off'));
+  const other = side === 'left' ? PANEL.right : (leftOff ? 0 : PANEL.left);
+  return panelMainWidth() - railW - other - PANEL_MIN_CENTER;
+}
 function panelClamp(side, w){
-  const lim = PANEL_LIM[side], other = PANEL[side === 'left' ? 'right' : 'left'];
-  const room = panelMainWidth() - other - PANEL_MIN_CENTER;
-  return Math.round(Math.max(lim[0], Math.min(lim[1], room, Number(w) || lim[0])));
+  const lim = PANEL_LIM[side];
+  return Math.round(Math.max(lim[0], Math.min(lim[1], panelRoom(side), Number(w) || lim[0])));
 }
 /* 把保存的宽度（可能比窗口放得下的大）换成当前窗口里实际使用的宽度；窗口变宽后会自动恢复到保存的值 */
 function panelEffective(side){ return panelClamp(side, PANEL[side]); }
@@ -20,8 +25,7 @@ function panelApply(){
   m.style.setProperty('--lw-user', panelEffective('left') + 'px'); m.style.setProperty('--rw-user', panelEffective('right') + 'px');
   Object.keys(PANEL_SIDE).forEach(id=>{
     const side = PANEL_SIDE[id], el = document.getElementById(id), lim = PANEL_LIM[side], now = panelEffective(side);
-    const other = PANEL[side === 'left' ? 'right' : 'left'];
-    el.setAttribute('aria-valuemin', String(lim[0])); el.setAttribute('aria-valuemax', String(Math.max(lim[0], Math.min(lim[1], panelMainWidth() - other - PANEL_MIN_CENTER))));
+    el.setAttribute('aria-valuemin', String(lim[0])); el.setAttribute('aria-valuemax', String(Math.max(lim[0], Math.min(lim[1], panelRoom(side)))));
     el.setAttribute('aria-valuenow', String(now)); el.setAttribute('aria-valuetext', (side === 'left' ? '左栏宽度 ' : '右栏宽度 ') + now + ' 像素');
   });
 }

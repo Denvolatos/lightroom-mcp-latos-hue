@@ -11,25 +11,59 @@
 </head>
 <body>
 
-<div class="topbar">
-  <span class="brand"><img class="logo" src="assets/latos-hue-ribbon-192.png" alt="">修图助手</span><span class="badge" id="demobadge">界面演示 · 示例数据</span>
-  <button class="btn" id="impbtn" onclick="startImport()">导入</button>
-  <button class="btn" onclick="openExport()">导出</button>
-  <button class="btn" id="pickbtn" onclick="openPick()" title="在 Lightroom 中选择照片后，让 AI 比较并给出排名和建议">AI 挑片</button>
-  <button class="btn" onclick="undo(this)">撤销</button>
-  <button class="btn" id="newchat" onclick="newChat()" style="display:none">新对话</button>
-  <span class="spacer"></span>
-  <span class="status upd-note" id="updnote" style="display:none"><span id="updtxt"></span><button class="btn small" id="updopen">查看新版本</button></span>
-  <button class="btn" id="setbtn" style="display:none" onclick="openSettings()">设置</button>
-  <span class="status"><span class="dot" id="lrdot"></span><span id="lrstat">Lightroom 已连接（示例）</span></span>
-  <span class="hint" id="lrhint"></span>
-  <span class="status" id="toastbox"></span>
-</div>
+<div class="main" id="main">
+  <!-- 最左：图标栏（窄屏变顶部横条） -->
+  <nav class="rail" id="rail" aria-label="主要功能">
+    <img class="logo" src="assets/latos-hue-ribbon-192.png" alt="Latos Hue">
+    <button type="button" class="rbtn on" id="r_photos" aria-pressed="true" title="照片面板（再点一次收起）"><b aria-hidden="true">▦</b><span>照片</span></button>
+    <button type="button" class="rbtn" id="r_lib" aria-pressed="false" title="预设、收藏和经验"><b aria-hidden="true">❖</b><span>配方库</span></button>
+    <button type="button" class="rbtn pri" id="impbtn" onclick="startImport()" title="从存储卡或文件夹导入照片"><b aria-hidden="true">⇩</b><span>导入</span></button>
+    <button type="button" class="rbtn" id="exportbtn" onclick="openExport()" title="导出当前照片"><b aria-hidden="true">⇧</b><span>导出</span></button>
+    <button type="button" class="rbtn" id="pickbtn" onclick="openPick()" title="在 Lightroom 中选择照片后，让 AI 比较并给出排名和建议"><b aria-hidden="true">✦</b><span>AI 挑片</span></button>
+    <span class="sp"></span>
+    <span class="morewrap">
+      <button type="button" class="rbtn" id="morebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" title="更多"><b aria-hidden="true">⋯</b><span>更多</span></button>
+    </span>
+    <button type="button" class="rbtn" id="setbtn" style="display:none" onclick="openSettings()" title="设置"><b aria-hidden="true">⚙</b><span>设置</span></button>
+  </nav>
+  <div class="menu" id="moremenu" role="menu" aria-label="更多" hidden>
+    <button type="button" role="menuitem" id="mm_new">新对话</button>
+    <button type="button" role="menuitem" id="mm_env">环境检查</button>
+    <button type="button" role="menuitem" id="mm_upd">检查更新</button>
+  </div>
 
-<div class="main">
-  <!-- LEFT -->
-  <div class="col left">
-    <div class="upper">
+  <!-- 顶栏：当前照片、显示方式、排列、缩放、撤销、连接状态 -->
+  <header class="topbar" id="topbar">
+    <div class="tname"><span id="cur" class="cur"></span><small id="curtime"></small></div>
+    <span class="badge" id="demobadge">界面演示 · 示例数据</span>
+    <div class="seg2" id="modes" role="group" aria-label="显示方式"><button type="button" class="on" data-m="pair">并排</button><button type="button" data-m="multi">多版本</button></div>
+    <span id="versiontools" style="display:none;align-items:center;gap:6px"><select id="versionpick" aria-label="选择保存的版本"></select><button class="btn small" id="versionsave">保存当前</button><button class="btn small" id="versionapply">应用版本</button><button class="btn small" id="versionundo" style="display:none">撤销应用</button></span>
+    <span class="spacer"></span>
+    <div class="arr" id="arrwrap" role="group" aria-label="预览排列"><span class="why">排列</span>
+      <div class="seg2" id="arrange"><button type="button" class="on" data-a="auto" aria-pressed="true" title="自动挑能让照片显示得更大的排法">自动</button><button type="button" data-a="side" aria-pressed="false">左右</button><button type="button" data-a="stack" aria-pressed="false">上下</button><button type="button" data-a="slide" aria-pressed="false" title="只显示一张，拖动中间竖线对比初始和当前">滑动对比</button></div></div>
+    <span id="pvctl" style="display:none;align-items:center;gap:8px">
+      <label class="why" id="edgebox">清晰度 <select id="edge"><option value="768">长边 768 px</option><option value="1024" selected>长边 1024 px</option><option value="1536">长边 1536 px</option><option value="2048">长边 2048 px</option></select></label>
+      <span class="zoomctl" id="zoomctl" role="group" aria-label="预览缩放">
+        <span class="why">缩放</span>
+        <button class="btn small zp" type="button" data-z="fit" aria-pressed="true" title="适合窗口（双击画面也可在“适合”和 100% 之间切换）">适合</button><button class="btn small zp" type="button" data-z="50" aria-pressed="false">50%</button><button class="btn small zp" type="button" data-z="100" aria-pressed="false">100%</button><button class="btn small zp" type="button" data-z="200" aria-pressed="false">200%</button>
+        <input type="range" id="zoomrange" min="10" max="400" step="1" value="100" aria-label="预览缩放比例（10% 到 400%）">
+        <output id="zoomtxt" class="zoomtxt" for="zoomrange">适合</output>
+      </span>
+    </span>
+    <span class="status upd-note" id="updnote" style="display:none"><span id="updtxt"></span><button class="btn small" id="updopen">查看新版本</button></span>
+    <span class="tright">
+    <button type="button" class="btn" id="undobtn" onclick="undo(this)" title="撤销最近一次修改"><span aria-hidden="true">↶</span> 撤销</button>
+    <span class="pillwrap">
+      <button type="button" class="pill ok" id="lrpill" aria-expanded="false" aria-controls="lrhint"><span class="dot" id="lrdot"></span><span id="lrstat">已连接（示例）</span></button>
+      <div class="pop" id="lrhint" role="status" hidden></div>
+    </span>
+    </span>
+  </header>
+
+  <!-- 照片面板（可收起）：照片 / 配方库 二选一 -->
+  <aside class="col left" id="ppanel" aria-label="照片面板">
+    <div class="ppview" id="libview" hidden>
+      <div class="pphead"><h4 id="lib_title">配方库</h4><span class="spacer"></span><button type="button" class="btn small ghost" id="lib_back" title="回到照片面板">◂ 回到照片</button></div>
       <div class="tabs" id="ltabs">
         <button class="tab on" data-t="preset">预设</button>
         <button class="tab" data-t="fav">收藏</button>
@@ -37,60 +71,48 @@
       </div>
       <div class="pane" id="lpane"></div>
     </div>
-    <div class="lower" id="gal">
-      <div class="galhead"><span class="galtitle" id="gal_title">我的照片</span><span class="spacer"></span>
-        <button class="btn small" id="gal_refresh" title="重新读取照片库里的照片">刷新</button>
-        <button class="btn small" id="gal_open" title="在资源管理器中打开照片库文件夹">打开文件夹</button></div>
+    <div class="ppview lower" id="gal">
+      <div class="pphead"><h4 class="galtitle" id="gal_title">照片</h4><span class="gcount" id="gal_count"></span><span class="spacer"></span>
+        <button class="btn small icon ghost" id="gal_refresh" type="button" title="重新读取照片库里的照片" aria-label="刷新照片库"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.7-4M13.5 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="btn small icon ghost" id="gal_open" type="button" title="在资源管理器中打开照片库文件夹" aria-label="打开照片库文件夹"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.8 4.2c0-.7.5-1.2 1.2-1.2h3l1.4 1.6H13c.7 0 1.2.5 1.2 1.2v6.2c0 .7-.5 1.2-1.2 1.2H3c-.7 0-1.2-.5-1.2-1.2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
+        <button type="button" class="btn small ghost" id="pp_collapse" title="收起照片面板">◂ 收起</button></div>
       <div class="galscope"><span id="gal_scope">照片库就是“设置”里的照片工作文件夹，导入的照片会按拍摄日期放进来。</span></div>
       <div class="galtools"><input type="text" id="gal_q" placeholder="搜索文件名" maxlength="60" autocomplete="off" aria-label="搜索文件名">
         <select id="gal_sort" title="排序方式" aria-label="排序方式"><option value="captured">拍摄时间</option><option value="imported">导入时间</option><option value="name">名称</option><option value="size">大小</option><option value="rating">星级</option><option value="flag">旗标</option><option value="label">颜色标签</option><option value="modified">最后修改</option><option value="edited">是否修过</option><option value="type">类型</option></select>
         <button class="btn small" id="gal_dir" type="button" title="降序（点击切换为升序）" aria-label="排序方向：降序，点击切换为升序">↓ 降序</button>
-        <select id="gal_filter" title="筛选" aria-label="筛选"><option value="all">全部</option><option value="rated">已评星</option><option value="pick">留用</option><option value="new">未同步</option></select></div>
+        <select id="gal_filter" title="筛选" aria-label="筛选"><option value="all">全部</option><option value="rated">已评星</option><option value="pick">留用</option><option value="new">未同步</option></select>
+</div>
       <div class="galbar" id="gal_bar"></div>
       <div class="galmsg" id="gal_msg"></div>
       <div class="galscroll" id="gal_scroll" tabindex="0"></div>
     </div>
-  </div>
+  </aside>
 
-  <div class="splitter" id="split_l" role="separator" aria-orientation="vertical" aria-label="调整左栏宽度" tabindex="0" title="拖动调整左栏宽度（双击恢复默认）"></div>
+  <div class="splitter" id="split_l" role="separator" aria-orientation="vertical" aria-label="调整照片面板宽度" tabindex="0" title="拖动调整照片面板宽度（双击恢复默认）"></div>
 
-  <!-- CENTER -->
-  <div class="center">
-    <div class="viewbar">
-      <div class="seg" id="modes"><button class="on" data-m="pair">并排</button><button data-m="multi">多版本</button></div>
-      <span id="versiontools" style="display:none;align-items:center;gap:6px"><select id="versionpick" aria-label="选择保存的版本"></select><button class="btn small" id="versionsave">保存当前</button><button class="btn small" id="versionapply">应用版本</button><button class="btn small" id="versionundo" style="display:none">撤销应用</button></span>
-      <span class="spacer"></span>
-      <span id="pvctl" style="display:none;align-items:center;gap:8px">
-        <label class="why" id="edgebox">预览清晰度 <select id="edge"><option value="768">长边 768 px</option><option value="1024" selected>长边 1024 px</option><option value="1536">长边 1536 px</option><option value="2048">长边 2048 px</option></select></label>
-        <span class="zoomctl" id="zoomctl" role="group" aria-label="预览缩放">
-          <span class="why">缩放</span>
-          <button class="btn small zp" type="button" data-z="fit" aria-pressed="true" title="适合窗口（双击画面也可在“适合”和 100% 之间切换）">适合</button><button class="btn small zp" type="button" data-z="50" aria-pressed="false">50%</button><button class="btn small zp" type="button" data-z="100" aria-pressed="false">100%</button><button class="btn small zp" type="button" data-z="200" aria-pressed="false">200%</button>
-          <input type="range" id="zoomrange" min="10" max="400" step="1" value="100" aria-label="预览缩放比例（10% 到 400%）">
-          <output id="zoomtxt" class="zoomtxt" for="zoomrange">适合</output>
-        </span>
-      </span>
-      <span class="why" id="cur"></span>
-    </div>
-    <div class="stage pair" id="stage"></div>
+  <!-- 中间：预览 -->
+  <main class="center" id="center">
+    <div class="stage" id="stage"></div>
     <div class="infobar" id="infobar"></div>
-  </div>
+  </main>
 
   <div class="splitter" id="split_r" role="separator" aria-orientation="vertical" aria-label="调整右栏宽度" tabindex="0" title="拖动调整右栏宽度（双击恢复默认）"></div>
 
-  <!-- RIGHT -->
-  <div class="col right">
+  <!-- 右栏：本次调整 + 对话 -->
+  <aside class="col right" id="rcol" aria-label="本次调整与对话">
     <div class="params">
-      <div class="section-title">本次调整</div>
+      <div class="section-title"><span>本次调整</span><span class="spacer"></span>
+        <span class="restore-row" id="restorerow" style="display:none"><button class="btn small ghost" onclick="restoreOriginal(this)" title="把当前照片还原到首次调整之前的状态">撤销本次</button></span></div>
       <div class="pane"><table id="ptable"><thead><tr><th>参数</th><th>改前</th><th>改后</th><th>状态</th><th></th></tr></thead><tbody></tbody></table>
-        <div class="empty" id="pempty">暂无调整。请在下方输入修图需求。</div>
-        <div class="restore-row" id="restorerow" style="display:none"><button class="btn small" onclick="restoreOriginal(this)">还原到原始状态</button></div></div>
+        <div class="empty" id="pempty">暂无调整。请在下方输入修图需求。</div></div>
     </div>
     <div class="chat">
       <div class="msgs" id="msgs"><div class="msg ai">请选择照片并输入期望的修图效果。</div></div>
-      <div class="opts"><button class="switch on" id="sw" title="开启后，每项调整需先经确认才会执行"></button><span id="swlabel">逐项确认：开（每项调整需先确认）</span></div>
+      <div class="opts"><button class="switch on" id="sw" title="开启后，每项调整需先经确认才会执行" aria-label="逐项确认"></button><span id="swlabel">逐项确认：开（每项调整需先确认）</span><span class="spacer"></span><button type="button" class="btn small ghost" id="newchat" onclick="newChat()" style="display:none" title="清空当前对话，开始新对话">新对话</button></div>
       <div class="chatbar"><input id="inp" placeholder="例如：提高天空通透度，增强整体层次感" autocomplete="off"><button class="btn primary" id="send">发送</button><button class="btn" id="stop" style="display:none">停止</button></div>
     </div>
-  </div>
+  </aside>
+  <div class="toast" id="toastbox" role="status" aria-live="polite"></div>
 </div>
 
 <div class="mask" id="mask">
@@ -284,6 +306,7 @@
 <script src="js/pick.js"></script>
 <script src="js/gallery.js"></script>
 <script src="js/layout.js"></script>
+<script src="js/shell.js"></script>
 <script src="js/settings.js"></script>
 <script src="js/update.js"></script>
 <script src="js/wizard.js"></script>

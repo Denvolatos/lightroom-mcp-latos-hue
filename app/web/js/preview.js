@@ -126,6 +126,7 @@ function setFrame(id, o){   // o: {url, text, note, busy}
   f.classList.toggle('busy', !!o.busy); f.querySelector('.note').textContent=o.note||'';
 }
 function renderStage(){
+  $('#curtime').textContent = ((pv && pv.photo) || {}).captured || '';
   const s=$('#stage'), real=REAL(), kind = real ? 'real' : (DEMO ? 'demo' : 'none');
   if(real && viewMode==='multi'){
     if(s.dataset.kind!=='multi'){
@@ -153,7 +154,7 @@ function renderStage(){
   if (real) pvctlShow(false); else $('#pvctl').style.display = 'none';
   if (real) updatePickBtn();
   if (kind==='demo'){ $('#cur').textContent='界面演示 · 示例画面，非真实照片';
-    s.children[1].querySelector('.scene').classList.toggle('after', !!nApplied());
+    zoomLayout(); s.children[1].querySelector('.scene').classList.toggle('after', !!nApplied());
     s.children[1].querySelector('.note').textContent = nApplied()?'已调整 '+nApplied()+' 项':'暂无调整'; $('#infobar').innerHTML=''; return; }
   if (kind==='none'){ $('#cur').textContent='';
     const t = noBackend ? '当前为静态页面，无预览（地址后加 #demo 可查看界面演示）' : '正在读取预览';
@@ -191,6 +192,80 @@ function previewArrived(ev){
   const ph = ev.photo || {};
   if (SWITCH && (ph.id===SWITCH.id || ph.name===SWITCH.name || (ev.state!=='ok' && ev.state!=='loading'))){ SWITCH=null; clearTimeout(markSwitching.t); }
 }
+/* ---- 预览排列（1.3.0）：自动 / 左右 / 上下 / 滑动对比 ----
+   每个预览框按“所显示照片的宽高比”（读不到时 3:2）在可用空间内 contain 缩放、居中：框的大小就是照片显示出来的大小，不拉伸、不被裁。
+   自动：在“左右并排”和“上下排”里，选能让照片显示面积更大的那种（横图常选上下排，竖图自然选左右）；窗口大小/照片变化时重新算。
+   滑动对比：只显示一张图，中间竖线（role=slider）可用鼠标/触摸拖动、左右方向键调整；左边“初始”右边“当前”。排列选择存 localStorage（键 lh_arrange）。 */
+const ARR_KEY = 'lh_arrange', ARR_OK = ['auto', 'side', 'stack', 'slide'], ARR_GAP = 10, ARR_DEFAULT_RATIO = 1.5;
+let ARR = 'auto', SLIDE = 50, ARR_NOW = 'side', SLIDE_DRAG = null;
+try { const v = window.localStorage.getItem(ARR_KEY); if (ARR_OK.indexOf(v) >= 0) ARR = v; } catch(e){}
+function arrRatio(){
+  const imgs = document.querySelectorAll('#stage .pimg');
+  for (const i of imgs){ if (i.naturalWidth > 0 && i.naturalHeight > 0 && i.closest('.frame.has')) return i.naturalWidth / i.naturalHeight; }
+  const c = pv && pv.current; if (c && c.w > 0 && c.h > 0) return c.w / c.h;
+  return ARR_DEFAULT_RATIO;
+}
+function arrFit(cw, ch, r){ const w = Math.max(0, Math.min(cw, ch * r)); return {w, h: w / r}; }
+/* 每种排法下两张照片一共显示多大的面积（越大越好） */
+function arrArea(mode, W, H, r){
+  if (mode === 'slide'){ const f = arrFit(W, H, r); return f.w * f.h; }
+  const cw = mode === 'side' ? (W - ARR_GAP) / 2 : W, ch = mode === 'side' ? H : (H - ARR_GAP) / 2, f = arrFit(cw, ch, r);
+  return 2 * f.w * f.h;
+}
+function arrChoose(W, H, r){ return arrArea('stack', W, H, r) > arrArea('side', W, H, r) ? 'stack' : 'side'; }     // 面积相同时用左右并排
+function arrangeLayout(){
+  const s = $('#stage'); if (!s) return;
+  const cs = getComputedStyle(s), W = s.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight), H = s.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  const frames = Array.prototype.slice.call(s.querySelectorAll(':scope > .frame'));
+  if (!frames.length || W <= 0 || H <= 0) return;
+  const r = arrRatio(); ARR_NOW = ARR === 'auto' ? arrChoose(W, H, r) : ARR;
+  ['arr-side', 'arr-stack', 'arr-slide'].forEach(c => s.classList.remove(c)); s.classList.add('arr-' + ARR_NOW); s.dataset.arr = ARR_NOW; s.dataset.ratio = r.toFixed(4);
+  let cw = W, ch = H;
+  if (ARR_NOW === 'side') cw = (W - ARR_GAP) / 2; else if (ARR_NOW === 'stack') ch = (H - ARR_GAP) / 2;
+  const f = arrFit(cw, ch, r);
+  frames.forEach(e => { e.style.width = f.w.toFixed(1) + 'px'; e.style.height = f.h.toFixed(1) + 'px'; });
+  slideLayout();
+}
+/* 滑动对比的中间竖线 */
+function slideLayout(){
+  const s = $('#stage'); let h = $('#slidehandle');
+  if (ARR_NOW !== 'slide' || !s.querySelector(':scope > .frame')){ if (h) h.remove(); s.style.removeProperty('--slide'); return; }
+  if (!h){
+    h = document.createElement('div'); h.id = 'slidehandle'; h.className = 'slidehandle'; h.tabIndex = 0; h.setAttribute('role', 'slider');
+    h.setAttribute('aria-label', '初始与当前的对比位置'); h.setAttribute('aria-orientation', 'horizontal'); h.setAttribute('aria-valuemin', '0'); h.setAttribute('aria-valuemax', '100');
+    h.title = '拖动或按左右方向键，对比初始（左）和当前（右）'; h.innerHTML = '<span class="knob" aria-hidden="true">⇆</span>';
+    h.addEventListener('pointerdown', slideDown); h.addEventListener('keydown', slideKey); s.appendChild(h);
+  }
+  const fr = s.querySelector(':scope > .frame'), left = fr.offsetLeft, top = fr.offsetTop;
+  s.style.setProperty('--slide', SLIDE + '%'); h.style.left = (left + fr.offsetWidth * SLIDE / 100) + 'px'; h.style.top = top + 'px'; h.style.height = fr.offsetHeight + 'px'; h.style.bottom = 'auto';
+  h.setAttribute('aria-valuenow', String(Math.round(SLIDE))); h.setAttribute('aria-valuetext', '初始 ' + Math.round(SLIDE) + '%，当前 ' + (100 - Math.round(SLIDE)) + '%');
+}
+function slideSet(v){ SLIDE = Math.max(0, Math.min(100, v)); slideLayout(); }
+function slideDown(e){
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  SLIDE_DRAG = {id: e.pointerId}; $('#slidehandle').classList.add('drag'); try { e.currentTarget.setPointerCapture(e.pointerId); } catch(err){}
+  e.preventDefault(); e.stopPropagation();
+}
+function slideKey(e){
+  const step = e.shiftKey ? 10 : 2; let v = null;
+  if (e.key === 'ArrowLeft') v = SLIDE - step; else if (e.key === 'ArrowRight') v = SLIDE + step; else if (e.key === 'Home') v = 0; else if (e.key === 'End') v = 100;
+  if (v === null) return; e.preventDefault(); slideSet(v);
+}
+document.addEventListener('pointermove', e=>{
+  if (!SLIDE_DRAG) return;
+  const fr = document.querySelector('#stage > .frame'); if (!fr) return; const r = fr.getBoundingClientRect();
+  if (r.width > 0) slideSet((e.clientX - r.left) / r.width * 100);
+});
+function slideUp(){ if (!SLIDE_DRAG) return; SLIDE_DRAG = null; const h = $('#slidehandle'); if (h) h.classList.remove('drag'); }
+document.addEventListener('pointerup', slideUp); document.addEventListener('pointercancel', slideUp);
+function arrUI(){ document.querySelectorAll('#arrange button').forEach(b => { const on = b.dataset.a === ARR; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }); }
+$('#arrange').onclick = e => {
+  const b = e.target.closest('button[data-a]'); if (!b) return; ARR = b.dataset.a;
+  try { window.localStorage.setItem(ARR_KEY, ARR); } catch(err){}
+  arrUI(); zoomLayout();
+};
+arrUI();
+
 /* ---- 预览无级缩放（1.3.0）：滑杆 10%–400%（step 1）+ 预设“适合 / 50% / 100% / 200%” + 数字显示 ----
    ZOOM.mode：'fit'（适合窗口）或 'pct'（固定百分比；100% = 预览图的原始像素）。两个预览窗（初始/当前）共用同一个缩放和平移位置
    （平移位置用 0–1 的归一化中心 cx/cy 表示），所以同步。Ctrl+滚轮以鼠标位置为中心缩放；放大后按住鼠标拖动平移；
@@ -208,7 +283,8 @@ function zoomGeom(f){
   let top = h <= fh ? (fh - h) / 2 : Math.min(0, Math.max(fh - h, fh / 2 - ZOOM.cy * h));
   return {img, nw, nh, fw, fh, fit, s, w, h, left, top};
 }
-function zoomLayout(){
+function zoomLayout(){ arrangeLayout(); zoomApply(); }
+function zoomApply(){
   const fr = zoomFrames(); let first = true;
   fr.forEach(f=>{
     const g = zoomGeom(f); if (!g) return;

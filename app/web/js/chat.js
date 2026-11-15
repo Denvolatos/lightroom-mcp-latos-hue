@@ -48,13 +48,18 @@ let photoName = null;           // 真实模式：Lightroom 当前选中的照�
 const DOTCLR = {connected:'var(--ok)', connecting:'var(--warn)', disconnected:'var(--bad)'};
 let LRL = {state:'idle', message:''}, LASTST = null;   // LRL：软件自动启动 Lightroom 的进度（lr_launch 事件）
 function showStatus(s){ LASTST = s;
-  let text = s.text, hint = s.state==='connected' ? '' : s.hint, dot = DOTCLR[s.state]||'var(--bad)';
+  let text = s.text, hint = s.state==='connected' ? '' : s.hint, dot = DOTCLR[s.state]||'var(--bad)', kind = s.state==='connected' ? 'ok' : (s.state==='connecting' ? 'warn' : 'bad');
   if (s.state!=='connected' && ['starting','already_running','not_found','failed','timeout'].indexOf(LRL.state)>=0){
     hint = LRL.message;
-    if (LRL.state==='starting'){ text = '正在启动 Lightroom…'; dot = 'var(--warn)'; hint = '请稍候，Lightroom 启动需要一会儿。'; } }
-  $('#lrstat').textContent = text; $('#lrdot').style.background = dot;
-  $('#lrhint').textContent = hint; $('#lrhint').title = hint; }
-function onLrLaunch(ev){ LRL = ev; if (LASTST) showStatus(LASTST); else { $('#lrstat').textContent = ev.state==='starting' ? '正在启动 Lightroom…' : $('#lrstat').textContent; $('#lrhint').textContent = ev.message; } }
+    if (LRL.state==='starting'){ text = '正在启动 Lightroom…'; dot = 'var(--warn)'; kind = 'warn'; hint = '请稍候，Lightroom 启动需要一会儿。'; } }
+  paintPill(s.state==='connected' ? '已连接' : text, kind, dot, hint, text); }
+/* 状态胶囊：短文字 + 颜色；完整提示放进悬停提示和点开的小面板（#lrhint，id 保持不变） */
+function paintPill(short, kind, dot, hint, full){
+  $('#lrstat').textContent = short; $('#lrdot').style.background = dot;
+  const p = $('#lrpill'); p.className = 'pill ' + kind; p.title = (full || short) + (hint ? '：' + hint : '');
+  const h = $('#lrhint'); h.textContent = hint || ''; h.title = hint || '';
+  if (!hint && !h.hidden){ h.hidden = true; p.setAttribute('aria-expanded', 'false'); } }
+function onLrLaunch(ev){ LRL = ev; if (LASTST) showStatus(LASTST); else { const st = ev.state==='starting' ? '正在启动 Lightroom…' : $('#lrstat').textContent; paintPill(st, ev.state==='starting' ? 'warn' : 'bad', ev.state==='starting' ? 'var(--warn)' : 'var(--bad)', ev.message, st); } }
 function setBusy(b){ busy=b; $('#send').disabled=b; $('#inp').disabled=b; $('#stop').style.display=b?'':'none'; $('#newchat').disabled=b;
   $('#sw').disabled=b; $('#sw').title = b ? 'AI 正在处理这一轮，结束后才能切换' : '开启后，每项调整需先经确认才会执行'; }   // 这一轮用的是发送时的设置，处理中切换不会生效
 async function newChat(){
@@ -115,7 +120,7 @@ function send(){ const v=$('#inp').value.trim(); if(!v || busy) return; $('#inp'
 $('#stop').onclick=()=>{ if(REAL()) window.pywebview.api.stop(); };
 $('#send').onclick=send; $('#inp').onkeydown=e=>{ if(e.key==='Enter') send(); };
 function setAsk(v){ ask=!!v; $('#sw').classList.toggle('on',ask);
-  $('#swlabel').textContent= ask?'逐项确认：开（每项调整需先确认）':'逐项确认：关（自动执行）'; }
+  $('#swlabel').textContent= ask?'逐项确认：开':'逐项确认：关'; $('#sw').title = ask ? '开启：每项调整需先经你确认才会执行' : '关闭：AI 的调整会自动执行'; }
 $('#sw').onclick=()=>setAsk(!ask);
 
 /* 弹窗：返回 Promise<boolean> */
