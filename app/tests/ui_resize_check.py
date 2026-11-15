@@ -25,7 +25,7 @@ TAIL = r"""<script>
   if (T === 'panels') {
     ok(SL.getAttribute('role') === 'separator' && SR.getAttribute('role') === 'separator', '分隔线应是 role=separator');
     ok(SL.getAttribute('aria-orientation') === 'vertical' && SL.tabIndex === 0 && !!SL.getAttribute('aria-label') && !!SR.getAttribute('aria-label'), '分隔线应可聚焦、有方向和名称');
-    const mainW = $$('.main').clientWidth, expL = Math.min(480, mainW - wR() - 320), expR = Math.min(520, mainW - wL() - 320);
+    const mainW = $$('#main').clientWidth - $$('#rail').offsetWidth, expL = Math.min(480, mainW - wR() - 320), expR = Math.min(520, mainW - wL() - 320);
     ok(SL.getAttribute('aria-valuemin') === '200' && +SL.getAttribute('aria-valuemax') === expL && SR.getAttribute('aria-valuemin') === '240' && +SR.getAttribute('aria-valuemax') === expR, 'aria 最小/最大值不对：' + [SL.getAttribute('aria-valuemax'), SR.getAttribute('aria-valuemax')] + ' 期望 ' + [expL, expR]);
     ok(Math.abs(wL() - 300) <= 1 && Math.abs(wR() - 320) <= 1, '应使用设置里的宽度 300/320，实际 ' + wL() + '/' + wR());
     ok(+SL.getAttribute('aria-valuenow') === wL() && +SR.getAttribute('aria-valuenow') === wR(), 'aria-valuenow 应等于当前宽度');
@@ -34,7 +34,7 @@ TAIL = r"""<script>
     window.__SAVED__.length = 0;
     await drag(SL, 50, 8); ok(Math.abs(wL() - 350) <= 1, '左栏拖 +50 应为 350，实际 ' + wL()); ok(+SL.getAttribute('aria-valuenow') === wL(), 'aria-valuenow 应同步');
     ok(!document.body.classList.contains('resizing') && !SL.classList.contains('drag'), '松开后应结束拖动状态');
-    await drag(SR, -60, 8); ok(Math.abs(wR() - 380) <= 1, '右栏向左拖 60 应变宽到 380，实际 ' + wR());
+    await drag(SR, -60, 8); const room = $$('#main').clientWidth - $$('#rail').offsetWidth - wL() - 320; ok(Math.abs(wR() - Math.min(380, room)) <= 1, '右栏向左拖 60 应变宽到 ' + Math.min(380, room) + '（受中间区最小宽度限制），实际 ' + wR());
     await wait(900); ok(saves().length === 1 && saves()[0].left === wL() && saves()[0].right === wR(), '两次拖动（500ms 内）应合并为一次保存：' + JSON.stringify(saves()));
     ok(Object.keys(window.__SAVED__[0]).join() === 'panel_widths', '只应保存 panel_widths');
     /* 夹紧 */
@@ -45,7 +45,7 @@ TAIL = r"""<script>
     await drag(SR, -2000, 4); ok(wR() <= 520 && wC() >= 319, '右栏不应超过 520 且中间 ≥320：' + wR() + '/' + wC());
     /* 键盘 */
     await key(SR, 'Enter'); await key(SL, 'Enter'); SL.focus(); await key(SL, 'Home'); ok(wL() === 200, 'Home 应到最小 200'); await key(SL, 'ArrowRight'); ok(wL() === 216, '→ 应 +16：' + wL()); await key(SL, 'ArrowRight', {shiftKey:true}); ok(wL() === 264, 'Shift+→ 应 +48：' + wL());
-    await key(SL, 'ArrowLeft'); ok(wL() === 248, '← 应 -16：' + wL()); await key(SL, 'End'); ok(wL() === Math.min(480, $$('.main').clientWidth - wR() - 320), 'End 应到最大：' + wL());
+    await key(SL, 'ArrowLeft'); ok(wL() === 248, '← 应 -16：' + wL()); await key(SL, 'End'); ok(wL() === Math.min(480, $$('#main').clientWidth - $$('#rail').offsetWidth - wR() - 320), 'End 应到最大：' + wL());
     await key(SL, 'Enter'); ok(wL() === 260, 'Enter 应恢复默认 260：' + wL());
     await key(SR, 'ArrowRight'); ok(wR() < 300 || true, ''); await key(SR, 'Enter'); ok(wR() === 300, 'Enter 应恢复默认 300');
     await key(SR, 'ArrowLeft'); ok(wR() === 316, '右栏 ← 应变宽 16：' + wR()); await key(SR, 'ArrowRight', {shiftKey:true}); ok(wR() === 268, '右栏 Shift+→ 应变窄 48：' + wR());
@@ -64,10 +64,14 @@ TAIL = r"""<script>
   if (T === 'missing') { ok(wL() === 260 && wR() === 300, '缺 panel_widths 应用默认 260/300，实际 ' + wL() + '/' + wR()); }
   if (T === 'narrow') {
     ok(!vis(SL) && !vis(SR) && getComputedStyle(SL).display === 'none', '窄屏（≤900）不应显示分隔线');
-    ok(Math.abs(wL() - Math.min(Math.max(220, W * .26), 340)) <= 40 || W <= 800, '窄屏应忽略保存的宽度：' + wL());
-    ok(wC() > 150 && document.documentElement.scrollWidth <= W + 1, '窄屏中间区/横向溢出：' + wC());
-    const r1 = $$('.col.left').getBoundingClientRect(), r2 = $$('.center').getBoundingClientRect(), r3 = $$('.col.right').getBoundingClientRect();
-    ok(r1.right <= r2.left + 1 && r2.right <= r3.left + 1, '三栏应依次排列');
+    ok(wL() === 0 && !vis($$('.col.left')), '窄屏照片面板默认收成抽屉（不占位）');
+    ok(Math.abs(wR() - Math.min(Math.max(200, W * .30), 360)) <= 2, '窄屏右栏应忽略保存的宽度：' + wR());
+    ok(wC() > 300 && document.documentElement.scrollWidth <= W + 1, '窄屏中间区/横向溢出：' + wC());
+    const r2 = $$('.center').getBoundingClientRect(), r3 = $$('.col.right').getBoundingClientRect();
+    ok(r2.right <= r3.left + 1, '中间区与右栏应依次排列');
+    const c0 = wC(); $$('#r_photos').click(); await wait(60); const d = $$('.col.left').getBoundingClientRect();
+    ok(vis($$('.col.left')) && d.width > 150 && d.width <= W * .87 && wC() === c0, '点“照片”应从左边滑出抽屉，且不挤占预览区：' + d.width);
+    $$('#pp_collapse').click(); await wait(60); ok(!vis($$('.col.left')), '点“收起”应关闭抽屉');
   }
   if (T === 'wide') {
     ok(vis(SL) && vis(SR) || SL.getBoundingClientRect().height > 0, '宽屏应有分隔线');

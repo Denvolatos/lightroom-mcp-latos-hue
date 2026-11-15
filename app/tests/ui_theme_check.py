@@ -83,7 +83,7 @@ TAIL = r"""<script>
   const add = (sel, min, what, bgSel) => { const e = $$(sel); if (!e) { probes.push('缺少 ' + sel); return; } const fg = getComputedStyle(e).color, bg = effBg(bgSel ? $$(bgSel) : e), c = contrast(fg, bg);
     if (c < min) probes.push(what + ' 对比度 ' + c.toFixed(2) + ' < ' + min + '（' + fg + ' 在 ' + bg + '）'); };
   add('.col.left .tab.on', 4.5, '标签页（选中）'); add('.col.left .tab:not(.on)', 3, '标签页（未选中）');
-  add('.msg.ai', 4.5, '对话气泡'); add('.status', 3, '顶栏状态文字'); add('.brand', 4.5, '品牌名');
+  add('.msg.ai', 4.5, '对话气泡'); add('.pill', 3, '连接状态胶囊'); add('.tname', 4.5, '当前照片名'); add('.rbtn:not(.pri):not(.on)', 3, '图标栏按钮'); add('.rbtn.pri', 3, '图标栏主按钮（导入）'); if ($$('.rbtn.on')) add('.rbtn.on', 4.5, '图标栏选中项');
   add('#inp', 4.5, '输入框文字'); add('#send', 3, '主按钮文字'); add('.topbar .btn', 4.5, '普通按钮文字');
   add('th', 3, '表格表头'); add('.galscope', 3, '图库说明文字'); add('#swlabel', 3, '开关说明');
   const pr = document.createElement('div'); pr.id = 'probe'; pr.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;overflow:hidden';

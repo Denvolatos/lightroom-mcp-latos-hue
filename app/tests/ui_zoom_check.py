@@ -129,7 +129,7 @@ TAIL = r"""<script>
   }
   if (T === 'layout') {
     ok(document.documentElement.scrollWidth <= W + 1, '页面横向溢出 ' + document.documentElement.scrollWidth + '>' + W);
-    const z = $$('#zoomctl').getBoundingClientRect(), c = $$('.center').getBoundingClientRect(); ok(z.right <= c.right + 1 && z.left >= c.left - 1, '缩放控件应在中栏内：' + JSON.stringify([z.left, z.right, c.left, c.right]));
+    const z = $$('#zoomctl').getBoundingClientRect(), c = $$('#topbar').getBoundingClientRect(); ok(z.right <= c.right + 1 && z.left >= c.left - 1, '缩放控件应在顶栏内：' + JSON.stringify([z.left, z.right, c.left, c.right]));
     btn('200').click(); await wait(60); document.querySelectorAll('#pvctl button, #pvctl input, #pvctl select').forEach(e => { const r = e.getBoundingClientRect(); if (r.width) ok(r.right <= W + 1 && r.left >= -1, '控件超出窗口 ' + (e.id || e.textContent)); });
   }
 })().then(() => __finish(new URLSearchParams(location.search).get('t')), e => { window.__bad.push('脚本异常 ' + e + ' ' + (e.stack || '').slice(0, 200)); __finish('err'); });

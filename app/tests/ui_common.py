@@ -36,6 +36,8 @@ FAKE_API = r"""<script>
   const realMM = window.matchMedia.bind(window);
   window.matchMedia = m => /prefers-color-scheme:\s*dark/.test(m) ? ({get matches(){ return window.__sysDark; }, media:m, addEventListener(t,f){ window.__mqL.push(f); }, removeEventListener(){}, addListener(f){ window.__mqL.push(f); }, removeListener(){}}) : realMM(m);
   window.__setSysDark = v => { window.__sysDark = v; window.__mqL.forEach(f => f({matches:v})); };
+  /* nostorage=1：localStorage 不可用（隐私模式/被禁用），页面必须照常工作 */
+  if (q.get('nostorage')) { try { Object.defineProperty(window, 'localStorage', {get(){ throw new Error('denied'); }}); } catch(e){} }
   let readonly = q.get('ro')==='1';
   const prov = q.get('prov') || 'ok';
   const claude = {ok:{available:true, state:'ready', reason:'已安装并已登录。', next_step:''},
@@ -53,8 +55,9 @@ FAKE_API = r"""<script>
     send: ()=>Promise.resolve({ok:true}), stop(){}, reset(){}, answer(){}, undo(){}, restore_original(){},
     status: ()=>Promise.resolve({state:'connected', text:'Lightroom 已连接', hint:'', photo:{id:'P', name:'DSC08238.ARW'}}),
     preview_state: ()=>Promise.resolve(({
-      ok: {type:'preview', state:'ok', photo:{id:'P', name:'DSC08238.ARW', camera:'Sony ILCE-7CM2', iso:'ISO 100', aperture:'ƒ / 8.0', shutter:'1/800 秒', focal:'20 mm', format:'RAW', size:'1600 × 1000'},
-           initial:{url:'/img/initial.jpg', w:1600, h:1000, version:'v0'}, current:{url:'/img/adjusted.jpg', w:1600, h:1000, version:'v1'}, same:false, edge:1600},
+      ok: {type:'preview', state:'ok', photo:{id:'P', name:'DSC08238.ARW', camera:'Sony ILCE-7CM2', iso:'ISO 100', aperture:'ƒ / 8.0', shutter:'1/800 秒', focal:'20 mm', format:'RAW', size:'1600 × 1000', captured:'2026-11-01 14:25'},
+           initial:{url: q.get('shape')==='portrait' ? '/img/pi.jpg' : '/img/initial.jpg', w: q.get('shape')==='portrait' ? 1000 : 1600, h: q.get('shape')==='portrait' ? 1500 : 1000, version:'v0'},
+           current:{url: q.get('shape')==='portrait' ? '/img/pi.jpg' : '/img/adjusted.jpg', w: q.get('shape')==='portrait' ? 1000 : 1600, h: q.get('shape')==='portrait' ? 1500 : 1000, version:'v1'}, same:false, edge:1600},
       error: {type:'preview', state:'error', message:'无法读取预览：请确认 Lightroom 已打开并选中了照片'},
       loading: {type:'preview', state:'loading', message:'正在读取预览', photo:{id:'P', name:'DSC08238.ARW'}}
     })[q.get('pv')] || {type:'preview', state:'none', message:'Lightroom 中未选中照片'}), set_preview_edge: ()=>Promise.resolve({ok:true}),
@@ -88,7 +91,15 @@ FAKE_API = r"""<script>
       {id:'lightroom', title:'Lightroom', state:'todo', text:'已找到 Lightroom 程序，但它还没有打开。', hint:'请先打开 Lightroom。', action:'', action_label:''},
       {id:'plugin', title:'Lightroom 插件', state:'wait', text:'等待 Lightroom。', hint:'', action:'', action_label:''}]}),
     wizard_done: ()=>Promise.resolve({ok:true}),
-    import_state: ()=>Promise.resolve({stage:'idle'}), selection_state: ()=>Promise.resolve({count:0, photos:[], active_id:null}),
+    import_state: ()=>Promise.resolve({stage:'idle'}),
+    selection_state: ()=>Promise.resolve(q.get('sel') ? {count:2, photos:[{id:'A', name:'a.ARW'},{id:'B', name:'b.ARW'}], active_id:'A'} : {count:0, photos:[], active_id:null}),
+    lib_presets: ()=>Promise.resolve({ok:true, max:200, presets:[{id:'p-000000000001', name:'示例预设一', note:'示例备注', groups:['色调','色彩'], count:14, modified:'2026-11-03 20:00:00', fav:true}]}),
+    lib_notes: ()=>Promise.resolve({ok:true, notes:[{id:'n-000000000001', title:'示例经验一：天空发灰', scene:'示例场景', tags:['风光'], body:'示例正文', use_in_chat:true, fav:true, modified:'2026-11-03 20:00:00'}], tags:['风光'], max:300, context:{used:1, eligible:1, truncated:false}}),
+    lib_favs: ()=>Promise.resolve({ok:true, total:1, photo_fav:false, groups:{preset:[{type:'preset', key:'示例预设一', label:'示例预设一'}], lr_preset:[], note:[], photo:[]}}),
+    lib_lr_presets: ()=>Promise.resolve({ok:true, hidden_masks:0, note:'共 1 个预设', groups:[{folder:'示例分组', presets:[{id:'11111111-aaaa', name:'示例 Lightroom 预设', masks:false, key:'示例分组/示例 Lightroom 预设', fav:false}]}]}),
+    check_update_now: ()=>{ rec('check_update_now'); return Promise.resolve({state:'latest', latest:'1.3.0', enabled:true}); },
+    export_dialog_state: ()=>Promise.resolve({stage:'idle', options:{format:'jpeg', size:2048, quality:92, bit_depth:16, metadata:'minimal'}, connected:true,
+      photo:{name:'DSC08206.ARW', camera:'Sony ILCE-7M3', format:'RAW', size:'6000 × 4000', iso:100}, folder:'D:\\示例\\导出', folder_message:'', can_export:true, reason:''}),
   };
   window.pywebview = {api: new Proxy(A, {get: (t, k) => (k in t) ? t[k] : (() => Promise.resolve({}))})};
 })();

@@ -46,7 +46,7 @@ async function run(){
     ok(vis($$('#s_wizard')) && vis($$('#s_upd')), '常规里应有环境检查入口和检查更新开关');
     const all = $$('#smask').innerText + Array.from($$('#smask').querySelectorAll('[title],[aria-label]')).map(e => (e.title||'') + (e.getAttribute('aria-label')||'')).join('');
     ['托盘', '开机自启', '开机启动', '关闭窗口', '最小化到'].forEach(w => ok(all.indexOf(w) < 0, '设置里不应出现“' + w + '”'));
-    document.querySelectorAll('#smask .sgroup').forEach(g => ok(parseFloat(getComputedStyle(g).borderTopLeftRadius) === 16, '卡片圆角应为 16px'));
+    document.querySelectorAll('#smask .sgroup').forEach(g => ok(parseFloat(getComputedStyle(g).borderTopLeftRadius) === ({glass: 20, dark: 10})[q.get('theme')] || (parseFloat(getComputedStyle(g).borderTopLeftRadius) === 16 && ['glass', 'dark'].indexOf(q.get('theme')) < 0), '卡片圆角应随主题（paper 16 / glass 20 / dark 10）'));
   }
   if (T === 'tabs') {
     await openAt();
