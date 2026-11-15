@@ -2,4 +2,4 @@
 # Copyright (C) 2026 Denvolatos and contributors
 """Lightroom MCP (Windows): lets Claude / Codex look at photos in Lightroom Classic."""
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"

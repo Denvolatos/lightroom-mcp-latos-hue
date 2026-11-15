@@ -3,6 +3,11 @@
 Versions: a new feature raises the middle number, a small fix the last one. The server version lives in
 `server/lightroom_mcp/__init__.py`, the plug-in version in `plugin/lrmcp.lrdevplugin/Version.lua` (and `Info.lua`).
 
+## 1.3.0 — released together with Latos Hue 1.3.0
+
+No change to the tools, the server or the plug-in commands; only the version number moves with the app release.
+- **Upgrading:** close Latos Hue and Lightroom, install, then restart Lightroom (or reload the plug-in once).
+
 ## 1.2.0 — released together with Latos Hue 1.2.0
 
 - **Plug-in / server:** `list_folder_photos` now also returns the colour label, whether the photo has been edited (`editCount`) and,
