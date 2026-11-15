@@ -63,7 +63,7 @@ async function wzChooseAi(id){
 async function wzAct(action){
   if (WZ.busy) return; WZ.busy=true; wzMsg(''); wzRender();
   if (action==='choose_ai'){
-    WZ.busy=false; closeWizard(); await openSettings(); $('#s_provider').focus(); return;
+    WZ.busy=false; closeWizard(); await openSettings('ai'); $('#s_provider').focus(); return;
   }
   try {
     const r = await window.pywebview.api[WZ_ACTIONS[action]]();

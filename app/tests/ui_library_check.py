@@ -74,6 +74,7 @@ const tab = t => click('#ltabs .tab[data-t="' + t + '"]');
 const sendEv = ev => window.onClaudeEvent(ev);
 (async()=>{
   await wait(200);
+  document.getElementById('r_lib').click(); await wait(50);      /* 新布局：配方库在图标栏里，点开才会替换照片面板 */
   if (/^preset/.test(S)) tab('preset');
   if (S === 'preset_list' || S === 'preset_confirm' || S === 'preset_save_error' || S === 'apply_readonly' || S === 'apply_error') { await wait(100); click('[data-pid="p-000000000001"]'); }
   if (S === 'preset_save' || S === 'preset_save_error' || S === 'preset_save_dup') { await wait(100); click('#pr_save'); await wait(150);

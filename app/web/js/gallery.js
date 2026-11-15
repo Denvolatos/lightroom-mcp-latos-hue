@@ -105,7 +105,7 @@ function applySelClass(el,id){ el.classList.toggle('sel', G.sel.indexOf(id)>=0);
 function applySelClasses(){ G.cells.forEach((el,id)=>applySelClass(el,id)); }
 function buildGallery(){
   const box=$('#gal_scroll'), st=G.st, top=box.scrollTop;
-  $('#gal_title').textContent = '我的照片' + (st.total ? `（${st.total} 张）` : '') + (st.state==='loading' && st.total ? '　正在刷新…' : '');
+  $('#gal_title').textContent = '照片'; $('#gal_count').textContent = (st.total ? st.total + ' 张' : '') + (st.state==='loading' && st.total ? ' · 正在刷新…' : '');
   $('#gal_scope').textContent = st.base ? `照片库：${st.base}（含子文件夹；导入的照片按拍摄日期放进来）` : '还没有选择照片工作文件夹，请先在“设置”里选择。';
   const listMode = !(st.state==='idle' || (st.state==='loading' && !(st.photos||[]).length)) && st.state!=='error' && !!st.base && !!st.total;
   const groups = listMode ? galGroups(galVisible()) : null;

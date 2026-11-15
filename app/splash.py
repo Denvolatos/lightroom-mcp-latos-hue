@@ -51,14 +51,17 @@ def splash_html(version: str, text: str = TEXT_CHECK, icon_uri: str | None = Non
     icon = icon_data_uri() if icon_uri is None else icon_uri
     img = f'<img class="ic" src="{icon}" alt="">' if icon else '<div class="ic"></div>'
     return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>{_html.escape(TITLE)}</title><style>
-html,body{{margin:0;height:100%;background:#17181b;overflow:hidden;font-family:"Segoe UI","Microsoft YaHei UI",sans-serif;color:#e6e7ea;user-select:none;cursor:default}}
-.card{{box-sizing:border-box;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:linear-gradient(160deg,#1d1f24,#141518);border:1px solid #2b2d33;border-radius:{CORNER // 2}px}}
+/* 与主界面同一套配色：默认浅色纸感，系统是深色时用深色（启动界面读不到设置，所以只能跟随系统） */
+:root{{--bg:#efece6;--card-a:#fbfaf7;--card-b:#f3f1ec;--line:#dedad1;--text:#26241f;--muted:#7c776b;--track:#dedad1;--accent:#1f8a82;--radius:{CORNER // 2}px}}
+@media (prefers-color-scheme:dark){{:root{{--bg:#17181a;--card-a:#222325;--card-b:#18191b;--line:#34363a;--text:#e8e9ea;--muted:#9ea2a9;--track:#2f3134;--accent:#3fb3a9}}}}
+html,body{{margin:0;height:100%;background:var(--bg);overflow:hidden;font-family:"Segoe UI","Microsoft YaHei UI",sans-serif;color:var(--text);user-select:none;cursor:default}}
+.card{{box-sizing:border-box;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:linear-gradient(160deg,var(--card-a),var(--card-b));border:1px solid var(--line);border-radius:var(--radius)}}
 .ic{{width:96px;height:96px;object-fit:contain;margin-bottom:6px}}
 .name{{font-size:22px;font-weight:600;letter-spacing:.5px}}
-.ver{{font-size:12px;color:#8b8f99}}
-.msg{{margin-top:18px;font-size:13px;color:#a9adb7;min-height:18px}}
-.bar{{margin-top:8px;width:180px;height:3px;border-radius:2px;background:#2a2c32;overflow:hidden;position:relative}}
-.bar i{{position:absolute;top:0;left:-40%;width:40%;height:100%;border-radius:2px;background:#4f8cff;animation:go 1.3s ease-in-out infinite}}
+.ver{{font-size:12px;color:var(--muted)}}
+.msg{{margin-top:18px;font-size:13px;color:var(--muted);min-height:18px}}
+.bar{{margin-top:8px;width:180px;height:3px;border-radius:2px;background:var(--track);overflow:hidden;position:relative}}
+.bar i{{position:absolute;top:0;left:-40%;width:40%;height:100%;border-radius:2px;background:var(--accent);animation:go 1.3s ease-in-out infinite}}
 @keyframes go{{0%{{left:-40%}}100%{{left:100%}}}}
 </style></head><body><div class="card">{img}<div class="name">Latos Hue 修图助手</div><div class="ver">版本 {_html.escape(version)}</div>
 <div class="msg" id="msg">{_html.escape(text)}</div><div class="bar"><i></i></div></div>

@@ -70,7 +70,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     const cs = getComputedStyle(e); const lh = parseFloat(cs.lineHeight) || 18;
     const lineH = r.height - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
     const label = (e.textContent || '').trim().slice(0, 12) || e.id;
-    if (e.tagName === 'BUTTON' && lineH > lh * 1.6 && label) bad.push('按钮换行 ' + label);
+    if (e.tagName === 'BUTTON' && !e.classList.contains('rbtn') && lineH > lh * 1.6 && label) bad.push('按钮换行 ' + label);
     if (r.right > W + 1 || r.left < -1) bad.push('超出窗口 ' + label);
   });
   document.querySelectorAll('.dialog').forEach(d => { const r = d.getBoundingClientRect(); if (r.width && (r.right > W + 1 || r.left < -1 || r.bottom > H + 1)) bad.push('对话框超出窗口'); });

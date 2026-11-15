@@ -105,6 +105,7 @@ async function setSort(key, dir) {
 (async()=>{
   const bad = [];
   await wait(1500);
+  if (innerWidth <= 900) { document.getElementById('r_photos').click(); await wait(200); }      /* 窄屏：照片面板是抽屉，点“照片”才滑出 */
   const W = document.documentElement.clientWidth;
   /* 无障碍名称、选项 */
   const o = Array.from(selE().options).map(x => x.value + ':' + x.textContent).join(',');

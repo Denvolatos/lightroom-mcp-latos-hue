@@ -1047,3 +1047,76 @@ PR 新增的 `version_save / version_apply / batch_plan_from_edit / batch_apply 
 - 脱敏是规则匹配，不能保证覆盖所有格式（例如路径里夹引号、非常规扩展名）；README 已提示用户发出前自查。
 - 清理缓存后图库缩略图重新取的完整链路只验证了“重新排队 + 通知页面”，没有接真实 Lightroom 看实际重取。
 - “进行中”判断沿用现有字段（`_busy`、会话 busy、导入/导出 stage），AI 挑片是否都经 `_busy` 依赖现有实现。
+
+## 1.3.0 界面（分支 feat/v130-ui）
+
+### 改了什么
+- **风格与主题**：`css/app.css` 全面改为设计稿的三套主题，颜色 / 圆角 / 阴影 / 字号全部走 `:root` 变量（规则里没有写死的颜色，`ui_theme_check.py` 会扫）。三套：`paper` 浅色纸感（设计稿 B，默认）、`glass` 夜蓝玻璃（设计稿 C）、`dark` 暗室（设计稿 A）。
+- **设置页**：改为左侧分栏导航 + 右侧卡片（常规 / Lightroom / AI 来源 / 安全 / 维护 / 关于）；≤900px 时导航变成顶部横排。
+- **关于页**：软件图标和名称、一句话介绍、版本、“它是什么”、作者两张卡片（名字是按钮，点了调 `open_link(key)`）、许可证、项目主页（打开 + 复制链接）、声明。没有“致谢”。
+- **可拖动面板**：左/右栏与中间区之间的分隔线（`js/layout.js`）；对话框可拖标题栏移动。
+- **预览无级缩放**：滑杆 + 预设 + 数字显示，Ctrl+滚轮、双击、拖动平移（`js/preview.js` 里的 `zoom*`）。预览图按原始像素放进画面，用 `transform` 缩放 / 平移，两个预览窗共用同一个缩放和平移位置。
+- **启动画面**（`splash.py` 里的 HTML/CSS，只改了样式）：用同一套配色，浅色默认、系统是深色时用深色。启动画面读不到设置，所以只能跟随系统，不跟随用户选的 glass / dark。
+
+### 主题与字号机制
+- `js/theme.js` 在 `<head>` 里最先加载。`<html data-theme="paper|glass|dark">`；偏好 `system` 在 JS 里解析（系统浅色→paper，系统深色→dark，监听 `prefers-color-scheme` 变化），同时写 `data-theme-pref`。
+- 设置读回之前用 `localStorage`（键 `lh_theme`、`lh_font_size`，读写都 try/catch）里缓存的上一次值，避免闪白/闪黑；读回后以设置为准并更新缓存。旧值 `light` 当 `paper`；不认识的值回落 `system`。
+- 字号：`html { font-size: calc(16px × --fscale) }`，`--fscale` = 0.9 / 1 / 1.12 / 1.25（small / standard / large / xlarge）。字号和与文字有关的宽度（对话框、标签列）都用 rem，所以布局随字号缩放。
+- 玻璃主题的 `backdrop-filter: var(--blur)`；其他主题 `--blur: none`。`@supports not (backdrop-filter…)` 时玻璃主题的面板变量换成不透明色。
+- 外观的保存方式：设置页里选主题 / 字号**立刻生效（预览）**，点“保存”才写入 `save_settings({theme, font_size})`，点“取消”或点遮罩恢复到打开设置时的样子（与设置页原有“改完点保存”一致）。只读模式、清理缓存、诊断包、恢复默认是**立即动作**，不经“保存”。
+- 面板宽度（`panel_widths`）和预览缩放（`preview_zoom`）各自防抖保存（500 / 600 ms），不经设置页的“保存”；设置页“保存”也不会带这两项。
+
+### 变量表（`:root` 默认 = paper；`[data-theme="dark"]` / `[data-theme="glass"]` 覆盖）
+| 变量 | 用途 | paper | dark | glass |
+|---|---|---|---|---|
+| `--bg` / `--bg-image` | 页面底 / 底图渐变 | #efece6 | #0f0f10 | #0b1020 + 两层径向渐变 |
+| `--panel` / `--panel2` | 面板 / 次级面板 | #fbfaf7 / #f3f1ec | #18181a / #202023 | 半透明 rgba(26,33,60,.72) / rgba(40,50,88,.6) |
+| `--topbar-bg` / `--dialog-bg` / `--settings-bg` | 顶栏 / 对话框 / 设置框底 | 面板色 / 面板色 / #efece6 | #141416 / #18181a / #0f0f10 | 半透明深蓝 |
+| `--line` / `--line-strong` / `--hover` | 线 / 强调线 / 悬停 | #dedad1 / #c4bfb3 / #ebe8e0 | #2c2c30 / #44444a / #26262a | 半透明蓝紫 |
+| `--text` / `--muted` / `--field` | 正文 / 次要字 / 输入框底 | #26241f / #7c776b / #fff | #ececee / #8e8e96 / #0f0f10 | #eaedff / #8f98c4 / 半透明深蓝 |
+| `--accent` / `--accent-hover` / `--accent-text` | 强调色 / 悬停 / 按钮字 | #1f8a82 / #18736c / #fff | #e8a33d / #f2b556 / #1a1203 | #7b8cff / #96a4ff / #0b1020 |
+| `--accent-soft` / `--accent-ring` / `--sel-bg` | 强调淡底 / 光圈 / 选中底 | 强调色 .12 / .45 / .10 | .15 / .55 / .14 | .18 / .6 / .18 |
+| `--link` / `--link-hover` | 链接字（保证对比度） | #16706a | = accent | #a3afff |
+| `--ok` / `--warn` / `--bad` | 成功 / 警告 / 危险 | #2e9b63 / #a8660a / #cf4a4a | #4cc38a / #f5c451 / #ef6a6a | #5fd6b0 / #f2c46b / #ff7d8c |
+| `--warn-bg` / `--bad-bg` / `--bad-text` / `--badge-bg` | 提示条、徽标底 | 浅暖色 | 深暖色 | 半透明 |
+| `--preview` / `--preview-text` | 预览区、缩略图底（始终深色） | #1b1b1d | #070708 | #05070f |
+| `--switch-off` / `--scroll` | 开关关闭色 / 滚动条 | #cfcabc | #3f3f45 / #3a3a3f | 半透明蓝 |
+| `--overlay` / `--blur` | 对话框遮罩 / 模糊 | rgba(38,36,31,.45) / none | rgba(0,0,0,.65) / none | rgba(5,8,20,.6) / blur(14px) |
+| `--shadow` / `--shadow-lg` | 阴影 | 柔和暖色 | 无 / 深 | 大扩散 |
+| `--radius-xs` / `--radius-sm` / `--radius` / `--radius-lg` | 圆角 | 4 / 7 / 10 / 16 | 3 / 5 / 6 / 10 | 5 / 9 / 12 / 20 |
+| `--fs-2xs … --fs-xxl` | 字号（rem；对应 10 / 11 / 12 / 13 / 14 / 15 / 18 / 22 px @100%） | 同 | 同 | 同 |
+
+所有主题共用（始终叠在图片上的深色小标签）：`--on-img`、`--img-chip`、`--img-shadow`、`--tag-warn-*`、`--tag-bad-*`。唯一保留字面颜色的是 `#demo` 示例画面 `.scene`（示例图，不是界面颜色）。
+
+### 后端约定（界面按此读，缺字段都做了防御）
+- `get_settings()` 的 `settings` 里：`theme`（system/paper/glass/dark）、`font_size`、`panel_widths {left,right}`、`preview_zoom`（"fit" 或 10–400 整数）；返回里另带 `readonly`。
+- `set_readonly(bool)`、`clear_cache()`、`make_diagnostics()`（取消 `{ok:false,cancelled:true}`）、`reset_settings()`、`about_info()`、`open_link(key)`（页面只传 `homepage` / `denvolatos` / `galio1991`，从不传网址）。
+- 面板宽度默认 260 / 300（与后端 `DEFAULT_PANEL_WIDTHS` 一致）；限制 200–480 / 240–520，同时给中间区至少留 320 px。窄屏（≤900px）隐藏分隔线，并忽略保存的宽度。
+
+### 界面检查脚本（PowerShell 里跑；Bash 沙箱里 Edge 无输出）
+`python app/tests/<脚本> <输出目录>`：
+`ui_theme_check.py`（三套主题、跟随系统、字号、对比度、无写死颜色）、`ui_settings_check.py`（设置页各分栏、关于页、维护、只读、外观）、`ui_resize_check.py`（分隔线与对话框拖动）、`ui_zoom_check.py`（缩放与平移）、`ui_layout_check.py` 等。共用工具在 `ui_common.py`（假 `pywebview.api`、静态服务、无头 Edge）。这些脚本都带断言，有问题退出码为 1。
+
+### 没验证的点
+- 没有接真实后端、没有启动 pywebview 窗口、没有连 Lightroom：新接口（`open_link`、`about_info`、维护三项、`set_readonly`）只在假 api 里按约定造过数据。
+- `backdrop-filter` 的“降级”分支（不支持时用不透明面板）只检查了 CSS 写法，没有在不支持的内核上跑过。
+- 玻璃主题的背景渐变没有计入对比度检查（按底色 `#0b1020` 算，最亮处的渐变更浅，次要文字实际对比度会略低）。
+- 无头 Edge 里“跟随系统”靠覆盖 `matchMedia` 模拟（无头 Edge 的 `prefers-color-scheme` 不好控制）；真实 WebView2 下的系统切换待真机看。
+- 触摸 / 笔输入的拖动没测；对话框拖动在多显示器、系统缩放不是 100% 时的表现待真机。
+- 启动画面（`splash.py`）只改了样式并用截图看过，没有走真实启动流程。
+
+### 1.3.0 主界面新布局「照片在左」（对照设计稿 `?s=a|b|c&p=main3`）
+- **整体四列**（`index.html` 的 `#main` 是一个网格）：图标栏 `#rail`（4.5rem）| 照片面板 `#ppanel`（`.col.left`，默认 260px，可拖宽）| 预览区 `#center` | 右栏 `#rcol`（默认 300px）。顶栏 `#topbar` 横跨照片面板之后的三列。分隔线 `#split_l` / `#split_r` 仍是零宽网格列。
+- **图标栏**：照片 `#r_photos`、配方库 `#r_lib`、导入 `#impbtn`（主按钮）、导出 `#exportbtn`、AI 挑片 `#pickbtn`；底部 更多 `#morebtn`、设置 `#setbtn`。导入/导出/挑片仍调用原来的 `startImport()` / `openExport()` / `openPick()`；`#pickbtn` 没有选中照片时仍然不可点（`updatePickBtn`）。
+- **照片面板**（`js/shell.js`）：照片（`#gal`，沿用 `js/gallery.js` 的分组 / 排序 / 选中 / 缩略图逻辑，顶部“照片 N 张 ◂收起”，刷新 / 打开文件夹是图标按钮）和配方库（`#libview`：预设 / 收藏 / 经验，沿用 `js/library.js`）二选一。点“照片”：正显示照片时收起，否则回到照片并展开；点“配方库”：替换内容，再点回到照片。
+- **收起状态**存在 `localStorage` 的 `lh_pp_collapsed`（读写都 try/catch；存储不可用时本次运行内仍可收起，只是不记住）。**后端设置里目前没有 `photo_panel_collapsed`**，合并后端时如要进设置，把 `ppSave()` / `PP.collapsed` 的初值改成读写设置即可。窄屏（≤900px）的抽屉状态不保存。
+- **顶栏**：当前照片名 `#cur` + 拍摄时间 `#curtime`（读 `preview` 事件里 `photo.captured`，没有就空）、并排 / 多版本 `#modes`、排列 `#arrange`（自动 / 左右 / 上下 / 滑动对比）、清晰度 `#edge`、缩放控件、更新提示 `#updnote`、撤销 `#undobtn`（调用原来的 `undo()`，撤销最近一次修改）、连接状态胶囊 `#lrpill`。多版本的控件 `#versiontools` 也在这一行。
+- **连接状态胶囊**：已连接 = 绿点 +“已连接”；正在连接 / 自动启动 Lightroom 中 = 黄色；未连接或出问题 = 红色 + 简短原因。完整提示放在胶囊的悬停提示里，点胶囊展开 `#lrhint`（原来的提示元素，id 不变，`textContent` 仍是完整提示）；展开 / 收起不改变顶栏高度。
+- **右栏**：“撤销本次”（原来的“还原到原始状态”，`restoreOriginal()`）在“本次调整”标题旁，只有存在已应用的调整时才显示；“逐项确认”开关和“新对话”在输入框正上方。
+- **更多菜单**：新对话、环境检查（`openWizard()`）、检查更新（打开设置的“关于”并触发检查）。菜单用 `position: fixed` 放在 `#main` 下（不放进图标栏，避免被 `overflow` 或玻璃主题的 `backdrop-filter` 裁掉）。
+- **预览框按照片真实比例**（`js/preview.js` 的 `arrangeLayout`）：每个框的宽高 = 照片在所在格子里 contain 后的大小（比例读 `img.naturalWidth/Height`，读不到用 `preview` 事件里的 `w/h`，再读不到用 3:2），居中；不拉伸、不裁剪。“自动”比较“左右”和“上下”两种排法下两张照片总共显示的面积，取大的（相同取左右）；窗口大小（`ResizeObserver`）、照片、面板收起 / 拖宽变化都会重新计算。排列选择存 `localStorage` 的 `lh_arrange`（无效值回落“自动”）。
+- **滑动对比**：只显示一张，两个框叠在同一格，用 `clip-path` 把“初始”裁到左半、“当前”裁到右半；中间竖线 `#slidehandle` 是 `role="slider"`（`aria-valuenow` 0–100）：鼠标 / 触摸拖动，← → 调 2%、Shift+← → 调 10%、Home / End 到 0 / 100。缩放 / 平移照样生效且两张同步。
+- **窄屏（≤900px）**：图标栏变成顶部横条（放不下可横向滚动），顶栏在它下面，照片面板变成从左边滑出的抽屉（叠在预览区上，不挤占它；点“照片 / 配方库”打开，“◂ 收起”或 Esc 关闭），分隔线隐藏，右栏宽度忽略保存值。
+- 为适配新结构改动的旧检查：`ui_layout_check.py` / `ui_versions_check.py` 的“按钮不换行”检查跳过图标栏按钮（图标 + 小字本来就是上下两行）；`ui_versions_check.py` 的“动态文字没有转义”检查放过设置对话框里固定的 logo 图片；`ui_sort_check.py`（窄屏先点“照片”滑出抽屉）、`ui_library_check.py`（先点“配方库”）、`ui_update_check.py`（先打开“关于”）、`ui_preview_check.py`（缩放预设按钮）改了入口。断言没有放宽。
+- 新增 `ui_shell_check.py`（图标栏 / 更多菜单 / 配方库 / 收起 / 顶栏 / 比例与自动排列 / 滑动对比 / 状态胶囊 / 右栏 / 窄屏抽屉 / 三套主题 × 800·1100·1440 截图）。
+- 没验证的点：只在假 `pywebview.api` 和无头 Edge 里跑过；真实 WebView2 里的触摸拖动、高分屏缩放、`backdrop-filter` 性能待真机看；图标栏里的符号图标（▦ ❖ ⇩ ⇧ ✦ ⋯ ⚙）依赖系统字体（Segoe UI Symbol），没有的系统上会换成别的字体。

@@ -152,12 +152,12 @@ const ROWS = [
     const cs = getComputedStyle(e); const lh = parseFloat(cs.lineHeight) || 18;
     const lineH = r.height - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
     const label = (e.textContent || '').trim().slice(0, 12) || e.id;
-    if (e.tagName === 'BUTTON' && lineH > lh * 1.6 && label) bad.push('按钮换行 ' + label);
+    if (e.tagName === 'BUTTON' && !e.classList.contains('rbtn') && lineH > lh * 1.6 && label) bad.push('按钮换行 ' + label);
     if (r.right > W + 1 || r.left < -1) bad.push('超出窗口 ' + label);
   });
   document.querySelectorAll('.dialog').forEach(d => { const r = d.getBoundingClientRect(); if (r.width && (r.right > W + 1 || r.left < -1 || r.bottom > H + 1 || r.top < -1)) bad.push('对话框超出窗口'); });
   /* 假数据里放了 <b>、<i>、<img onerror>：它们只能以文字出现，不能变成真的元素 */
-  if (document.querySelector('.dialog b, .dialog i, .dialog img, #versionpick b, #infobar b, #infobar img')) bad.push('动态文字没有转义');
+  if (document.querySelector('.dialog b, .dialog i, .dialog img:not(.logo), #versionpick b, #infobar b, #infobar img')) bad.push('动态文字没有转义');
   const pre = document.createElement('pre'); pre.id = 'chk'; pre.style.cssText = 'position:fixed;left:-9999px;top:0';
   pre.textContent = 'CHK[' + W + 'x' + H + ' ' + q + ']:' + (bad.length ? bad.join(' | ') : 'OK') + errNote + (notes.length ? ' 〔' + notes.join('；') + '〕' : '');
   document.body.appendChild(pre);
