@@ -46,7 +46,7 @@ DEFAULT_GALLERY_ORDER = "desc"
 
 
 # 1.3.0 外观与界面布局（只保存用户的选择，应用由界面做）
-THEMES = ("system", "light", "dark")
+THEMES = ("system", "paper", "glass", "dark")     # 跟随系统 / 浅色纸感 / 夜蓝玻璃 / 暗室；旧版的 "light" 按 "paper" 处理
 FONT_SIZES = ("small", "standard", "large", "xlarge")
 PANEL_LIMITS = {"left": (200, 480), "right": (240, 520)}     # 像素
 DEFAULT_PANEL_WIDTHS = {"left": 260, "right": 300}
@@ -55,6 +55,8 @@ DEFAULT_ZOOM = "fit"
 
 
 def clean_theme(v):
+    if v == "light":                                 # 旧值兼容（1.3.0 开发期曾用过）
+        return "paper"
     return v if isinstance(v, str) and v in THEMES else None
 
 
@@ -435,7 +437,7 @@ class SettingsStore:
         if "theme" in changes:
             t = clean_theme(changes["theme"])
             if t is None:
-                errors["theme"] = "外观只能选择跟随系统、浅色或深色。"
+                errors["theme"] = "外观只能选择跟随系统、浅色纸感、夜蓝玻璃或暗室。"
             else:
                 new["theme"] = t
         if "font_size" in changes:

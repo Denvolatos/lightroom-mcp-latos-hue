@@ -48,7 +48,7 @@ def test_sanitize_loading(raw, expect):
 
 
 @pytest.mark.parametrize("changes", [
-    {"theme": "dark"}, {"theme": "light"}, {"theme": "system"},
+    {"theme": "dark"}, {"theme": "paper"}, {"theme": "glass"}, {"theme": "system"},
     {"font_size": "small"}, {"font_size": "large"},
     {"panel_widths": {"left": 480, "right": 240}}, {"preview_zoom": "fit"}, {"preview_zoom": 400}, {"preview_zoom": 10},
 ])
@@ -91,3 +91,9 @@ def test_new_keys_do_not_disturb_other_settings(store):
     assert store.update({"preview_edge": 2048, "confirm_default": False})["ok"]
     assert store.update({"theme": "dark"})["ok"]
     assert store.data["preview_edge"] == 2048 and store.data["confirm_default"] is False and store.data["schema"] == st.SCHEMA_VERSION
+
+
+def test_theme_values_and_legacy_light():
+    assert st.clean_theme("paper") == "paper" and st.clean_theme("glass") == "glass"
+    assert st.clean_theme("light") == "paper"                      # 旧值按浅色纸感处理
+    assert st.clean_theme("blue") is None and st.clean_theme(3) is None
